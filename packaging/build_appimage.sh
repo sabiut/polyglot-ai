@@ -24,11 +24,14 @@ APPDIR="$SCRIPT_DIR/Polyglot_AI.AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
 mkdir -p "$APPDIR/usr/lib"
-mkdir -p "$APPDIR/usr/share/applications"
-mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 # Create a venv inside AppDir using the system Python
+# NOTE: --clear wipes $APPDIR/usr, so mkdir for share/ must come AFTER this
 python3 -m venv "$APPDIR/usr" --copies --clear
+
+# Create directories that venv --clear would have removed
+mkdir -p "$APPDIR/usr/share/applications"
+mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 # Install the wheel
 "$APPDIR/usr/bin/pip" install --upgrade pip
