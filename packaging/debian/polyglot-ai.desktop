@@ -8,3 +8,4 @@ Categories=Development;IDE;TextEditor;
 Keywords=code;editor;ai;openai;anthropic;python;
 Terminal=false
 StartupNotify=true
+StartupWMClass=polyglot-ai

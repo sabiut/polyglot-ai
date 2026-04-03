@@ -298,14 +298,53 @@ def main() -> None:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    # On Wayland/GNOME the taskbar icon comes from a .desktop file
+    # matched by the app ID.  When running from source (no installed
+    # .desktop), we install a transient one so the icon appears.
+    import shutil
+    import subprocess
+
+    _desktop_src = Path(__file__).parent.parent.parent.parent / "packaging" / "debian" / "polyglot-ai.desktop"
+    _desktop_dst = Path.home() / ".local" / "share" / "applications" / "polyglot-ai.desktop"
+    _icon_src = Path(__file__).parent / "resources" / "icons" / "polyglot-ai.png"
+    _icon_dst = Path.home() / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "polyglot-ai.png"
+
+    if _icon_src.exists():
+        _icon_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_icon_src, _icon_dst)
+
+    if _desktop_src.exists():
+        _desktop_dst.parent.mkdir(parents=True, exist_ok=True)
+        # Patch Exec= to the real executable path so Gio/GNOME accepts it
+        _real_exec = shutil.which("polyglot-ai") or sys.executable
+        _desktop_content = _desktop_src.read_text()
+        _desktop_content = _desktop_content.replace(
+            "Exec=polyglot-ai", f"Exec={_real_exec}"
+        )
+        _desktop_dst.write_text(_desktop_content)
+        for cmd in [
+            ["update-desktop-database", str(_desktop_dst.parent)],
+            ["gtk-update-icon-cache", "-f", "-t",
+             str(Path.home() / ".local" / "share" / "icons" / "hicolor")],
+        ]:
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=5)
+            except FileNotFoundError:
+                pass
+
+    # Set Wayland app_id before QApplication so the compositor picks it up
+    import os
+
+    os.environ.setdefault("QT_WAYLAND_APP_ID", "polyglot-ai")
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("polyglot-ai")
 
-    # Set application icon
+    # Set application icon (used by window managers and title bars)
     from PyQt6.QtGui import QIcon
 
-    icon_path = Path(__file__).parent / "resources" / "icons" / "polyglot-ai.png"
+    icon_path = _icon_src
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 

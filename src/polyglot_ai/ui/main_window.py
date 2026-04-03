@@ -38,6 +38,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 768)
         self.resize(1400, 900)
 
+        # Set window icon explicitly (some Linux DEs ignore app-level icon)
+        from PyQt6.QtGui import QIcon
+
+        icon_path = Path(__file__).parent.parent / "resources" / "icons" / "polyglot-ai.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
         # Create panels
         self._file_explorer = FileExplorer()
         self._search_panel = SearchPanel()

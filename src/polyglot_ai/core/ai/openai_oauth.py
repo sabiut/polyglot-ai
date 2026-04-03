@@ -479,7 +479,7 @@ class OpenAIOAuthClient(AIProvider):
                 self._event_bus.emit(EVT_AI_STREAM_DONE)
                 return  # Success — exit retry loop
 
-            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as e:
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.ReadError) as e:
                 if attempt < max_retries - 1:
                     wait = 3 * (attempt + 1)
                     logger.warning(
