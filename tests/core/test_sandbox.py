@@ -76,6 +76,7 @@ async def test_exec_command(sandbox):
 
 @pytest.mark.asyncio
 async def test_exec_command_timeout(sandbox):
-    output, code = await sandbox.exec_command("sleep 60", timeout=1)
+    # Use tail -f which blocks indefinitely on an allowed command
+    output, code = await sandbox.exec_command("tail -f /dev/null", timeout=1)
     assert code == 1
     assert "timed out" in output.lower()
