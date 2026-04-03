@@ -23,9 +23,7 @@ class CommandPalette(QDialog):
     def __init__(self, registry: ActionRegistry, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._registry = registry
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup
-        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(560)
         self.setMaximumHeight(400)

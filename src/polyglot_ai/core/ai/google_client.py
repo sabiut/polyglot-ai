@@ -112,15 +112,17 @@ class GoogleClient(AIProvider):
                     func_desc = func.get("description", "")
                     params = func.get("parameters", {})
                     if func_name:
-                        gemini_tools.append(types.Tool(
-                            function_declarations=[
-                                types.FunctionDeclaration(
-                                    name=func_name,
-                                    description=func_desc,
-                                    parameters=params if params.get("properties") else None,
-                                )
-                            ]
-                        ))
+                        gemini_tools.append(
+                            types.Tool(
+                                function_declarations=[
+                                    types.FunctionDeclaration(
+                                        name=func_name,
+                                        description=func_desc,
+                                        parameters=params if params.get("properties") else None,
+                                    )
+                                ]
+                            )
+                        )
                 if gemini_tools:
                     config.tools = gemini_tools
 
@@ -136,9 +138,7 @@ class GoogleClient(AIProvider):
             ):
                 if chunk.text:
                     total_text += chunk.text
-                    self._event_bus.emit(
-                        EVT_AI_STREAM_CHUNK, content=chunk.text
-                    )
+                    self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=chunk.text)
                     yield StreamChunk(delta_content=chunk.text)
 
                 # Extract function calls from Gemini response
@@ -152,17 +152,22 @@ class GoogleClient(AIProvider):
                         if hasattr(part, "function_call") and part.function_call:
                             fc = part.function_call
                             import json as _json
+
                             tidx = next_tool_idx
                             next_tool_idx += 1
                             yield StreamChunk(
-                                tool_calls=[{
-                                    "index": tidx,
-                                    "id": f"call_{fc.name}_{tidx}",
-                                    "function": {
-                                        "name": fc.name,
-                                        "arguments": _json.dumps(dict(fc.args)) if fc.args else "{}",
-                                    },
-                                }]
+                                tool_calls=[
+                                    {
+                                        "index": tidx,
+                                        "id": f"call_{fc.name}_{tidx}",
+                                        "function": {
+                                            "name": fc.name,
+                                            "arguments": _json.dumps(dict(fc.args))
+                                            if fc.args
+                                            else "{}",
+                                        },
+                                    }
+                                ]
                             )
 
                 # Check for usage metadata
@@ -180,6 +185,7 @@ class GoogleClient(AIProvider):
 
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             error_msg = sanitize_error(str(e))
             logger.exception("Google API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
@@ -194,4 +200,5 @@ class GoogleClient(AIProvider):
             return False, "No models returned"
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             return False, sanitize_error(str(e))

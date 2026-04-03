@@ -54,17 +54,19 @@ class MainWindow(QMainWindow):
 
         # ── Sidebar stack (switches based on activity bar) ──
         self._sidebar_stack = QStackedWidget()
-        self._sidebar_stack.addWidget(self._file_explorer)   # 0: files
-        self._sidebar_stack.addWidget(self._search_panel)    # 1: search
+        self._sidebar_stack.addWidget(self._file_explorer)  # 0: files
+        self._sidebar_stack.addWidget(self._search_panel)  # 1: search
         self._sidebar_stack.addWidget(self._git_panel)  # 2: git
-        self._sidebar_stack.addWidget(self._mcp_sidebar)     # 3: mcp
+        self._sidebar_stack.addWidget(self._mcp_sidebar)  # 3: mcp
         self._sidebar_stack.setMinimumWidth(200)
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
         from PyQt6.QtWidgets import QTabWidget
+
         self._right_tabs = QTabWidget()
         self._right_tabs.setTabPosition(QTabWidget.TabPosition.North)
         from polyglot_ai.ui import theme_colors as tc
+
         self._right_tabs.setStyleSheet(f"""
             QTabWidget::pane {{ border: none; }}
             QTabBar::tab {{
@@ -81,6 +83,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         from polyglot_ai.ui.panels.changeset_panel import ChangesetPanel
+
         self._changeset_panel = ChangesetPanel()
         self._plan_panel = PlanPanel()
         self._usage_panel = UsagePanel()
@@ -234,26 +237,22 @@ class MainWindow(QMainWindow):
 
         self._action_toggle_explorer = QAction("&Explorer", self)
         self._action_toggle_explorer.setShortcut(QKeySequence("Ctrl+Shift+E"))
-        self._action_toggle_explorer.triggered.connect(
-            lambda: self._on_activity_changed("files"))
+        self._action_toggle_explorer.triggered.connect(lambda: self._on_activity_changed("files"))
         view_menu.addAction(self._action_toggle_explorer)
 
         self._action_toggle_search = QAction("&Search", self)
         self._action_toggle_search.setShortcut(QKeySequence("Ctrl+Shift+F"))
-        self._action_toggle_search.triggered.connect(
-            lambda: self._on_activity_changed("search"))
+        self._action_toggle_search.triggered.connect(lambda: self._on_activity_changed("search"))
         view_menu.addAction(self._action_toggle_search)
 
         self._action_toggle_git = QAction("Source &Control", self)
         self._action_toggle_git.setShortcut(QKeySequence("Ctrl+Shift+G"))
-        self._action_toggle_git.triggered.connect(
-            lambda: self._on_activity_changed("git"))
+        self._action_toggle_git.triggered.connect(lambda: self._on_activity_changed("git"))
         view_menu.addAction(self._action_toggle_git)
 
         self._action_toggle_mcp = QAction("&MCP Servers", self)
         self._action_toggle_mcp.setShortcut(QKeySequence("Ctrl+Shift+M"))
-        self._action_toggle_mcp.triggered.connect(
-            lambda: self._on_activity_changed("mcp"))
+        self._action_toggle_mcp.triggered.connect(lambda: self._on_activity_changed("mcp"))
         view_menu.addAction(self._action_toggle_mcp)
 
         view_menu.addSeparator()
@@ -394,18 +393,71 @@ class MainWindow(QMainWindow):
         """Register all menu actions into the action registry."""
         reg = self._action_registry
         reg.register("file.new", "New File", self._editor_panel.new_file, "File", "Ctrl+N")
-        reg.register("file.open", "Open File", lambda: self._editor_panel.open_file(), "File", "Ctrl+O")
-        reg.register("file.open_project", "Open Project", self._open_project, "File", "Ctrl+Shift+O")
+        reg.register(
+            "file.open", "Open File", lambda: self._editor_panel.open_file(), "File", "Ctrl+O"
+        )
+        reg.register(
+            "file.open_project", "Open Project", self._open_project, "File", "Ctrl+Shift+O"
+        )
         reg.register("file.save", "Save", self._editor_panel.save_current, "File", "Ctrl+S")
-        reg.register("file.save_all", "Save All", self._editor_panel.save_all, "File", "Ctrl+Shift+S")
-        reg.register("view.explorer", "Show Explorer", lambda: self._on_activity_changed("files"), "View", "Ctrl+Shift+E")
-        reg.register("view.search", "Show Search", lambda: self._on_activity_changed("search"), "View", "Ctrl+Shift+F")
-        reg.register("view.git", "Show Source Control", lambda: self._on_activity_changed("git"), "View", "Ctrl+Shift+G")
-        reg.register("view.mcp", "Show MCP Servers", lambda: self._on_activity_changed("mcp"), "View", "Ctrl+Shift+M")
-        reg.register("view.terminal", "Toggle Terminal", lambda: self._action_toggle_terminal.toggle(), "View", "Ctrl+`")
-        reg.register("view.chat", "Toggle AI Chat", lambda: self._action_toggle_chat.toggle(), "View", "Ctrl+Shift+A")
-        reg.register("view.theme", "Toggle Dark/Light Theme", lambda: self._action_toggle_theme.trigger(), "View")
-        reg.register("ai.new_chat", "New Conversation", lambda: self._action_new_chat.trigger(), "AI", "Ctrl+Shift+N")
+        reg.register(
+            "file.save_all", "Save All", self._editor_panel.save_all, "File", "Ctrl+Shift+S"
+        )
+        reg.register(
+            "view.explorer",
+            "Show Explorer",
+            lambda: self._on_activity_changed("files"),
+            "View",
+            "Ctrl+Shift+E",
+        )
+        reg.register(
+            "view.search",
+            "Show Search",
+            lambda: self._on_activity_changed("search"),
+            "View",
+            "Ctrl+Shift+F",
+        )
+        reg.register(
+            "view.git",
+            "Show Source Control",
+            lambda: self._on_activity_changed("git"),
+            "View",
+            "Ctrl+Shift+G",
+        )
+        reg.register(
+            "view.mcp",
+            "Show MCP Servers",
+            lambda: self._on_activity_changed("mcp"),
+            "View",
+            "Ctrl+Shift+M",
+        )
+        reg.register(
+            "view.terminal",
+            "Toggle Terminal",
+            lambda: self._action_toggle_terminal.toggle(),
+            "View",
+            "Ctrl+`",
+        )
+        reg.register(
+            "view.chat",
+            "Toggle AI Chat",
+            lambda: self._action_toggle_chat.toggle(),
+            "View",
+            "Ctrl+Shift+A",
+        )
+        reg.register(
+            "view.theme",
+            "Toggle Dark/Light Theme",
+            lambda: self._action_toggle_theme.trigger(),
+            "View",
+        )
+        reg.register(
+            "ai.new_chat",
+            "New Conversation",
+            lambda: self._action_new_chat.trigger(),
+            "AI",
+            "Ctrl+Shift+N",
+        )
         reg.register("edit.undo", "Undo", self._forward_undo, "Edit", "Ctrl+Z")
         reg.register("edit.redo", "Redo", self._forward_redo, "Edit", "Ctrl+Shift+Z")
 
@@ -418,6 +470,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Ensure clean shutdown — session save happens in app.py after loop stops."""
         from PyQt6.QtWidgets import QApplication
+
         event.accept()
         QApplication.quit()
 
@@ -440,8 +493,10 @@ class MainWindow(QMainWindow):
                 "center": self._center_splitter.sizes(),
             },
             "session.window_geometry": {
-                "x": self.x(), "y": self.y(),
-                "w": self.width(), "h": self.height(),
+                "x": self.x(),
+                "y": self.y(),
+                "w": self.width(),
+                "h": self.height(),
             },
         }
 

@@ -86,7 +86,12 @@ def _migrate_keyring() -> None:
 
             keyring.set_password(NEW_SERVICE, key_name, old_value)
             keyring.delete_password(OLD_SERVICE, key_name)
-            logger.info("Migrated keyring entry: %s/%s → %s/%s",
-                        OLD_SERVICE, key_name, NEW_SERVICE, key_name)
+            logger.info(
+                "Migrated keyring entry: %s/%s → %s/%s",
+                OLD_SERVICE,
+                key_name,
+                NEW_SERVICE,
+                key_name,
+            )
         except Exception:
             logger.warning("Failed to migrate keyring entry: %s", key_name, exc_info=True)

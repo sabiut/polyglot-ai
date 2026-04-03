@@ -106,9 +106,9 @@ async def git_show_file(sandbox, args: dict) -> str:
     if not path:
         return "Error: No file path provided"
 
-    if not re.match(r'^[a-zA-Z0-9_./@^~\-]+$', ref):
+    if not re.match(r"^[a-zA-Z0-9_./@^~\-]+$", ref):
         return f"Error: Invalid git ref: {ref}"
-    if not re.match(r'^[a-zA-Z0-9_./ \-]+$', path):
+    if not re.match(r"^[a-zA-Z0-9_./ \-]+$", path):
         return f"Error: Invalid file path: {path}"
 
     git_ref_path = shlex.quote(f"{ref}:{path}")

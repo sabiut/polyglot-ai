@@ -7,7 +7,12 @@ import logging
 import shlex
 from pathlib import Path
 
-from polyglot_ai.constants import ALLOWED_COMMANDS, BLOCKED_PATTERNS, COMMAND_TIMEOUT, DANGEROUS_COMMANDS
+from polyglot_ai.constants import (
+    ALLOWED_COMMANDS,
+    BLOCKED_PATTERNS,
+    COMMAND_TIMEOUT,
+    DANGEROUS_COMMANDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +35,7 @@ class Sandbox:
         try:
             resolved.relative_to(self._root)
         except ValueError:
-            raise PermissionError(
-                f"Path '{path}' escapes project root '{self._root}'"
-            )
+            raise PermissionError(f"Path '{path}' escapes project root '{self._root}'")
 
         # Check for symlinks escaping root
         if resolved.is_symlink():
@@ -40,21 +43,36 @@ class Sandbox:
             try:
                 real.relative_to(self._root)
             except ValueError:
-                raise PermissionError(
-                    f"Symlink '{path}' points outside project root"
-                )
+                raise PermissionError(f"Symlink '{path}' points outside project root")
 
         return resolved
 
     # Commands that can mutate the filesystem or execute arbitrary code.
     # These always require explicit user approval via the approval dialog.
-    _MUTATING_COMMANDS = frozenset({
-        "python", "python3", "pip", "pip3",
-        "node", "npm", "npx",
-        "rm", "cp", "mv", "mkdir", "touch",
-        "git", "make", "cmake", "cargo", "rustc",
-        "sed", "awk", "tee",
-    })
+    _MUTATING_COMMANDS = frozenset(
+        {
+            "python",
+            "python3",
+            "pip",
+            "pip3",
+            "node",
+            "npm",
+            "npx",
+            "rm",
+            "cp",
+            "mv",
+            "mkdir",
+            "touch",
+            "git",
+            "make",
+            "cmake",
+            "cargo",
+            "rustc",
+            "sed",
+            "awk",
+            "tee",
+        }
+    )
 
     def validate_command(self, command: str) -> tuple[bool, str]:
         """Check if a command is allowed. Returns (allowed, reason)."""
@@ -108,11 +126,19 @@ class Sandbox:
                     )
 
         # Block dangerous subcommand patterns
-        _DANGEROUS_FLAGS = frozenset({
-            "-exec", "-delete", "--delete", "--exec",
-            "-rf", "--force", "--no-preserve-root",
-            "eval", "exec",
-        })
+        _DANGEROUS_FLAGS = frozenset(
+            {
+                "-exec",
+                "-delete",
+                "--delete",
+                "--exec",
+                "-rf",
+                "--force",
+                "--no-preserve-root",
+                "eval",
+                "exec",
+            }
+        )
         for part in parts[1:]:
             if part in _DANGEROUS_FLAGS:
                 return False, f"Dangerous flag '{part}' is not allowed"
@@ -171,9 +197,7 @@ class Sandbox:
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
             )
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
             # Truncate very long output

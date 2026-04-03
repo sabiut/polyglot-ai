@@ -82,22 +82,27 @@ class AnthropicClient(AIProvider):
                     # Convert OpenAI tool_calls to Anthropic tool_use blocks
                     for tc in msg.get("tool_calls", []):
                         import json as _json
+
                         fn = tc.get("function", {})
                         args_str = fn.get("arguments", "{}")
                         try:
                             args = _json.loads(args_str) if args_str else {}
                         except _json.JSONDecodeError:
                             args = {}
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tc.get("id", ""),
-                            "name": fn.get("name", ""),
-                            "input": args,
-                        })
-                    anthropic_messages.append({
-                        "role": "assistant",
-                        "content": content_blocks if content_blocks else (text or ""),
-                    })
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tc.get("id", ""),
+                                "name": fn.get("name", ""),
+                                "input": args,
+                            }
+                        )
+                    anthropic_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content_blocks if content_blocks else (text or ""),
+                        }
+                    )
 
                 elif role == "tool":
                     # Tool results → Anthropic uses role "user" with tool_result content
@@ -105,31 +110,43 @@ class AnthropicClient(AIProvider):
                     result_content = msg.get("content", "")
                     # Anthropic expects tool results in a user message
                     # Merge consecutive tool results into one user message
-                    if (anthropic_messages
-                            and anthropic_messages[-1]["role"] == "user"
-                            and isinstance(anthropic_messages[-1]["content"], list)
-                            and any(b.get("type") == "tool_result"
-                                    for b in anthropic_messages[-1]["content"])):
-                        anthropic_messages[-1]["content"].append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_call_id,
-                            "content": result_content,
-                        })
-                    else:
-                        anthropic_messages.append({
-                            "role": "user",
-                            "content": [{
+                    if (
+                        anthropic_messages
+                        and anthropic_messages[-1]["role"] == "user"
+                        and isinstance(anthropic_messages[-1]["content"], list)
+                        and any(
+                            b.get("type") == "tool_result"
+                            for b in anthropic_messages[-1]["content"]
+                        )
+                    ):
+                        anthropic_messages[-1]["content"].append(
+                            {
                                 "type": "tool_result",
                                 "tool_use_id": tool_call_id,
                                 "content": result_content,
-                            }],
-                        })
+                            }
+                        )
+                    else:
+                        anthropic_messages.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_call_id,
+                                        "content": result_content,
+                                    }
+                                ],
+                            }
+                        )
 
                 elif role == "user":
-                    anthropic_messages.append({
-                        "role": role,
-                        "content": msg.get("content", ""),
-                    })
+                    anthropic_messages.append(
+                        {
+                            "role": role,
+                            "content": msg.get("content", ""),
+                        }
+                    )
 
             # Ensure messages alternate user/assistant
             if not anthropic_messages:
@@ -152,11 +169,13 @@ class AnthropicClient(AIProvider):
                 anthropic_tools = []
                 for tool in tools:
                     func = tool.get("function", {})
-                    anthropic_tools.append({
-                        "name": func.get("name", ""),
-                        "description": func.get("description", ""),
-                        "input_schema": func.get("parameters", {}),
-                    })
+                    anthropic_tools.append(
+                        {
+                            "name": func.get("name", ""),
+                            "description": func.get("description", ""),
+                            "input_schema": func.get("parameters", {}),
+                        }
+                    )
                 kwargs["tools"] = anthropic_tools
 
             # Map Anthropic content block index → our tool call index
@@ -181,34 +200,36 @@ class AnthropicClient(AIProvider):
                                 block_to_tool_idx[event.index] = tidx
                                 next_tool_idx += 1
                                 yield StreamChunk(
-                                    tool_calls=[{
-                                        "index": tidx,
-                                        "id": event.content_block.id,
-                                        "function": {
-                                            "name": event.content_block.name,
-                                            "arguments": "",
-                                        },
-                                    }]
+                                    tool_calls=[
+                                        {
+                                            "index": tidx,
+                                            "id": event.content_block.id,
+                                            "function": {
+                                                "name": event.content_block.name,
+                                                "arguments": "",
+                                            },
+                                        }
+                                    ]
                                 )
 
                     elif event_type == "content_block_delta" and hasattr(event, "index"):
                         delta = event.delta
                         if hasattr(delta, "text"):
-                            self._event_bus.emit(
-                                EVT_AI_STREAM_CHUNK, content=delta.text
-                            )
+                            self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=delta.text)
                             yield StreamChunk(delta_content=delta.text)
                         elif hasattr(delta, "partial_json"):
                             tidx = block_to_tool_idx.get(event.index, 0)
                             yield StreamChunk(
-                                tool_calls=[{
-                                    "index": tidx,
-                                    "id": None,
-                                    "function": {
-                                        "name": None,
-                                        "arguments": delta.partial_json,
-                                    },
-                                }]
+                                tool_calls=[
+                                    {
+                                        "index": tidx,
+                                        "id": None,
+                                        "function": {
+                                            "name": None,
+                                            "arguments": delta.partial_json,
+                                        },
+                                    }
+                                ]
                             )
 
                     elif event_type == "message_delta":
@@ -233,8 +254,7 @@ class AnthropicClient(AIProvider):
                             "prompt_tokens": final_message.usage.input_tokens,
                             "completion_tokens": final_message.usage.output_tokens,
                             "total_tokens": (
-                                final_message.usage.input_tokens
-                                + final_message.usage.output_tokens
+                                final_message.usage.input_tokens + final_message.usage.output_tokens
                             ),
                         }
                     )
@@ -243,6 +263,7 @@ class AnthropicClient(AIProvider):
 
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             error_msg = sanitize_error(str(e))
             logger.exception("Anthropic API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
@@ -254,4 +275,5 @@ class AnthropicClient(AIProvider):
             return True, "Connection successful"
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             return False, sanitize_error(str(e))

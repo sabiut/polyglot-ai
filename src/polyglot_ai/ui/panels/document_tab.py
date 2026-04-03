@@ -49,11 +49,11 @@ class DocumentTab(QWidget):
         btn_style = f"""
             QPushButton {{
                 background: transparent; border: none; border-radius: 3px;
-                padding: 2px 8px; color: {tc.get('text_primary')};
+                padding: 2px 8px; color: {tc.get("text_primary")};
                 font-size: {tc.FONT_MD}px; min-width: 24px;
             }}
-            QPushButton:hover {{ background: {tc.get('bg_hover')}; }}
-            QPushButton:pressed {{ background: {tc.get('bg_active')}; }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
+            QPushButton:pressed {{ background: {tc.get("bg_active")}; }}
         """
 
         buttons = [
@@ -117,9 +117,9 @@ class DocumentTab(QWidget):
         self._source.setFont(QFont(tc.FONT_CODE.split(",")[0].strip('"'), tc.FONT_BASE))
         self._source.setStyleSheet(f"""
             QPlainTextEdit {{
-                background: {tc.get('bg_base')}; color: {tc.get('text_primary')};
+                background: {tc.get("bg_base")}; color: {tc.get("text_primary")};
                 border: none; padding: 12px;
-                selection-background-color: {tc.get('bg_active')};
+                selection-background-color: {tc.get("bg_active")};
             }}
         """)
         self._source.setTabStopDistance(32)
@@ -131,8 +131,8 @@ class DocumentTab(QWidget):
         self._preview.setOpenExternalLinks(True)
         self._preview.setStyleSheet(f"""
             QTextBrowser {{
-                background: {tc.get('bg_base')}; color: {tc.get('text_primary')};
-                border: none; border-left: 1px solid {tc.get('border_secondary')};
+                background: {tc.get("bg_base")}; color: {tc.get("text_primary")};
+                border: none; border-left: 1px solid {tc.get("border_secondary")};
                 padding: 16px; font-size: {tc.FONT_BASE}px;
             }}
         """)
@@ -223,13 +223,16 @@ class DocumentTab(QWidget):
         if not self._file_path:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export as PDF", str(self._file_path.with_suffix(".pdf")),
+            self,
+            "Export as PDF",
+            str(self._file_path.with_suffix(".pdf")),
             "PDF Files (*.pdf)",
         )
         if not path:
             return
         try:
             from PyQt6.QtPrintSupport import QPrinter
+
             printer = QPrinter(QPrinter.PrinterMode.HighResolution)
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(path)
@@ -242,7 +245,9 @@ class DocumentTab(QWidget):
         if not self._file_path:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export as HTML", str(self._file_path.with_suffix(".html")),
+            self,
+            "Export as HTML",
+            str(self._file_path.with_suffix(".html")),
             "HTML Files (*.html)",
         )
         if not path:

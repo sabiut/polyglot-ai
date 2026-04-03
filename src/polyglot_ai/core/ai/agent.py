@@ -61,9 +61,9 @@ class AgentLoop:
         request_id = kwargs.get("request_id")
         if self._pending_approval_id and request_id != self._pending_approval_id:
             logger.warning(
-                "Ignoring approval response with mismatched request_id: "
-                "expected=%s, got=%s",
-                self._pending_approval_id, request_id,
+                "Ignoring approval response with mismatched request_id: expected=%s, got=%s",
+                self._pending_approval_id,
+                request_id,
             )
             return
         self._approval_result = approved
@@ -163,6 +163,7 @@ class AgentLoop:
 
                         # Generate unique request ID to bind response
                         import uuid
+
                         request_id = str(uuid.uuid4())
                         self._pending_approval_id = request_id
 

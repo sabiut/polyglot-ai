@@ -36,6 +36,7 @@ class ProjectIndexer:
     async def build_index(self, project_root: Path) -> None:
         """Build the index from scratch. Runs in background thread."""
         import asyncio
+
         self._project_root = project_root
         await asyncio.to_thread(self._build_sync, project_root)
 

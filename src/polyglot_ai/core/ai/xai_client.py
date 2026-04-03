@@ -108,7 +108,9 @@ class XAIClient(AIProvider):
                             "index": tc.index,
                             "id": tc.id,
                             "function": {
-                                "name": tc.function.name if tc.function and tc.function.name else None,
+                                "name": tc.function.name
+                                if tc.function and tc.function.name
+                                else None,
                                 "arguments": tc.function.arguments if tc.function else "",
                             },
                         }
@@ -124,6 +126,7 @@ class XAIClient(AIProvider):
 
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             error_msg = sanitize_error(str(e))
             logger.exception("xAI API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
@@ -135,4 +138,5 @@ class XAIClient(AIProvider):
             return True, "Connection successful"
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             return False, sanitize_error(str(e))

@@ -30,6 +30,7 @@ class QtBridgeAdapter(QObject):
     def _make_emitter(self, event: str) -> Callable[..., Any]:
         def emitter(**kwargs: Any) -> None:
             self._dispatch.emit(event, kwargs)
+
         return emitter
 
     def _on_dispatch(self, event: str, kwargs: dict) -> None:

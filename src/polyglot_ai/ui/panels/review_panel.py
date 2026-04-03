@@ -78,6 +78,7 @@ class ReviewPanel(QWidget):
 
         # Review mode selector — styled dropdown
         from polyglot_ai.ui.widgets.styled_combo import StyledComboBox
+
         self._mode_combo = StyledComboBox()
         self._mode_combo.addItemWithDesc("Working Changes", "Review unstaged modifications")
         self._mode_combo.addItemWithDesc("Staged Changes", "Review what will be committed")
@@ -145,8 +146,7 @@ class ReviewPanel(QWidget):
             "Select a review mode above and click Run Review to analyze your code changes."
         )
         welcome_desc.setStyleSheet(
-            "font-size: 13px; color: #aaa; margin-top: 4px; "
-            "background: transparent; border: none;"
+            "font-size: 13px; color: #aaa; margin-top: 4px; background: transparent; border: none;"
         )
         welcome_desc.setWordWrap(True)
         wc_layout.addWidget(welcome_desc)
@@ -162,9 +162,7 @@ class ReviewPanel(QWidget):
             "  <b style='color: #569cd6;'>Branch vs Main</b> — review all commits on this branch</div>"
             "</div>"
         )
-        modes_text.setStyleSheet(
-            "font-size: 13px; background: transparent; border: none;"
-        )
+        modes_text.setStyleSheet("font-size: 13px; background: transparent; border: none;")
         modes_text.setTextFormat(Qt.TextFormat.RichText)
         modes_text.setWordWrap(True)
         wc_layout.addWidget(modes_text)
@@ -263,21 +261,15 @@ class ReviewPanel(QWidget):
 
         # Stats row
         stats = QHBoxLayout()
-        stats.addWidget(self._stat_badge(
-            f"{result.files_reviewed} files", "#888"))
-        stats.addWidget(self._stat_badge(
-            f"+{result.total_additions}", "#4ec9b0"))
-        stats.addWidget(self._stat_badge(
-            f"-{result.total_deletions}", "#f44747"))
-        stats.addWidget(self._stat_badge(
-            f"{len(result.findings)} findings", "#569cd6"))
+        stats.addWidget(self._stat_badge(f"{result.files_reviewed} files", "#888"))
+        stats.addWidget(self._stat_badge(f"+{result.total_additions}", "#4ec9b0"))
+        stats.addWidget(self._stat_badge(f"-{result.total_deletions}", "#f44747"))
+        stats.addWidget(self._stat_badge(f"{len(result.findings)} findings", "#569cd6"))
 
         if result.critical_count:
-            stats.addWidget(self._stat_badge(
-                f"{result.critical_count} critical", "#f44747"))
+            stats.addWidget(self._stat_badge(f"{result.critical_count} critical", "#f44747"))
         if result.high_count:
-            stats.addWidget(self._stat_badge(
-                f"{result.high_count} high", "#e5a00d"))
+            stats.addWidget(self._stat_badge(f"{result.high_count} high", "#e5a00d"))
 
         stats.addStretch()
         if result.model:
@@ -345,13 +337,17 @@ class ReviewPanel(QWidget):
 
         cat_icon = _CATEGORY_ICONS.get(finding.category.value, "📝")
         cat_label = QLabel(f"{cat_icon} {finding.category.value}")
-        cat_label.setStyleSheet("font-size: 11px; color: #888; background: transparent; border: none;")
+        cat_label.setStyleSheet(
+            "font-size: 11px; color: #888; background: transparent; border: none;"
+        )
         top.addWidget(cat_label)
 
         top.addStretch()
 
         file_label = QLabel(f"📄 {finding.file}:{finding.line}")
-        file_label.setStyleSheet("font-size: 11px; color: #569cd6; background: transparent; border: none;")
+        file_label.setStyleSheet(
+            "font-size: 11px; color: #569cd6; background: transparent; border: none;"
+        )
         file_label.setCursor(Qt.CursorShape.PointingHandCursor)
         top.addWidget(file_label)
 

@@ -16,7 +16,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path, validate_python_syntax
+from polyglot_ai.core.file_safety import (
+    check_blocked_file,
+    is_sensitive_path,
+    validate_python_syntax,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +46,13 @@ def parse_code_blocks(text: str) -> list[dict]:
             continue
         if ".." in path:
             continue
-        blocks.append({
-            "path": path,
-            "content": match.group(3).strip(),
-            "language": lang,
-        })
+        blocks.append(
+            {
+                "path": path,
+                "content": match.group(3).strip(),
+                "language": lang,
+            }
+        )
 
     if blocks:
         return blocks
@@ -63,15 +69,15 @@ def parse_code_blocks(text: str) -> list[dict]:
         path = match.group(1) or match.group(2) or match.group(3)
         if ".." in path:
             continue
-        blocks.append({
-            "path": path,
-            "content": match.group(4).strip(),
-            "language": "",
-        })
+        blocks.append(
+            {
+                "path": path,
+                "content": match.group(4).strip(),
+                "language": "",
+            }
+        )
 
     return blocks
-
-
 
 
 def _create_backup(full_path: Path) -> Path | None:
@@ -120,6 +126,7 @@ def apply_code_block(project_root: Path, block: dict) -> tuple[bool, str]:
     # legitimately small files like __init__.py, conftest.py, etc.
     if rel_path.endswith(".py") and len(content.strip()) < 20:
         import os
+
         basename = os.path.basename(rel_path)
         # These are often very short or even empty
         allowed_short = {"__init__.py", "__main__.py", "conftest.py", "setup.py"}
@@ -135,6 +142,7 @@ def apply_code_block(project_root: Path, block: dict) -> tuple[bool, str]:
 
     # Symlink protection — reject writes through symlinked path components
     from polyglot_ai.core.security import check_no_symlinks_in_path
+
     safe, reason = check_no_symlinks_in_path(full_path, project_root.resolve())
     if not safe:
         return False, f"Rejected {rel_path}: {reason}"

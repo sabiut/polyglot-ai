@@ -128,20 +128,35 @@ class Database:
     # Pre-declared ALTER TABLE statements for migrations.
     # All identifiers are constants — no dynamic SQL construction needed.
     _V2_ALTERS = [
-        ("conversations", "pinned",
-         "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"),
-        ("conversations", "archived",
-         "ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"),
+        (
+            "conversations",
+            "pinned",
+            "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "conversations",
+            "archived",
+            "ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+        ),
     ]
     _V3_ALTERS = [
-        ("conversations", "parent_conversation_id",
-         "ALTER TABLE conversations ADD COLUMN parent_conversation_id INTEGER"),
-        ("conversations", "fork_point_message_id",
-         "ALTER TABLE conversations ADD COLUMN fork_point_message_id INTEGER"),
+        (
+            "conversations",
+            "parent_conversation_id",
+            "ALTER TABLE conversations ADD COLUMN parent_conversation_id INTEGER",
+        ),
+        (
+            "conversations",
+            "fork_point_message_id",
+            "ALTER TABLE conversations ADD COLUMN fork_point_message_id INTEGER",
+        ),
     ]
     _V4_ALTERS = [
-        ("conversations", "category",
-         "ALTER TABLE conversations ADD COLUMN category TEXT NOT NULL DEFAULT 'all'"),
+        (
+            "conversations",
+            "category",
+            "ALTER TABLE conversations ADD COLUMN category TEXT NOT NULL DEFAULT 'all'",
+        ),
     ]
 
     async def _migrate_v2(self) -> None:
@@ -166,11 +181,20 @@ class Database:
 
     # Tables and columns that may be referenced in _column_exists().
     # Only these identifiers are allowed in the PRAGMA query.
-    _VALID_TABLES = frozenset({"conversations", "messages", "attachments",
-                               "prompt_templates", "settings", "audit_log",
-                               "schema_version"})
-    _VALID_COLUMNS = frozenset({"pinned", "archived", "parent_conversation_id",
-                                "fork_point_message_id", "category"})
+    _VALID_TABLES = frozenset(
+        {
+            "conversations",
+            "messages",
+            "attachments",
+            "prompt_templates",
+            "settings",
+            "audit_log",
+            "schema_version",
+        }
+    )
+    _VALID_COLUMNS = frozenset(
+        {"pinned", "archived", "parent_conversation_id", "fork_point_message_id", "category"}
+    )
 
     async def _column_exists(self, table: str, column: str) -> bool:
         """Check if a column already exists in a table.
@@ -190,9 +214,7 @@ class Database:
     async def _get_version(self) -> int:
         assert self._conn is not None
         try:
-            cursor = await self._conn.execute(
-                "SELECT MAX(version) FROM schema_version"
-            )
+            cursor = await self._conn.execute("SELECT MAX(version) FROM schema_version")
             row = await cursor.fetchone()
             return row[0] if row and row[0] else 0
         except aiosqlite.OperationalError:
@@ -247,7 +269,10 @@ class Database:
     # Convenience methods for conversations and messages
 
     async def create_conversation(
-        self, title: str, model: str, category: str = "all",
+        self,
+        title: str,
+        model: str,
+        category: str = "all",
     ) -> int:
         cursor = await self.execute(
             "INSERT INTO conversations (title, model, category) VALUES (?, ?, ?)",
@@ -261,9 +286,7 @@ class Database:
                 "SELECT * FROM conversations WHERE category = ? ORDER BY updated_at DESC",
                 (category,),
             )
-        return await self.fetchall(
-            "SELECT * FROM conversations ORDER BY updated_at DESC"
-        )
+        return await self.fetchall("SELECT * FROM conversations ORDER BY updated_at DESC")
 
     async def insert_message(
         self,
@@ -282,8 +305,7 @@ class Database:
                (conversation_id, role, content, tool_calls, tool_call_id,
                 model, tokens_in, tokens_out)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (conversation_id, role, content, tc_json, tool_call_id,
-             model, tokens_in, tokens_out),
+            (conversation_id, role, content, tc_json, tool_call_id, model, tokens_in, tokens_out),
         )
         await self.execute(
             "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
@@ -327,8 +349,12 @@ class Database:
         )
 
     async def insert_attachment(
-        self, message_id: int, filename: str, mime_type: str,
-        file_path: str | None = None, file_size: int | None = None,
+        self,
+        message_id: int,
+        filename: str,
+        mime_type: str,
+        file_path: str | None = None,
+        file_size: int | None = None,
     ) -> int:
         cursor = await self.execute(
             """INSERT INTO attachments (message_id, filename, mime_type, file_path, file_size)
@@ -353,7 +379,9 @@ class Database:
     # Conversation forking
 
     async def fork_conversation(
-        self, conv_id: int, fork_message_id: int,
+        self,
+        conv_id: int,
+        fork_message_id: int,
     ) -> int:
         """Create a new conversation forking from a specific message.
 
@@ -361,7 +389,8 @@ class Database:
         """
         assert self._conn is not None
         conv = await self.fetchone(
-            "SELECT title, model FROM conversations WHERE id = ?", (conv_id,),
+            "SELECT title, model FROM conversations WHERE id = ?",
+            (conv_id,),
         )
         if not conv:
             raise ValueError(f"Conversation {conv_id} not found")
@@ -389,8 +418,16 @@ class Database:
                        (conversation_id, role, content, tool_calls, tool_call_id,
                         model, tokens_in, tokens_out)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (new_conv_id, msg["role"], msg["content"], msg["tool_calls"],
-                     msg["tool_call_id"], msg["model"], msg["tokens_in"], msg["tokens_out"]),
+                    (
+                        new_conv_id,
+                        msg["role"],
+                        msg["content"],
+                        msg["tool_calls"],
+                        msg["tool_call_id"],
+                        msg["model"],
+                        msg["tokens_in"],
+                        msg["tokens_out"],
+                    ),
                 )
                 new_msg_id = cursor2.lastrowid
 
@@ -404,8 +441,13 @@ class Database:
                         """INSERT INTO attachments
                            (message_id, filename, mime_type, file_path, file_size)
                            VALUES (?, ?, ?, ?, ?)""",
-                        (new_msg_id, att["filename"], att["mime_type"],
-                         att["file_path"], att["file_size"]),
+                        (
+                            new_msg_id,
+                            att["filename"],
+                            att["mime_type"],
+                            att["file_path"],
+                            att["file_size"],
+                        ),
                     )
 
             await self._conn.commit()
@@ -418,12 +460,14 @@ class Database:
     # Prompt templates
 
     async def list_prompt_templates(self) -> list[dict]:
-        return await self.fetchall(
-            "SELECT * FROM prompt_templates ORDER BY is_builtin DESC, name"
-        )
+        return await self.fetchall("SELECT * FROM prompt_templates ORDER BY is_builtin DESC, name")
 
     async def create_prompt_template(
-        self, name: str, content: str, category: str = "custom", is_builtin: bool = False,
+        self,
+        name: str,
+        content: str,
+        category: str = "custom",
+        is_builtin: bool = False,
     ) -> int:
         cursor = await self.execute(
             """INSERT INTO prompt_templates (name, content, category, is_builtin)
@@ -433,7 +477,10 @@ class Database:
         return cursor.lastrowid
 
     async def update_prompt_template(
-        self, template_id: int, name: str, content: str,
+        self,
+        template_id: int,
+        name: str,
+        content: str,
     ) -> None:
         await self.execute(
             "UPDATE prompt_templates SET name = ?, content = ?, updated_at = datetime('now') WHERE id = ?",

@@ -72,6 +72,7 @@ class ClaudeOAuthClient(AIProvider):
 
         # Security: reject symlinks and files not owned by current user
         from polyglot_ai.core.security import check_secure_file
+
         secure, reason = check_secure_file(CLAUDE_CREDENTIALS_FILE)
         if not secure:
             logger.warning("Insecure credentials file: %s — %s", CLAUDE_CREDENTIALS_FILE, reason)
@@ -92,7 +93,9 @@ class ClaudeOAuthClient(AIProvider):
             # Re-validate after chmod
             secure, reason = check_secure_file(CLAUDE_CREDENTIALS_FILE)
             if not secure:
-                logger.error("Credentials file still insecure after chmod: %s — refusing to read", reason)
+                logger.error(
+                    "Credentials file still insecure after chmod: %s — refusing to read", reason
+                )
                 return
 
         try:
@@ -106,8 +109,7 @@ class ClaudeOAuthClient(AIProvider):
             if self._access_token:
                 self._client = AsyncAnthropic(auth_token=self._access_token)
                 logger.info(
-                    "Loaded Claude auth from ~/.claude/.credentials.json "
-                    "(subscription: %s)",
+                    "Loaded Claude auth from ~/.claude/.credentials.json (subscription: %s)",
                     self._subscription_type or "unknown",
                 )
         except Exception:
@@ -223,10 +225,12 @@ class ClaudeOAuthClient(AIProvider):
                         system_prompt = msg.get("content", "")
                     continue
                 if role in ("user", "assistant"):
-                    anthropic_messages.append({
-                        "role": role,
-                        "content": msg.get("content", ""),
-                    })
+                    anthropic_messages.append(
+                        {
+                            "role": role,
+                            "content": msg.get("content", ""),
+                        }
+                    )
 
             if not anthropic_messages:
                 anthropic_messages = [{"role": "user", "content": "Hello"}]
@@ -248,11 +252,13 @@ class ClaudeOAuthClient(AIProvider):
                 anthropic_tools = []
                 for tool in tools:
                     func = tool.get("function", {})
-                    anthropic_tools.append({
-                        "name": func.get("name", ""),
-                        "description": func.get("description", ""),
-                        "input_schema": func.get("parameters", {}),
-                    })
+                    anthropic_tools.append(
+                        {
+                            "name": func.get("name", ""),
+                            "description": func.get("description", ""),
+                            "input_schema": func.get("parameters", {}),
+                        }
+                    )
                 kwargs["tools"] = anthropic_tools
 
             block_to_tool_idx: dict[int, int] = {}
@@ -272,34 +278,36 @@ class ClaudeOAuthClient(AIProvider):
                                 block_to_tool_idx[event.index] = tidx
                                 next_tool_idx += 1
                                 yield StreamChunk(
-                                    tool_calls=[{
-                                        "index": tidx,
-                                        "id": event.content_block.id,
-                                        "function": {
-                                            "name": event.content_block.name,
-                                            "arguments": "",
-                                        },
-                                    }]
+                                    tool_calls=[
+                                        {
+                                            "index": tidx,
+                                            "id": event.content_block.id,
+                                            "function": {
+                                                "name": event.content_block.name,
+                                                "arguments": "",
+                                            },
+                                        }
+                                    ]
                                 )
 
                     elif event_type == "content_block_delta" and hasattr(event, "index"):
                         delta = event.delta
                         if hasattr(delta, "text"):
-                            self._event_bus.emit(
-                                EVT_AI_STREAM_CHUNK, content=delta.text
-                            )
+                            self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=delta.text)
                             yield StreamChunk(delta_content=delta.text)
                         elif hasattr(delta, "partial_json"):
                             tidx = block_to_tool_idx.get(event.index, 0)
                             yield StreamChunk(
-                                tool_calls=[{
-                                    "index": tidx,
-                                    "id": None,
-                                    "function": {
-                                        "name": None,
-                                        "arguments": delta.partial_json,
-                                    },
-                                }]
+                                tool_calls=[
+                                    {
+                                        "index": tidx,
+                                        "id": None,
+                                        "function": {
+                                            "name": None,
+                                            "arguments": delta.partial_json,
+                                        },
+                                    }
+                                ]
                             )
 
                     elif event_type == "message_delta":
@@ -313,8 +321,8 @@ class ClaudeOAuthClient(AIProvider):
                                     "prompt_tokens": 0,
                                     "completion_tokens": event.usage.output_tokens,
                                     "total_tokens": event.usage.output_tokens,
-                                    },
-                                )
+                                },
+                            )
 
                 # Get final usage
                 final_message = await stream.get_final_message()
@@ -324,8 +332,7 @@ class ClaudeOAuthClient(AIProvider):
                             "prompt_tokens": final_message.usage.input_tokens,
                             "completion_tokens": final_message.usage.output_tokens,
                             "total_tokens": (
-                                final_message.usage.input_tokens
-                                + final_message.usage.output_tokens
+                                final_message.usage.input_tokens + final_message.usage.output_tokens
                             ),
                         }
                     )
@@ -334,12 +341,11 @@ class ClaudeOAuthClient(AIProvider):
 
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             error_msg = sanitize_error(str(e))
             logger.exception("Claude subscription API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
-            yield StreamChunk(
-                delta_content=f"\n\n**Error:** {error_msg[:200]}"
-            )
+            yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg[:200]}")
 
     async def test_connection(self) -> tuple[bool, str]:
         if not self._access_token or not self._client:
@@ -350,6 +356,7 @@ class ClaudeOAuthClient(AIProvider):
             return True, f"Connected via Claude subscription{sub}"
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             return False, sanitize_error(str(e))
 
     def logout(self, clear_disk: bool = True) -> str:
@@ -374,6 +381,7 @@ class ClaudeOAuthClient(AIProvider):
         if clear_disk and CLAUDE_CREDENTIALS_FILE.exists():
             try:
                 from polyglot_ai.core.security import secure_write
+
                 data = json.loads(CLAUDE_CREDENTIALS_FILE.read_text())
                 if "claudeAiOauth" in data and isinstance(data["claudeAiOauth"], dict):
                     data["claudeAiOauth"]["accessToken"] = None

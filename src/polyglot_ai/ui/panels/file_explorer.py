@@ -35,9 +35,20 @@ from PyQt6.QtWidgets import (
 logger = logging.getLogger(__name__)
 
 HIDDEN_DIRS = {
-    "__pycache__", ".git", ".venv", "venv", "node_modules",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".eggs",
-    "__pypackages__", ".tox", "dist", "build", "*.egg-info",
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".eggs",
+    "__pypackages__",
+    ".tox",
+    "dist",
+    "build",
+    "*.egg-info",
 }
 
 # File extension → (icon color, icon symbol)
@@ -191,14 +202,12 @@ def get_file_icon(file_path: str) -> QIcon:
 class FileIconDelegate(QStyledItemDelegate):
     """Custom delegate to draw file-type icons instead of system icons."""
 
-    def __init__(self, fs_model: QFileSystemModel, proxy: QSortFilterProxyModel,
-                 parent=None):
+    def __init__(self, fs_model: QFileSystemModel, proxy: QSortFilterProxyModel, parent=None):
         super().__init__(parent)
         self._fs_model = fs_model
         self._proxy = proxy
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem,
-              index: QModelIndex) -> None:
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         source_index = self._proxy.mapToSource(index)
         file_path = self._fs_model.filePath(source_index)
         is_dir = self._fs_model.isDir(source_index)
@@ -256,16 +265,12 @@ class FileIconDelegate(QStyledItemDelegate):
 
             if is_expanded:
                 # Down chevron ▼
-                painter.drawLine(chevron_x + 2, chevron_y - 2,
-                                 chevron_x + 5, chevron_y + 1)
-                painter.drawLine(chevron_x + 5, chevron_y + 1,
-                                 chevron_x + 8, chevron_y - 2)
+                painter.drawLine(chevron_x + 2, chevron_y - 2, chevron_x + 5, chevron_y + 1)
+                painter.drawLine(chevron_x + 5, chevron_y + 1, chevron_x + 8, chevron_y - 2)
             else:
                 # Right chevron ►
-                painter.drawLine(chevron_x + 3, chevron_y - 3,
-                                 chevron_x + 6, chevron_y)
-                painter.drawLine(chevron_x + 6, chevron_y,
-                                 chevron_x + 3, chevron_y + 3)
+                painter.drawLine(chevron_x + 3, chevron_y - 3, chevron_x + 6, chevron_y)
+                painter.drawLine(chevron_x + 6, chevron_y, chevron_x + 3, chevron_y + 3)
 
             content_x += 12
 
@@ -299,8 +304,9 @@ class FileIconDelegate(QStyledItemDelegate):
             font.setBold(False)
             painter.setFont(font)
 
-        painter.drawText(text_x, y, rect.width() - text_x, h,
-                         Qt.AlignmentFlag.AlignVCenter, file_name)
+        painter.drawText(
+            text_x, y, rect.width() - text_x, h, Qt.AlignmentFlag.AlignVCenter, file_name
+        )
 
         painter.restore()
 
@@ -373,9 +379,9 @@ class _DragDropTreeView(QTreeView):
         dest = target_path / source_path.name
         if dest.exists():
             from PyQt6.QtWidgets import QMessageBox
+
             QMessageBox.warning(
-                self, "Move Failed",
-                f"'{source_path.name}' already exists in '{target_path.name}'."
+                self, "Move Failed", f"'{source_path.name}' already exists in '{target_path.name}'."
             )
             event.ignore()
             return
@@ -473,9 +479,7 @@ class FileExplorer(QWidget):
         ph_layout.setSpacing(4)
 
         self._chevron = QLabel("▼")
-        self._chevron.setStyleSheet(
-            "font-size: 10px; color: #cccccc; background: transparent;"
-        )
+        self._chevron.setStyleSheet("font-size: 10px; color: #cccccc; background: transparent;")
         self._chevron.setFixedWidth(12)
         ph_layout.addWidget(self._chevron)
 
@@ -668,6 +672,7 @@ class FileExplorer(QWidget):
     def _draw_file_icon():
         """Draw a new-file icon (document with + sign)."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -702,6 +707,7 @@ class FileExplorer(QWidget):
     def _draw_folder_icon():
         """Draw a new-folder icon (folder with + sign)."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -810,7 +816,9 @@ class FileExplorer(QWidget):
 
         menu.exec(self._tree.viewport().mapToGlobal(position))
 
-    def _styled_input(self, title: str, label: str, placeholder: str = "", default: str = "") -> tuple[str, bool]:
+    def _styled_input(
+        self, title: str, label: str, placeholder: str = "", default: str = ""
+    ) -> tuple[str, bool]:
         """Show a dark-themed input dialog matching the app style."""
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
@@ -987,17 +995,20 @@ class FileExplorer(QWidget):
                 path.unlink()
             elif path.is_dir():
                 import shutil
+
                 shutil.rmtree(path)
             logger.info("Deleted: %s", path)
 
     def _copy_path(self, path: Path) -> None:
         from PyQt6.QtWidgets import QApplication
+
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(str(path))
 
     def _copy_relative_path(self, path: Path) -> None:
         from PyQt6.QtWidgets import QApplication
+
         clipboard = QApplication.clipboard()
         if clipboard and self._project_root:
             try:
@@ -1008,6 +1019,7 @@ class FileExplorer(QWidget):
 
     def _reveal_in_file_manager(self, path: Path) -> None:
         import subprocess
+
         target = path.parent if path.is_file() else path
         try:
             subprocess.Popen(["xdg-open", str(target)])

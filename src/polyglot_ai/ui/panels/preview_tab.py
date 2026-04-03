@@ -25,9 +25,18 @@ from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
-IMAGE_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico",
-})
+IMAGE_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
+        ".bmp",
+        ".ico",
+    }
+)
 TABLE_EXTENSIONS = frozenset({".csv", ".tsv"})
 PDF_EXTENSIONS = frozenset({".pdf"})
 PREVIEW_EXTENSIONS = IMAGE_EXTENSIONS | TABLE_EXTENSIONS | PDF_EXTENSIONS
@@ -53,9 +62,9 @@ class PreviewTab(QWidget):
         self._table_viewer = self._build_table_viewer()
         self._fallback_viewer = self._build_fallback_viewer()
 
-        self._stack.addWidget(self._image_viewer)   # 0
-        self._stack.addWidget(self._table_viewer)    # 1
-        self._stack.addWidget(self._fallback_viewer) # 2
+        self._stack.addWidget(self._image_viewer)  # 0
+        self._stack.addWidget(self._table_viewer)  # 1
+        self._stack.addWidget(self._fallback_viewer)  # 2
 
         # Load content
         self._load(file_path)
@@ -78,11 +87,11 @@ class PreviewTab(QWidget):
 
         btn_style = f"""
             QPushButton {{
-                background: transparent; border: 1px solid {tc.get('border_card')};
-                border-radius: 3px; padding: 2px 8px; color: {tc.get('text_primary')};
+                background: transparent; border: 1px solid {tc.get("border_card")};
+                border-radius: 3px; padding: 2px 8px; color: {tc.get("text_primary")};
                 font-size: {tc.FONT_MD}px;
             }}
-            QPushButton:hover {{ background: {tc.get('bg_hover')}; }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
         """
 
         zoom_in = QPushButton("+")
@@ -145,17 +154,17 @@ class PreviewTab(QWidget):
         self._table = QTableWidget()
         self._table.setStyleSheet(f"""
             QTableWidget {{
-                background: {tc.get('bg_base')}; color: {tc.get('text_primary')};
+                background: {tc.get("bg_base")}; color: {tc.get("text_primary")};
                 border: none; font-size: {tc.FONT_MD}px;
-                gridline-color: {tc.get('border_secondary')};
+                gridline-color: {tc.get("border_secondary")};
             }}
             QHeaderView::section {{
-                background: {tc.get('bg_surface')}; color: {tc.get('text_heading')};
-                border: 1px solid {tc.get('border_secondary')};
+                background: {tc.get("bg_surface")}; color: {tc.get("text_heading")};
+                border: 1px solid {tc.get("border_secondary")};
                 padding: 4px; font-size: {tc.FONT_SM}px; font-weight: 600;
             }}
             QTableWidget::item {{ padding: 4px; }}
-            QTableWidget::item:selected {{ background: {tc.get('bg_active')}; }}
+            QTableWidget::item:selected {{ background: {tc.get("bg_active")}; }}
         """)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -178,9 +187,7 @@ class PreviewTab(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         msg = QLabel("This file type cannot be previewed inline.")
-        msg.setStyleSheet(
-            f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_BASE}px;"
-        )
+        msg.setStyleSheet(f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_BASE}px;")
         msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(msg)
 
@@ -188,11 +195,11 @@ class PreviewTab(QWidget):
         open_btn.setObjectName("previewOpenExternal")
         open_btn.setStyleSheet(f"""
             #previewOpenExternal {{
-                background: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')};
+                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
                 border: none; border-radius: {tc.RADIUS_SM}px;
                 padding: 8px 20px; font-size: {tc.FONT_BASE}px; font-weight: 600;
             }}
-            #previewOpenExternal:hover {{ background: {tc.get('accent_primary_hover')}; }}
+            #previewOpenExternal:hover {{ background: {tc.get("accent_primary_hover")}; }}
         """)
         open_btn.clicked.connect(self._open_externally)
         layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)

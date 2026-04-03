@@ -15,39 +15,74 @@ logger = logging.getLogger(__name__)
 
 # ── Secret file patterns (excluded from AI context/indexing) ──────
 
-SECRET_FILE_PATTERNS = frozenset({
-    # Environment files
-    ".env", ".env.local", ".env.production", ".env.staging", ".env.development",
-    ".envrc",
-    # Certificates and keys
-    ".pem", ".key", ".crt", ".p12", ".pfx", ".jks",
-    ".keystore", ".truststore",
-    # SSH
-    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
-    "known_hosts", "authorized_keys",
-    # Package manager auth
-    ".npmrc", ".yarnrc", ".yarnrc.yml",
-    ".pypirc", ".netrc", ".curlrc",
-    # Cloud credentials
-    ".boto", ".s3cfg",
-    # Docker
-    ".dockercfg", "config.json",  # docker config
-    # Other
-    "poetry.toml",  # can contain PyPI tokens
-})
+SECRET_FILE_PATTERNS = frozenset(
+    {
+        # Environment files
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.staging",
+        ".env.development",
+        ".envrc",
+        # Certificates and keys
+        ".pem",
+        ".key",
+        ".crt",
+        ".p12",
+        ".pfx",
+        ".jks",
+        ".keystore",
+        ".truststore",
+        # SSH
+        "id_rsa",
+        "id_ed25519",
+        "id_ecdsa",
+        "id_dsa",
+        "known_hosts",
+        "authorized_keys",
+        # Package manager auth
+        ".npmrc",
+        ".yarnrc",
+        ".yarnrc.yml",
+        ".pypirc",
+        ".netrc",
+        ".curlrc",
+        # Cloud credentials
+        ".boto",
+        ".s3cfg",
+        # Docker
+        ".dockercfg",
+        "config.json",  # docker config
+        # Other
+        "poetry.toml",  # can contain PyPI tokens
+    }
+)
 
-SECRET_FILE_EXTENSIONS = frozenset({
-    ".pem", ".key", ".crt", ".p12", ".pfx", ".jks",
-    ".keystore", ".env", ".secret", ".credentials",
-    ".tfvars", ".auto.tfvars",
-})
+SECRET_FILE_EXTENSIONS = frozenset(
+    {
+        ".pem",
+        ".key",
+        ".crt",
+        ".p12",
+        ".pfx",
+        ".jks",
+        ".keystore",
+        ".env",
+        ".secret",
+        ".credentials",
+        ".tfvars",
+        ".auto.tfvars",
+    }
+)
 
-SECRET_FILE_PREFIXES = frozenset({
-    ".env",
-    "secret",
-    "credentials",
-    ".netrc",
-})
+SECRET_FILE_PREFIXES = frozenset(
+    {
+        ".env",
+        "secret",
+        "credentials",
+        ".netrc",
+    }
+)
 
 # Patterns to redact from error messages
 _REDACT_PATTERNS = [
@@ -65,10 +100,17 @@ _REDACT_PATTERNS = [
 
 # ── Allowed MCP server commands ───────────────────────────────────
 
-MCP_ALLOWED_COMMANDS = frozenset({
-    "npx", "uvx", "python", "python3", "node",
-    "docker", "podman",
-})
+MCP_ALLOWED_COMMANDS = frozenset(
+    {
+        "npx",
+        "uvx",
+        "python",
+        "python3",
+        "node",
+        "docker",
+        "podman",
+    }
+)
 
 
 def is_secret_file(path: Path) -> bool:
@@ -91,14 +133,14 @@ def is_secret_file(path: Path) -> bool:
 # Used to prevent accidental upload of secrets to AI providers.
 
 _CONTENT_SECRET_PATTERNS = [
-    re.compile(r"(?:sk|pk|rk)-[a-zA-Z0-9]{20,}"),             # OpenAI / Stripe style
-    re.compile(r"ghp_[a-zA-Z0-9]{36,}"),                       # GitHub PAT
-    re.compile(r"gho_[a-zA-Z0-9]{36,}"),                       # GitHub OAuth
-    re.compile(r"glpat-[a-zA-Z0-9\-]{20,}"),                   # GitLab PAT
-    re.compile(r"xai-[a-zA-Z0-9]{20,}"),                       # xAI
-    re.compile(r"AKIA[0-9A-Z]{16}"),                            # AWS access key
-    re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),    # Private keys
-    re.compile(r"-----BEGIN\s+CERTIFICATE-----"),               # Certificates
+    re.compile(r"(?:sk|pk|rk)-[a-zA-Z0-9]{20,}"),  # OpenAI / Stripe style
+    re.compile(r"ghp_[a-zA-Z0-9]{36,}"),  # GitHub PAT
+    re.compile(r"gho_[a-zA-Z0-9]{36,}"),  # GitHub OAuth
+    re.compile(r"glpat-[a-zA-Z0-9\-]{20,}"),  # GitLab PAT
+    re.compile(r"xai-[a-zA-Z0-9]{20,}"),  # xAI
+    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
+    re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),  # Private keys
+    re.compile(r"-----BEGIN\s+CERTIFICATE-----"),  # Certificates
     re.compile(
         r"""(?:password|passwd|pwd|secret|token|api_key|apikey|"""
         r"""access_key|private_key)\s*[=:]\s*['"][^'"]{8,}['"]""",
@@ -158,8 +200,7 @@ def check_secure_file(path: Path) -> tuple[bool, str]:
     mode = st.st_mode
     if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
         return False, (
-            f"File has insecure permissions ({oct(mode & 0o777)}). "
-            f"Expected 0600 or stricter."
+            f"File has insecure permissions ({oct(mode & 0o777)}). Expected 0600 or stricter."
         )
 
     return True, "OK"

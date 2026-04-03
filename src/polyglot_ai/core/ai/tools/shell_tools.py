@@ -35,18 +35,20 @@ async def web_search(args: dict) -> str:
     def _do_search() -> str:
         try:
             url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) PolyglotAI/0.2"
-            })
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) PolyglotAI/0.2"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
 
             import re
+
             results = []
             for m in re.finditer(
                 r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
                 r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-                html, re.DOTALL,
+                html,
+                re.DOTALL,
             ):
                 link = m.group(1)
                 title = re.sub(r"<[^>]+>", "", m.group(2)).strip()

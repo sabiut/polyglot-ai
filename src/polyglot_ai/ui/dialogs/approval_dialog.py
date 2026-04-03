@@ -67,9 +67,7 @@ class ApprovalDialog(QDialog):
             self._diff_viewer.set_command_preview(command)
         else:
             # Generic argument display
-            self._diff_viewer.set_command_preview(
-                json.dumps(args, indent=2)
-            )
+            self._diff_viewer.set_command_preview(json.dumps(args, indent=2))
 
         layout.addWidget(self._diff_viewer)
 
@@ -78,16 +76,12 @@ class ApprovalDialog(QDialog):
         btn_layout.addStretch()
 
         reject_btn = QPushButton("Reject")
-        reject_btn.setStyleSheet(
-            "background-color: #5a1d1d; padding: 8px 20px;"
-        )
+        reject_btn.setStyleSheet("background-color: #5a1d1d; padding: 8px 20px;")
         reject_btn.clicked.connect(self._reject)
         btn_layout.addWidget(reject_btn)
 
         approve_btn = QPushButton("Approve")
-        approve_btn.setStyleSheet(
-            "background-color: #0e639c; padding: 8px 20px;"
-        )
+        approve_btn.setStyleSheet("background-color: #0e639c; padding: 8px 20px;")
         approve_btn.clicked.connect(self._approve)
         btn_layout.addWidget(approve_btn)
 

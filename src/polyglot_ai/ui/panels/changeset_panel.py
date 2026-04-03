@@ -38,19 +38,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FileChange:
     """A single proposed file change."""
-    path: str                    # Relative to project root
-    original: str = ""           # Original content (empty for new files)
-    proposed: str = ""           # Proposed new content
-    status: str = "pending"      # pending | applied | rejected | rolled_back
+
+    path: str  # Relative to project root
+    original: str = ""  # Original content (empty for new files)
+    proposed: str = ""  # Proposed new content
+    status: str = "pending"  # pending | applied | rejected | rolled_back
     backup_path: str | None = None  # Path to backup file
 
 
 class ChangesetPanel(QWidget):
     """Panel for reviewing and managing AI-proposed file changes."""
 
-    change_applied = pyqtSignal(str)    # file path
-    change_rejected = pyqtSignal(str)   # file path
-    change_rolledback = pyqtSignal(str) # file path
+    change_applied = pyqtSignal(str)  # file path
+    change_rejected = pyqtSignal(str)  # file path
+    change_rolledback = pyqtSignal(str)  # file path
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -75,12 +76,16 @@ class ChangesetPanel(QWidget):
         # Header bar
         header = QWidget()
         header.setFixedHeight(40)
-        header.setStyleSheet(f"background-color: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_secondary')};")
+        header.setStyleSheet(
+            f"background-color: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 12, 0)
 
         title = QLabel("PENDING CHANGES")
-        title.setStyleSheet(f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_tertiary')}; letter-spacing: 1px;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_tertiary')}; letter-spacing: 1px;"
+        )
         header_layout.addWidget(title)
 
         self._count_label = QLabel("0 files")
@@ -118,11 +123,11 @@ class ChangesetPanel(QWidget):
         self._apply_all_btn = QPushButton("✓ Apply All")
         self._apply_all_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {tc.get('accent_success')}; color: {tc.get('text_on_accent')}; font-weight: 600;
+                background-color: {tc.get("accent_success")}; color: {tc.get("text_on_accent")}; font-weight: 600;
                 padding: 4px 14px; border: none; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('accent_success_hover')}; }}
-            QPushButton:disabled {{ background-color: {tc.get('border_secondary')}; color: #666; }}
+            QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
+            QPushButton:disabled {{ background-color: {tc.get("border_secondary")}; color: #666; }}
         """)
         self._apply_all_btn.clicked.connect(self._apply_all)
         self._apply_all_btn.setEnabled(False)
@@ -132,11 +137,11 @@ class ChangesetPanel(QWidget):
         self._reject_all_btn = QPushButton("✗ Reject All")
         self._reject_all_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent; color: {tc.get('accent_error')};
-                padding: 4px 14px; border: 1px solid {tc.get('border_input')}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
+                background-color: transparent; color: {tc.get("accent_error")};
+                padding: 4px 14px; border: 1px solid {tc.get("border_input")}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('bg_feedback_neg')}; }}
-            QPushButton:disabled {{ background-color: transparent; color: {tc.get('border_card')}; border-color: {tc.get('border_secondary')}; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_feedback_neg")}; }}
+            QPushButton:disabled {{ background-color: transparent; color: {tc.get("border_card")}; border-color: {tc.get("border_secondary")}; }}
         """)
         self._reject_all_btn.clicked.connect(self._reject_all)
         self._reject_all_btn.setEnabled(False)
@@ -147,24 +152,24 @@ class ChangesetPanel(QWidget):
         # Splitter: file list | diff view
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setStyleSheet(f"""
-            QSplitter::handle {{ background-color: {tc.get('border_secondary')}; width: 1px; }}
+            QSplitter::handle {{ background-color: {tc.get("border_secondary")}; width: 1px; }}
         """)
 
         # File list
         self._file_list = QListWidget()
         self._file_list.setStyleSheet(f"""
             QListWidget {{
-                background-color: {tc.get('bg_base')}; border: none; outline: none;
+                background-color: {tc.get("bg_base")}; border: none; outline: none;
                 font-size: {tc.FONT_MD}px;
             }}
             QListWidget::item {{
-                padding: 8px 12px; color: {tc.get('text_primary')}; border-bottom: 1px solid #2a2a2a;
+                padding: 8px 12px; color: {tc.get("text_primary")}; border-bottom: 1px solid #2a2a2a;
             }}
             QListWidget::item:selected {{
-                background-color: {tc.get('bg_surface_overlay')}; color: {tc.get('text_on_accent')};
+                background-color: {tc.get("bg_surface_overlay")}; color: {tc.get("text_on_accent")};
             }}
             QListWidget::item:hover:!selected {{
-                background-color: {tc.get('bg_surface')};
+                background-color: {tc.get("bg_surface")};
             }}
         """)
         self._file_list.currentRowChanged.connect(self._on_file_selected)
@@ -179,16 +184,22 @@ class ChangesetPanel(QWidget):
         # File action bar
         action_bar = QWidget()
         action_bar.setFixedHeight(36)
-        action_bar.setStyleSheet(f"background-color: {tc.get('bg_surface')}; border-bottom: 1px solid {tc.get('border_secondary')};")
+        action_bar.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         action_layout = QHBoxLayout(action_bar)
         action_layout.setContentsMargins(12, 0, 12, 0)
 
         self._file_path_label = QLabel("")
-        self._file_path_label.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('text_heading')}; font-weight: bold;")
+        self._file_path_label.setStyleSheet(
+            f"font-size: {tc.FONT_MD}px; color: {tc.get('text_heading')}; font-weight: bold;"
+        )
         action_layout.addWidget(self._file_path_label)
 
         self._file_status_label = QLabel("")
-        self._file_status_label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};")
+        self._file_status_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};"
+        )
         action_layout.addWidget(self._file_status_label)
 
         action_layout.addStretch()
@@ -196,10 +207,10 @@ class ChangesetPanel(QWidget):
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {tc.get('accent_success')}; color: {tc.get('text_on_accent')}; font-weight: 600;
+                background-color: {tc.get("accent_success")}; color: {tc.get("text_on_accent")}; font-weight: 600;
                 padding: 3px 12px; border: none; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('accent_success_hover')}; }}
+            QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
         """)
         self._apply_btn.clicked.connect(self._apply_selected)
         action_layout.addWidget(self._apply_btn)
@@ -207,10 +218,10 @@ class ChangesetPanel(QWidget):
         self._reject_btn = QPushButton("Reject")
         self._reject_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent; color: {tc.get('accent_error')};
-                padding: 3px 12px; border: 1px solid {tc.get('border_input')}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
+                background-color: transparent; color: {tc.get("accent_error")};
+                padding: 3px 12px; border: 1px solid {tc.get("border_input")}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('bg_feedback_neg')}; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_feedback_neg")}; }}
         """)
         self._reject_btn.clicked.connect(self._reject_selected)
         action_layout.addWidget(self._reject_btn)
@@ -218,8 +229,8 @@ class ChangesetPanel(QWidget):
         self._rollback_btn = QPushButton("↩ Rollback")
         self._rollback_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent; color: {tc.get('accent_warning')};
-                padding: 3px 12px; border: 1px solid {tc.get('border_input')}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
+                background-color: transparent; color: {tc.get("accent_warning")};
+                padding: 3px 12px; border: 1px solid {tc.get("border_input")}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
             QPushButton:hover {{ background-color: #2a2a1a; }}
         """)
@@ -235,7 +246,7 @@ class ChangesetPanel(QWidget):
         self._diff_view.setFont(QFont("Consolas, Monaco, Courier New", 12))
         self._diff_view.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #1a1a1a; color: {tc.get('text_primary')}; border: none;
+                background-color: #1a1a1a; color: {tc.get("text_primary")}; border: none;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: {tc.FONT_MD}px; line-height: 150%;
             }}
@@ -253,10 +264,10 @@ class ChangesetPanel(QWidget):
     def _show_empty_state(self) -> None:
         self._diff_view.setHtml(
             f'<div style="color:#666; padding:40px; text-align:center; font-size:{tc.FONT_BASE}px;">'
-            'No pending changes.<br><br>'
-            'When the AI proposes file modifications, they will appear here<br>'
-            'for review before being applied to your project.'
-            '</div>'
+            "No pending changes.<br><br>"
+            "When the AI proposes file modifications, they will appear here<br>"
+            "for review before being applied to your project."
+            "</div>"
         )
 
     # ── Public API ───────────────────────────────────────────────
@@ -387,22 +398,29 @@ class ChangesetPanel(QWidget):
         proposed_lines = change.proposed.splitlines(keepends=True)
 
         diff = difflib.unified_diff(
-            original_lines, proposed_lines,
+            original_lines,
+            proposed_lines,
             fromfile=f"a/{change.path}",
             tofile=f"b/{change.path}",
             lineterm="",
         )
 
-        html_parts = [f'<pre style="font-family:monospace; font-size:{tc.FONT_MD}px; line-height:160%; margin:8px;">']
+        html_parts = [
+            f'<pre style="font-family:monospace; font-size:{tc.FONT_MD}px; line-height:160%; margin:8px;">'
+        ]
 
         for line in diff:
             line = line.rstrip("\n")
             escaped = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
             if line.startswith("+++") or line.startswith("---"):
-                html_parts.append(f'<span style="color:{tc.get("diff_meta_fg")};">{escaped}</span>\n')
+                html_parts.append(
+                    f'<span style="color:{tc.get("diff_meta_fg")};">{escaped}</span>\n'
+                )
             elif line.startswith("@@"):
-                html_parts.append(f'<span style="color:{tc.get("diff_hunk_fg")};">{escaped}</span>\n')
+                html_parts.append(
+                    f'<span style="color:{tc.get("diff_hunk_fg")};">{escaped}</span>\n'
+                )
             elif line.startswith("+"):
                 html_parts.append(
                     f'<span style="background:{tc.get("bg_diff_add")}; color:{tc.get("diff_add_fg")}; display:block; '
@@ -414,7 +432,9 @@ class ChangesetPanel(QWidget):
                     f'padding:0 4px;">{escaped}</span>'
                 )
             else:
-                html_parts.append(f'<span style="color:{tc.get("diff_meta_fg")};">{escaped}</span>\n')
+                html_parts.append(
+                    f'<span style="color:{tc.get("diff_meta_fg")};">{escaped}</span>\n'
+                )
 
         html_parts.append("</pre>")
 
@@ -424,7 +444,9 @@ class ChangesetPanel(QWidget):
                 f'<pre style="font-family:monospace; font-size:{tc.FONT_MD}px; margin:8px;">',
                 f'<span style="color:{tc.get("diff_add_fg")};">New file — full content shown below:</span>\n\n',
             ]
-            escaped = change.proposed.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            escaped = (
+                change.proposed.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            )
             html_parts.append(f'<span style="color:{tc.get("text_primary")};">{escaped}</span>')
             html_parts.append("</pre>")
 
@@ -449,6 +471,7 @@ class ChangesetPanel(QWidget):
             # Backup using centralized backup location
             if target.exists():
                 from polyglot_ai.core.ai.code_applier import _create_backup
+
                 backup_path = _create_backup(target)
                 if backup_path:
                     change.backup_path = str(backup_path)
@@ -500,8 +523,11 @@ class ChangesetPanel(QWidget):
         paths = [p for p, c in self._changes.items() if c.status == "pending"]
         for path in paths:
             self._file_list.setCurrentRow(
-                next(i for i in range(self._file_list.count())
-                     if self._file_list.item(i).data(Qt.ItemDataRole.UserRole) == path)
+                next(
+                    i
+                    for i in range(self._file_list.count())
+                    if self._file_list.item(i).data(Qt.ItemDataRole.UserRole) == path
+                )
             )
             self._apply_selected()
 

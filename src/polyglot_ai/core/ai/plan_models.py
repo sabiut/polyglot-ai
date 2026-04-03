@@ -79,8 +79,7 @@ class Plan:
         if not self.steps:
             return 0.0
         done = sum(
-            1 for s in self.steps
-            if s.status in (PlanStepStatus.COMPLETED, PlanStepStatus.SKIPPED)
+            1 for s in self.steps if s.status in (PlanStepStatus.COMPLETED, PlanStepStatus.SKIPPED)
         )
         return done / len(self.steps)
 
@@ -127,7 +126,9 @@ class Plan:
             summary=data.get("summary", ""),
             steps=[PlanStep.from_dict(s) for s in data.get("steps", [])],
             status=PlanStatus(data.get("status", "draft")),
-            created_at=datetime.fromisoformat(data["created_at"]) if "created_at" in data else datetime.now(),
+            created_at=datetime.fromisoformat(data["created_at"])
+            if "created_at" in data
+            else datetime.now(),
             conversation_id=data.get("conversation_id"),
             original_request=data.get("original_request", ""),
         )

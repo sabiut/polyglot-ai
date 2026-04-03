@@ -35,14 +35,25 @@ from polyglot_ai.ui import theme_colors as tc
 logger = logging.getLogger(__name__)
 
 PROVIDERS = [
-    {"name": "openai", "display": "OpenAI", "placeholder": "sk-...",
-     "url": "platform.openai.com/api-keys"},
-    {"name": "anthropic", "display": "Anthropic", "placeholder": "sk-ant-...",
-     "url": "console.anthropic.com/settings/keys"},
-    {"name": "google", "display": "Google (Gemini)", "placeholder": "AIza...",
-     "url": "aistudio.google.com/apikey"},
-    {"name": "xai", "display": "xAI (Grok)", "placeholder": "xai-...",
-     "url": "console.x.ai"},
+    {
+        "name": "openai",
+        "display": "OpenAI",
+        "placeholder": "sk-...",
+        "url": "platform.openai.com/api-keys",
+    },
+    {
+        "name": "anthropic",
+        "display": "Anthropic",
+        "placeholder": "sk-ant-...",
+        "url": "console.anthropic.com/settings/keys",
+    },
+    {
+        "name": "google",
+        "display": "Google (Gemini)",
+        "placeholder": "AIza...",
+        "url": "aistudio.google.com/apikey",
+    },
+    {"name": "xai", "display": "xAI (Grok)", "placeholder": "xai-...", "url": "console.x.ai"},
 ]
 
 # ── Shared Styles ────────────────────────────────────────────────
@@ -137,15 +148,19 @@ class SettingsDialog(QDialog):
         # ── Sidebar ──
         sidebar = QWidget()
         sidebar.setFixedWidth(190)
-        sidebar.setStyleSheet(f"background-color: {tc.get('bg_surface')}; border-right: 1px solid {tc.get('border_secondary')};")
+        sidebar.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; border-right: 1px solid {tc.get('border_secondary')};"
+        )
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 12, 0, 12)
         sidebar_layout.setSpacing(0)
 
         # App title in sidebar
         title = QLabel("Settings")
-        title.setStyleSheet(f"font-size: {tc.FONT_BASE}px; font-weight: bold; color: {tc.get('text_tertiary')}; "
-                            f"padding: 8px 16px 12px 16px;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_BASE}px; font-weight: bold; color: {tc.get('text_tertiary')}; "
+            f"padding: 8px 16px 12px 16px;"
+        )
         sidebar_layout.addWidget(title)
 
         # Nav items
@@ -170,13 +185,13 @@ class SettingsDialog(QDialog):
         self._nav_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         sections = [
-            ("🔑  Accounts", ),
-            ("✏️  Editor", ),
-            ("🤖  AI", ),
-            ("💻  Terminal", ),
-            ("🔌  MCP Servers", ),
+            ("🔑  Accounts",),
+            ("✏️  Editor",),
+            ("🤖  AI",),
+            ("💻  Terminal",),
+            ("🔌  MCP Servers",),
         ]
-        for label, in sections:
+        for (label,) in sections:
             item = QListWidgetItem(label)
             item.setSizeHint(item.sizeHint().__class__(190, 40))
             self._nav_list.addItem(item)
@@ -188,7 +203,9 @@ class SettingsDialog(QDialog):
 
         # Version label
         ver = QLabel("v0.1.0")
-        ver.setStyleSheet(f"color: {tc.get('border_input')}; font-size: {tc.FONT_XS}px; padding: 8px 16px;")
+        ver.setStyleSheet(
+            f"color: {tc.get('border_input')}; font-size: {tc.FONT_XS}px; padding: 8px 16px;"
+        )
         sidebar_layout.addWidget(ver)
 
         main_layout.addWidget(sidebar)
@@ -211,7 +228,9 @@ class SettingsDialog(QDialog):
 
         # Bottom buttons
         btn_bar = QWidget()
-        btn_bar.setStyleSheet(f"background-color: {tc.get('bg_surface')}; border-top: 1px solid {tc.get('border_secondary')};")
+        btn_bar.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; border-top: 1px solid {tc.get('border_secondary')};"
+        )
         btn_layout = QHBoxLayout(btn_bar)
         btn_layout.setContentsMargins(16, 10, 16, 10)
         btn_layout.addStretch()
@@ -272,7 +291,9 @@ class SettingsDialog(QDialog):
         row.addWidget(self._openai_oauth_btn)
 
         self._openai_oauth_status = QLabel("")
-        self._openai_oauth_status.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')};")
+        self._openai_oauth_status.setStyleSheet(
+            f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')};"
+        )
         row.addWidget(self._openai_oauth_status)
         row.addStretch()
 
@@ -285,6 +306,7 @@ class SettingsDialog(QDialog):
         # Check current status
         from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
         from polyglot_ai.core.bridge import EventBus
+
         _check = OpenAIOAuthClient(EventBus())
         if _check.is_authenticated:
             self._set_openai_oauth_status("Signed in ✓", tc.get("accent_success_muted"))
@@ -314,7 +336,9 @@ class SettingsDialog(QDialog):
         claude_row.addWidget(self._claude_oauth_btn)
 
         self._claude_oauth_status = QLabel("")
-        self._claude_oauth_status.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')};")
+        self._claude_oauth_status.setStyleSheet(
+            f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')};"
+        )
         claude_row.addWidget(self._claude_oauth_status)
         claude_row.addStretch()
 
@@ -326,6 +350,7 @@ class SettingsDialog(QDialog):
 
         # Check Claude auth status
         from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
+
         _check_claude = ClaudeOAuthClient(EventBus())
         if _check_claude.is_authenticated:
             sub = _check_claude._subscription_type or ""
@@ -357,13 +382,17 @@ class SettingsDialog(QDialog):
             has_key = bool(self._keyring.get_key(provider["name"]))
             dot = QLabel("●")
             dot.setFixedWidth(14)
-            dot.setStyleSheet(f"color: {tc.get('accent_success_muted') if has_key else tc.get('border_input')}; font-size: {tc.FONT_LG}px;")
+            dot.setStyleSheet(
+                f"color: {tc.get('accent_success_muted') if has_key else tc.get('border_input')}; font-size: {tc.FONT_LG}px;"
+            )
             row.addWidget(dot)
 
             # Provider name
             name_lbl = QLabel(provider["display"])
             name_lbl.setFixedWidth(100)
-            name_lbl.setStyleSheet(f"font-weight: bold; font-size: {tc.FONT_BASE}px; color: {tc.get('text_heading')};")
+            name_lbl.setStyleSheet(
+                f"font-weight: bold; font-size: {tc.FONT_BASE}px; color: {tc.get('text_heading')};"
+            )
             row.addWidget(name_lbl)
 
             # Key input
@@ -392,14 +421,18 @@ class SettingsDialog(QDialog):
             # Test result
             test_label = QLabel("")
             test_label.setFixedWidth(80)
-            test_label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};")
+            test_label.setStyleSheet(
+                f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};"
+            )
             self._test_labels[provider["name"]] = test_label
             row.addWidget(test_label)
 
             api_layout.addLayout(row)
 
         key_note = QLabel("🔒 Keys are stored securely in your system keyring.")
-        key_note.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 4px;")
+        key_note.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 4px;"
+        )
         api_layout.addWidget(key_note)
         layout.addWidget(api_card)
 
@@ -473,12 +506,19 @@ class SettingsDialog(QDialog):
 
         self._default_model = QComboBox()
         self._default_model.setEditable(True)
-        self._default_model.addItems([
-            "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
-            "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
-            "gemini-3.1-pro-preview", "gemini-3-flash-preview",
-            "grok-4.20-0309-reasoning",
-        ])
+        self._default_model.addItems(
+            [
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.4-nano",
+                "claude-opus-4-6",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+                "gemini-3.1-pro-preview",
+                "gemini-3-flash-preview",
+                "grok-4.20-0309-reasoning",
+            ]
+        )
         self._default_model.setCurrentText(self._settings.get("ai.default_model"))
         form.addRow("Default Model:", self._default_model)
 
@@ -568,6 +608,7 @@ class SettingsDialog(QDialog):
         self._mcp_cards: dict[str, dict] = {}  # id -> {card, btn, status}
 
         from polyglot_ai.core.mcp_client import MCP_CATALOG
+
         for i, entry in enumerate(MCP_CATALOG):
             card = self._create_server_card(entry)
             row, col = divmod(i, 2)
@@ -578,7 +619,9 @@ class SettingsDialog(QDialog):
         # Custom server section
         layout.addSpacing(16)
         custom_header = QLabel("Custom Server")
-        custom_header.setStyleSheet(f"font-size: {tc.FONT_LG}px; font-weight: bold; color: #ccc; margin-top: 8px;")
+        custom_header.setStyleSheet(
+            f"font-size: {tc.FONT_LG}px; font-weight: bold; color: #ccc; margin-top: 8px;"
+        )
         layout.addWidget(custom_header)
 
         custom_card = QGroupBox()
@@ -629,13 +672,17 @@ class SettingsDialog(QDialog):
         # Top row: icon + name + connect button
         top = QHBoxLayout()
         icon_label = QLabel(entry["icon"])
-        icon_label.setStyleSheet(f"font-size: {tc.FONT_2XL}px; background: transparent; border: none;")
+        icon_label.setStyleSheet(
+            f"font-size: {tc.FONT_2XL}px; background: transparent; border: none;"
+        )
         icon_label.setFixedWidth(28)
         top.addWidget(icon_label)
 
         name_label = QLabel(entry["name"])
-        name_label.setStyleSheet(f"font-size: {tc.FONT_BASE}px; font-weight: bold; color: {tc.get('text_heading')}; "
-                                 f"background: transparent; border: none;")
+        name_label.setStyleSheet(
+            f"font-size: {tc.FONT_BASE}px; font-weight: bold; color: {tc.get('text_heading')}; "
+            f"background: transparent; border: none;"
+        )
         top.addWidget(name_label)
         top.addStretch()
 
@@ -656,13 +703,17 @@ class SettingsDialog(QDialog):
 
         # Description
         desc = QLabel(entry["description"])
-        desc.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; background: transparent; border: none;")
+        desc.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; background: transparent; border: none;"
+        )
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
         # Status
         status = QLabel("")
-        status.setStyleSheet(f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; background: transparent; border: none;")
+        status.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; background: transparent; border: none;"
+        )
         layout.addWidget(status)
 
         self._mcp_cards[entry["id"]] = {"card": card, "btn": btn, "status": status}
@@ -685,8 +736,9 @@ class SettingsDialog(QDialog):
                     f"}}"
                     f"QPushButton:hover {{ background-color: {tc.get('accent_danger_hover')}; }}"
                 )
-                tools = [t for t in self._mcp_client.available_tools.values()
-                         if t.server_name == sid]
+                tools = [
+                    t for t in self._mcp_client.available_tools.values() if t.server_name == sid
+                ]
                 widgets["status"].setText(f"✓ Connected · {len(tools)} tools")
             elif sid in registered:
                 widgets["btn"].setText("Connect")
@@ -699,7 +751,8 @@ class SettingsDialog(QDialog):
                 )
                 widgets["status"].setText("Registered · not connected")
                 widgets["status"].setStyleSheet(
-                    f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_warning')}; background: transparent; border: none;")
+                    f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_warning')}; background: transparent; border: none;"
+                )
             else:
                 widgets["btn"].setText("Connect")
                 widgets["status"].setText("")
@@ -718,6 +771,7 @@ class SettingsDialog(QDialog):
         else:
             # Need config?
             from polyglot_ai.core.mcp_client import MCP_CATALOG
+
             entry = next((e for e in MCP_CATALOG if e["id"] == server_id), None)
             if not entry:
                 return
@@ -726,15 +780,20 @@ class SettingsDialog(QDialog):
             for cf in entry.get("config_fields", []):
                 if cf["type"] == "password":
                     val, ok = QInputDialog.getText(
-                        self, f"{entry['name']} Setup", f"{cf['label']}:",
-                        QLineEdit.EchoMode.Password)
+                        self,
+                        f"{entry['name']} Setup",
+                        f"{cf['label']}:",
+                        QLineEdit.EchoMode.Password,
+                    )
                 elif cf["type"] == "directory":
                     from PyQt6.QtWidgets import QFileDialog
+
                     val = QFileDialog.getExistingDirectory(self, f"Select {cf['label']}")
                     ok = bool(val)
                 else:
                     val, ok = QInputDialog.getText(
-                        self, f"{entry['name']} Setup", f"{cf['label']}:")
+                        self, f"{entry['name']} Setup", f"{cf['label']}:"
+                    )
 
                 if not ok or not val:
                     return  # User cancelled
@@ -751,7 +810,8 @@ class SettingsDialog(QDialog):
         if widgets.get("status"):
             widgets["status"].setText("Connecting...")
             widgets["status"].setStyleSheet(
-                f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_warning')}; background: transparent; border: none;")
+                f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_warning')}; background: transparent; border: none;"
+            )
 
         success = await self._mcp_client.connect(server_id)
         if success:
@@ -760,7 +820,8 @@ class SettingsDialog(QDialog):
             if widgets.get("status"):
                 widgets["status"].setText("Failed to connect")
                 widgets["status"].setStyleSheet(
-                    f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_error')}; background: transparent; border: none;")
+                    f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_error')}; background: transparent; border: none;"
+                )
 
     async def _disconnect_mcp(self, server_id: str) -> None:
         await self._mcp_client.disconnect(server_id)
@@ -794,8 +855,10 @@ class SettingsDialog(QDialog):
                     env[k.strip()] = v.strip()
 
         from polyglot_ai.core.mcp_client import MCPServerConfig
-        config = MCPServerConfig(name=name, command=command, args=args,
-                                 env=env if env else None, enabled=True)
+
+        config = MCPServerConfig(
+            name=name, command=command, args=args, env=env if env else None, enabled=True
+        )
         self._mcp_client.add_server(config)
         self._mcp_client._save_config()
 
@@ -818,7 +881,8 @@ class SettingsDialog(QDialog):
 
         if not OpenAIOAuthClient.is_codex_available():
             QMessageBox.warning(
-                self, "Node.js Required",
+                self,
+                "Node.js Required",
                 "ChatGPT sign-in requires Node.js (for npx).\n\n"
                 "Install it with:\n  sudo apt install nodejs npm\n\nThen try again.",
             )
@@ -833,11 +897,14 @@ class SettingsDialog(QDialog):
             success = OpenAIOAuthClient.run_codex_login()
             if success:
                 from polyglot_ai.core.bridge import EventBus
+
                 client = OpenAIOAuthClient(EventBus())
                 if client.is_authenticated:
                     self.oauth_status_changed.emit("Signed in ✓", tc.get("accent_success_muted"))
                 else:
-                    self.oauth_status_changed.emit("Login completed but no token found", tc.get("accent_warning"))
+                    self.oauth_status_changed.emit(
+                        "Login completed but no token found", tc.get("accent_warning")
+                    )
             else:
                 self.oauth_status_changed.emit("Login failed or cancelled", tc.get("accent_error"))
 
@@ -846,6 +913,7 @@ class SettingsDialog(QDialog):
     def _logout_openai_oauth(self) -> None:
         from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
         from polyglot_ai.core.bridge import EventBus
+
         client = OpenAIOAuthClient(EventBus())
         client.logout()
         self._set_openai_oauth_status("Signed out", tc.get("text_secondary"))
@@ -871,6 +939,7 @@ class SettingsDialog(QDialog):
         self.claude_oauth_status_changed.emit("Logging in via terminal...", "#969696")
 
         import threading
+
         def run():
             success = ClaudeOAuthClient.run_claude_login()
             if success:
@@ -884,15 +953,14 @@ class SettingsDialog(QDialog):
                         "Login completed but no token found", "#e5a00d"
                     )
             else:
-                self.claude_oauth_status_changed.emit(
-                    "Login failed or cancelled", "#f44747"
-                )
+                self.claude_oauth_status_changed.emit("Login failed or cancelled", "#f44747")
 
         threading.Thread(target=run, daemon=True).start()
 
     def _logout_claude_oauth(self) -> None:
         from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
         from polyglot_ai.core.bridge import EventBus
+
         client = ClaudeOAuthClient(EventBus())
         client.logout()
         self._set_claude_oauth_status("Signed out", "#969696")
@@ -912,21 +980,26 @@ class SettingsDialog(QDialog):
         label.setStyleSheet("font-size: 11px; color: #969696;")
 
         from polyglot_ai.core.bridge import EventBus
+
         bus = EventBus()
 
         async def test():
             try:
                 if provider_name == "openai":
                     from polyglot_ai.core.ai.client import OpenAIClient
+
                     client = OpenAIClient(api_key, bus)
                 elif provider_name == "anthropic":
                     from polyglot_ai.core.ai.anthropic_client import AnthropicClient
+
                     client = AnthropicClient(api_key, bus)
                 elif provider_name == "google":
                     from polyglot_ai.core.ai.google_client import GoogleClient
+
                     client = GoogleClient(api_key, bus)
                 elif provider_name == "xai":
                     from polyglot_ai.core.ai.xai_client import XAIClient
+
                     client = XAIClient(api_key, bus)
                 else:
                     label.setText("Unknown")

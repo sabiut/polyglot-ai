@@ -79,64 +79,156 @@ LEGACY_KEYRING_SERVICE = "codex-desktop"
 # Sandbox — allowed shell commands (union of both tiers)
 # Read-only commands can run without approval.
 # Dangerous commands ALWAYS require explicit user approval.
-SAFE_COMMANDS = frozenset({
-    "ls", "cat", "grep", "find", "head", "tail", "wc",
-    "sort", "uniq", "diff", "tree", "echo", "printf",
-    "git",  # read-only git subcommands; commits need approval via tool
-})
+SAFE_COMMANDS = frozenset(
+    {
+        "ls",
+        "cat",
+        "grep",
+        "find",
+        "head",
+        "tail",
+        "wc",
+        "sort",
+        "uniq",
+        "diff",
+        "tree",
+        "echo",
+        "printf",
+        "git",  # read-only git subcommands; commits need approval via tool
+    }
+)
 
-DANGEROUS_COMMANDS = frozenset({
-    "python", "python3",
-    "pip", "pip3",
-    "node", "npm", "npx",
-    "cargo", "rustc",
-    "make", "cmake",
-    "mkdir", "touch", "cp", "mv", "rm",
-    "sed", "awk", "tee",
-})
+DANGEROUS_COMMANDS = frozenset(
+    {
+        "python",
+        "python3",
+        "pip",
+        "pip3",
+        "node",
+        "npm",
+        "npx",
+        "cargo",
+        "rustc",
+        "make",
+        "cmake",
+        "mkdir",
+        "touch",
+        "cp",
+        "mv",
+        "rm",
+        "sed",
+        "awk",
+        "tee",
+    }
+)
 
 ALLOWED_COMMANDS = SAFE_COMMANDS | DANGEROUS_COMMANDS
 
 # File extensions recognized as source code
-CODE_EXTENSIONS = frozenset({
-    ".py", ".pyw", ".js", ".mjs", ".ts", ".tsx", ".jsx",
-    ".java", ".go", ".rs", ".c", ".cpp", ".cxx", ".cc", ".h", ".hpp",
-    ".cs", ".rb", ".php", ".swift", ".kt", ".scala", ".dart", ".lua", ".r", ".m",
-    ".sh", ".bash", ".zsh",
-    ".sql", ".html", ".htm", ".css", ".scss", ".xml", ".svg",
-    ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
-    ".md", ".markdown", ".txt",
-    ".env.example", ".gitignore", ".dockerignore",
-    "Dockerfile", "Makefile", "CMakeLists.txt",
-})
+CODE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".pyw",
+        ".js",
+        ".mjs",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".java",
+        ".go",
+        ".rs",
+        ".c",
+        ".cpp",
+        ".cxx",
+        ".cc",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".kt",
+        ".scala",
+        ".dart",
+        ".lua",
+        ".r",
+        ".m",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".sql",
+        ".html",
+        ".htm",
+        ".css",
+        ".scss",
+        ".xml",
+        ".svg",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".md",
+        ".markdown",
+        ".txt",
+        ".env.example",
+        ".gitignore",
+        ".dockerignore",
+        "Dockerfile",
+        "Makefile",
+        "CMakeLists.txt",
+    }
+)
 
 # Directories to skip when walking project trees
-SKIP_DIRS = frozenset({
-    ".git", ".svn", "__pycache__", ".venv", "venv",
-    "node_modules", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    "dist", "build", ".eggs", ".tox", ".nox",
-    "target", "bin", "obj", ".next", ".nuxt", ".idea", ".vscode",
-    ".polyglot-backups",  # code_applier backup files — may contain old secrets
-})
+SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".svn",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        ".eggs",
+        ".tox",
+        ".nox",
+        "target",
+        "bin",
+        "obj",
+        ".next",
+        ".nuxt",
+        ".idea",
+        ".vscode",
+        ".polyglot-backups",  # code_applier backup files — may contain old secrets
+    }
+)
 
 # Max file size for indexing / context inclusion (bytes)
 MAX_FILE_SIZE = 50_000
 
-BLOCKED_PATTERNS = frozenset({
-    "sudo",
-    "rm -rf /",
-    "rm -rf /*",
-    "curl|bash",
-    "curl|sh",
-    "wget|bash",
-    "wget|sh",
-    "chmod 777",
-    "dd if=",
-    "mkfs",
-    ":(){",  # fork bomb
-    "shutdown",
-    "reboot",
-    "poweroff",
-    "init 0",
-    "init 6",
-})
+BLOCKED_PATTERNS = frozenset(
+    {
+        "sudo",
+        "rm -rf /",
+        "rm -rf /*",
+        "curl|bash",
+        "curl|sh",
+        "wget|bash",
+        "wget|sh",
+        "chmod 777",
+        "dd if=",
+        "mkfs",
+        ":(){",  # fork bomb
+        "shutdown",
+        "reboot",
+        "poweroff",
+        "init 0",
+        "init 6",
+    }
+)

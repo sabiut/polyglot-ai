@@ -6,24 +6,41 @@ from pathlib import Path
 
 # Extensions that are NEVER writable by AI
 BLOCKED_EXTENSIONS = {
-    ".env",                             # secrets
-    ".pem", ".key", ".crt", ".p12",    # certificates
-    ".service", ".timer",              # systemd
-    ".sudoers",                        # privilege escalation
+    ".env",  # secrets
+    ".pem",
+    ".key",
+    ".crt",
+    ".p12",  # certificates
+    ".service",
+    ".timer",  # systemd
+    ".sudoers",  # privilege escalation
 }
 
 # Filenames that are NEVER writable by AI
 BLOCKED_FILENAMES = {
-    ".bashrc", ".zshrc", ".profile", ".bash_profile",
-    ".gitconfig", ".npmrc", ".pypirc",
-    "id_rsa", "id_ed25519", "authorized_keys",
-    "shadow", "passwd", "sudoers",
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    ".bash_profile",
+    ".gitconfig",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
+    "authorized_keys",
+    "shadow",
+    "passwd",
+    "sudoers",
 }
 
 # Hidden directories that ARE allowed (common repo config)
 ALLOWED_HIDDEN_DIRS = {
-    ".github", ".vscode", ".claude", ".husky",
-    ".circleci", ".gitlab",
+    ".github",
+    ".vscode",
+    ".claude",
+    ".husky",
+    ".circleci",
+    ".gitlab",
 }
 
 # Paths within allowed hidden dirs that control CI/hooks/automation.

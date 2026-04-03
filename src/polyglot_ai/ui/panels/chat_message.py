@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
 )
 
 
-
 class AvatarWidget(QWidget):
     """Small colored circle with an initial letter."""
 
@@ -54,7 +53,6 @@ class ChatMessage(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setStyleSheet("background: transparent;")
 
-
         _icon_btn_style = """
             QPushButton {
                 background-color: transparent; border: none;
@@ -85,9 +83,7 @@ class ChatMessage(QWidget):
                     "border-left: 3px solid #0078d4; }"
                 )
             else:
-                bubble.setStyleSheet(
-                    "QWidget { background-color: #303030; border-radius: 18px; }"
-                )
+                bubble.setStyleSheet("QWidget { background-color: #303030; border-radius: 18px; }")
             bubble_layout = QVBoxLayout(bubble)
             bubble_layout.setContentsMargins(14, 10, 14, 10)
             bubble_layout.setSpacing(0)
@@ -98,7 +94,9 @@ class ChatMessage(QWidget):
             self._content_label.setFrameShape(QTextBrowser.Shape.NoFrame)
             self._content_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self._content_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._content_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+            self._content_label.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+            )
             self._content_label.setMaximumWidth(560 if is_long else 480)
             self._content_label.setStyleSheet(
                 "QTextBrowser { color: #e8e8e8; font-size: 13px; background: transparent; "
@@ -125,7 +123,9 @@ class ChatMessage(QWidget):
             self._content_label.setFrameShape(QTextBrowser.Shape.NoFrame)
             self._content_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self._content_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            self._content_label.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
             self._content_label.setStyleSheet(
                 "QTextBrowser { color: #d1d5db; font-size: 13px; background: transparent; "
                 "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', sans-serif; "
@@ -146,13 +146,17 @@ class ChatMessage(QWidget):
                 self._action_bar.setContentsMargins(0, 2, 0, 0)
                 self._action_bar.setSpacing(1)
                 self._action_bar.addWidget(
-                    self._make_icon_btn("copy", "Copy", self._copy_to_clipboard))
+                    self._make_icon_btn("copy", "Copy", self._copy_to_clipboard)
+                )
                 self._action_bar.addWidget(
-                    self._make_icon_btn("thumbs_up", "Good response", self._on_thumbs_up))
+                    self._make_icon_btn("thumbs_up", "Good response", self._on_thumbs_up)
+                )
                 self._action_bar.addWidget(
-                    self._make_icon_btn("thumbs_down", "Bad response", self._on_thumbs_down))
+                    self._make_icon_btn("thumbs_down", "Bad response", self._on_thumbs_down)
+                )
                 self._action_bar.addWidget(
-                    self._make_icon_btn("regenerate", "Regenerate", self._on_regenerate))
+                    self._make_icon_btn("regenerate", "Regenerate", self._on_regenerate)
+                )
                 self._action_bar.addStretch()
                 self._action_widget = action_widget
                 action_widget.setVisible(False)
@@ -172,6 +176,7 @@ class ChatMessage(QWidget):
         """Prompt user before opening external links from AI output."""
         from PyQt6.QtWidgets import QMessageBox
         from PyQt6.QtGui import QDesktopServices
+
         url_str = url.toString()
         # Only allow http/https — block file://, javascript:, data:, etc.
         if not url_str.startswith(("http://", "https://")):
@@ -226,6 +231,7 @@ class ChatMessage(QWidget):
     def _make_icon_btn(self, icon_type: str, tooltip: str, callback) -> QWidget:
         """Create a small icon button for the action bar."""
         from PyQt6.QtWidgets import QPushButton
+
         btn = QPushButton()
         btn.setFixedSize(28, 28)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -244,6 +250,7 @@ class ChatMessage(QWidget):
     def _draw_action_icon(icon_type: str):
         """Draw small action icons matching ChatGPT style."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -288,6 +295,7 @@ class ChatMessage(QWidget):
         elif icon_type == "regenerate":
             # Circular arrow
             from PyQt6.QtCore import QRectF
+
             painter.drawArc(QRectF(3, 3, 10, 10), 30 * 16, 300 * 16)
             # Arrow head
             painter.drawLine(11, 2, 13, 5)
@@ -337,6 +345,7 @@ class ChatMessage(QWidget):
     def _create_edit_icon():
         """Draw a pencil/edit icon."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -363,6 +372,7 @@ class ChatMessage(QWidget):
     def _create_copy_icon():
         """Draw a clipboard/copy icon."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -385,6 +395,7 @@ class ChatMessage(QWidget):
     def _create_check_icon():
         """Draw a checkmark icon for 'copied' feedback."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -404,6 +415,7 @@ class ChatMessage(QWidget):
     def _copy_to_clipboard(self) -> None:
         """Copy the raw message text to clipboard."""
         from PyQt6.QtWidgets import QApplication
+
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(self._content)
@@ -411,6 +423,7 @@ class ChatMessage(QWidget):
                 self._copy_btn.setIcon(self._create_check_icon())
                 self._copy_btn.setToolTip("Copied!")
                 from PyQt6.QtCore import QTimer
+
                 QTimer.singleShot(1500, self._restore_copy_icon)
 
     def _restore_copy_icon(self) -> None:
@@ -420,6 +433,7 @@ class ChatMessage(QWidget):
 
     def contextMenuEvent(self, event) -> None:
         from PyQt6.QtWidgets import QMenu
+
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu { background: #2d2d30; border: 1px solid #454545; color: #ccc; font-size: 12px; padding: 4px 0; }
@@ -458,23 +472,64 @@ class ChatMessage(QWidget):
 
     # Language display names
     _LANG_NAMES = {
-        "py": "Python", "python": "Python", "js": "JavaScript",
-        "javascript": "JavaScript", "ts": "TypeScript", "typescript": "TypeScript",
-        "jsx": "JSX", "tsx": "TSX", "html": "HTML", "css": "CSS",
-        "scss": "SCSS", "json": "JSON", "yaml": "YAML", "yml": "YAML",
-        "toml": "TOML", "xml": "XML", "sql": "SQL", "sh": "Bash",
-        "bash": "Bash", "shell": "Shell", "zsh": "Zsh", "fish": "Fish",
-        "rust": "Rust", "rs": "Rust", "go": "Go", "golang": "Go",
-        "java": "Java", "c": "C", "cpp": "C++", "cs": "C#", "csharp": "C#",
-        "rb": "Ruby", "ruby": "Ruby", "php": "PHP", "swift": "Swift",
-        "kotlin": "Kotlin", "kt": "Kotlin", "dart": "Dart", "lua": "Lua",
-        "r": "R", "perl": "Perl", "scala": "Scala", "groovy": "Groovy",
-        "dockerfile": "Dockerfile", "docker": "Dockerfile",
-        "makefile": "Makefile", "cmake": "CMake",
-        "diff": "Diff", "patch": "Patch", "md": "Markdown",
-        "markdown": "Markdown", "ini": "INI", "cfg": "Config",
-        "env": "Env", "txt": "Text", "plaintext": "Text",
-        "graphql": "GraphQL", "proto": "Protobuf",
+        "py": "Python",
+        "python": "Python",
+        "js": "JavaScript",
+        "javascript": "JavaScript",
+        "ts": "TypeScript",
+        "typescript": "TypeScript",
+        "jsx": "JSX",
+        "tsx": "TSX",
+        "html": "HTML",
+        "css": "CSS",
+        "scss": "SCSS",
+        "json": "JSON",
+        "yaml": "YAML",
+        "yml": "YAML",
+        "toml": "TOML",
+        "xml": "XML",
+        "sql": "SQL",
+        "sh": "Bash",
+        "bash": "Bash",
+        "shell": "Shell",
+        "zsh": "Zsh",
+        "fish": "Fish",
+        "rust": "Rust",
+        "rs": "Rust",
+        "go": "Go",
+        "golang": "Go",
+        "java": "Java",
+        "c": "C",
+        "cpp": "C++",
+        "cs": "C#",
+        "csharp": "C#",
+        "rb": "Ruby",
+        "ruby": "Ruby",
+        "php": "PHP",
+        "swift": "Swift",
+        "kotlin": "Kotlin",
+        "kt": "Kotlin",
+        "dart": "Dart",
+        "lua": "Lua",
+        "r": "R",
+        "perl": "Perl",
+        "scala": "Scala",
+        "groovy": "Groovy",
+        "dockerfile": "Dockerfile",
+        "docker": "Dockerfile",
+        "makefile": "Makefile",
+        "cmake": "CMake",
+        "diff": "Diff",
+        "patch": "Patch",
+        "md": "Markdown",
+        "markdown": "Markdown",
+        "ini": "INI",
+        "cfg": "Config",
+        "env": "Env",
+        "txt": "Text",
+        "plaintext": "Text",
+        "graphql": "GraphQL",
+        "proto": "Protobuf",
     }
 
     # Syntax keywords for basic highlighting per language family
@@ -519,11 +574,18 @@ class ChatMessage(QWidget):
 
     # Map language aliases to highlighting family
     _LANG_FAMILY = {
-        "py": "python", "python": "python",
-        "js": "javascript", "javascript": "javascript",
-        "ts": "javascript", "typescript": "javascript",
-        "jsx": "javascript", "tsx": "javascript",
-        "sh": "bash", "bash": "bash", "shell": "bash", "zsh": "bash",
+        "py": "python",
+        "python": "python",
+        "js": "javascript",
+        "javascript": "javascript",
+        "ts": "javascript",
+        "typescript": "javascript",
+        "jsx": "javascript",
+        "tsx": "javascript",
+        "sh": "bash",
+        "bash": "bash",
+        "shell": "bash",
+        "zsh": "bash",
     }
 
     @classmethod
@@ -540,7 +602,9 @@ class ChatMessage(QWidget):
 
         def stash(match, color: str) -> str:
             idx = len(replacements)
-            replacements.append((f"\x01H{idx}\x01", f'<span style="color:{color};">{match.group(0)}</span>'))
+            replacements.append(
+                (f"\x01H{idx}\x01", f'<span style="color:{color};">{match.group(0)}</span>')
+            )
             return f"\x01H{idx}\x01"
 
         # Process multiline — handle line by line for comment patterns
@@ -607,18 +671,18 @@ class ChatMessage(QWidget):
                 f'border:1px solid #374151;">'
                 # Header bar — dark with language label and copy icon
                 f'<div style="background:#2f2f2f; padding:6px 12px; '
-                f'display:flex; font-size:12px; color:#b4b4b4; '
+                f"display:flex; font-size:12px; color:#b4b4b4; "
                 f'border-bottom:1px solid #374151;">'
                 f'<span style="font-family:sans-serif; font-size:12px; color:#b4b4b4;">'
-                f'{display_lang}</span>'
-                f'</div>'
+                f"{display_lang}</span>"
+                f"</div>"
                 # Code content
                 f'<div style="background:#1e1e1e; padding:12px 16px; '
-                f'font-family:\'Consolas\',\'Monaco\',\'Courier New\',monospace; '
-                f'font-size:13px; color:#d4d4d4; line-height:155%; '
+                f"font-family:'Consolas','Monaco','Courier New',monospace; "
+                f"font-size:13px; color:#d4d4d4; line-height:155%; "
                 f'white-space:pre-wrap; overflow-x:auto;">'
-                f'{highlighted}</div>'
-                f'</div>'
+                f"{highlighted}</div>"
+                f"</div>"
             )
             code_blocks.append(html)
             return f"\x00CODE{len(code_blocks) - 1}\x00"
@@ -632,7 +696,7 @@ class ChatMessage(QWidget):
         text = re.sub(
             r"`([^`]+)`",
             r'<code style="background:#2f2f2f; padding:2px 6px; '
-            r'border-radius:4px; font-family:\'Consolas\',monospace; '
+            r"border-radius:4px; font-family:\'Consolas\',monospace; "
             r'font-size:13px; color:#f97583;">\1</code>',
             text,
         )

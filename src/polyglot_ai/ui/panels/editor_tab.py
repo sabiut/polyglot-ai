@@ -176,9 +176,7 @@ class EditorTab(QWidget):
         editor.setEolVisibility(False)
 
         # Auto-complete (basic word completion)
-        editor.setAutoCompletionSource(
-            QsciScintilla.AutoCompletionSource.AcsDocument
-        )
+        editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsDocument)
         editor.setAutoCompletionThreshold(3)
 
     def _setup_lexer(self, suffix: str) -> None:
@@ -208,73 +206,73 @@ class EditorTab(QWidget):
         """Apply VS Code-inspired token colors to lexer styles."""
         # Color palette — readable on #1e1e1e background
         colors = {
-            "keyword":      "#569cd6",   # blue (softer than default)
-            "keyword2":     "#c586c0",   # purple/magenta
-            "string":       "#ce9178",   # warm orange/salmon
-            "string2":      "#ce9178",
-            "number":       "#b5cea8",   # light green
-            "comment":      "#6a9955",   # green
-            "decorator":    "#dcdcaa",   # yellow
-            "function":     "#dcdcaa",   # yellow
-            "class_name":   "#4ec9b0",   # teal
-            "operator":     "#d4d4d4",   # white
-            "identifier":   "#9cdcfe",   # light blue
-            "default":      "#d4d4d4",   # white
-            "builtin":      "#4ec9b0",   # teal
+            "keyword": "#569cd6",  # blue (softer than default)
+            "keyword2": "#c586c0",  # purple/magenta
+            "string": "#ce9178",  # warm orange/salmon
+            "string2": "#ce9178",
+            "number": "#b5cea8",  # light green
+            "comment": "#6a9955",  # green
+            "decorator": "#dcdcaa",  # yellow
+            "function": "#dcdcaa",  # yellow
+            "class_name": "#4ec9b0",  # teal
+            "operator": "#d4d4d4",  # white
+            "identifier": "#9cdcfe",  # light blue
+            "default": "#d4d4d4",  # white
+            "builtin": "#4ec9b0",  # teal
         }
 
         if isinstance(lexer, QsciLexerPython):
             color_map = {
-                0: colors["default"],       # Default
-                1: colors["comment"],       # Comment
-                2: colors["number"],        # Number
-                3: colors["string"],        # DoubleQuotedString
-                4: colors["string"],        # SingleQuotedString
-                5: colors["keyword"],       # Keyword
-                6: colors["string"],        # TripleSingleQuotedString
-                7: colors["string"],        # TripleDoubleQuotedString
-                8: colors["function"],      # ClassName
-                9: colors["function"],      # FunctionMethodName
-                10: colors["operator"],     # Operator
-                11: colors["identifier"],   # Identifier
-                12: colors["comment"],      # CommentBlock
-                13: colors["string"],       # UnclosedString
-                14: colors["decorator"],    # HighlightedIdentifier
-                15: colors["decorator"],    # Decorator
+                0: colors["default"],  # Default
+                1: colors["comment"],  # Comment
+                2: colors["number"],  # Number
+                3: colors["string"],  # DoubleQuotedString
+                4: colors["string"],  # SingleQuotedString
+                5: colors["keyword"],  # Keyword
+                6: colors["string"],  # TripleSingleQuotedString
+                7: colors["string"],  # TripleDoubleQuotedString
+                8: colors["function"],  # ClassName
+                9: colors["function"],  # FunctionMethodName
+                10: colors["operator"],  # Operator
+                11: colors["identifier"],  # Identifier
+                12: colors["comment"],  # CommentBlock
+                13: colors["string"],  # UnclosedString
+                14: colors["decorator"],  # HighlightedIdentifier
+                15: colors["decorator"],  # Decorator
             }
         elif isinstance(lexer, QsciLexerJavaScript):
             color_map = {
                 0: colors["default"],
-                1: colors["comment"],       # Comment
-                2: colors["comment"],       # CommentLine
-                3: colors["comment"],       # CommentDoc
-                4: colors["number"],        # Number
-                5: colors["keyword"],       # Keyword
-                6: colors["string"],        # DoubleQuotedString
-                7: colors["string"],        # SingleQuotedString
-                10: colors["operator"],     # Operator
-                11: colors["identifier"],   # Identifier
-                15: colors["comment"],      # CommentLineDoc
+                1: colors["comment"],  # Comment
+                2: colors["comment"],  # CommentLine
+                3: colors["comment"],  # CommentDoc
+                4: colors["number"],  # Number
+                5: colors["keyword"],  # Keyword
+                6: colors["string"],  # DoubleQuotedString
+                7: colors["string"],  # SingleQuotedString
+                10: colors["operator"],  # Operator
+                11: colors["identifier"],  # Identifier
+                15: colors["comment"],  # CommentLineDoc
             }
         elif isinstance(lexer, QsciLexerCSS):
             color_map = {
                 0: colors["default"],
                 1: colors["comment"],
-                2: colors["keyword"],       # Tag
-                4: colors["identifier"],    # Class selector
-                6: colors["string"],        # Value
-                8: colors["number"],        # Number
-                13: colors["keyword2"],     # Property
+                2: colors["keyword"],  # Tag
+                4: colors["identifier"],  # Class selector
+                6: colors["string"],  # Value
+                8: colors["number"],  # Number
+                13: colors["keyword2"],  # Property
             }
         elif isinstance(lexer, QsciLexerHTML):
             color_map = {
                 0: colors["default"],
-                1: colors["keyword"],       # Tag
-                2: colors["identifier"],    # UnknownTag
-                3: colors["class_name"],    # Attribute
-                6: colors["string"],        # HTMLDoubleQuotedString
-                7: colors["string"],        # HTMLSingleQuotedString
-                9: colors["comment"],       # HTMLComment
+                1: colors["keyword"],  # Tag
+                2: colors["identifier"],  # UnknownTag
+                3: colors["class_name"],  # Attribute
+                6: colors["string"],  # HTMLDoubleQuotedString
+                7: colors["string"],  # HTMLSingleQuotedString
+                9: colors["comment"],  # HTMLComment
             }
         elif isinstance(lexer, QsciLexerBash):
             color_map = {
@@ -282,17 +280,17 @@ class EditorTab(QWidget):
                 1: colors["comment"],
                 2: colors["number"],
                 3: colors["keyword"],
-                4: colors["string"],        # DoubleQuotedString
-                5: colors["string"],        # SingleQuotedString
+                4: colors["string"],  # DoubleQuotedString
+                5: colors["string"],  # SingleQuotedString
                 6: colors["operator"],
-                7: colors["identifier"],    # Identifier
-                8: colors["identifier"],    # Scalar
+                7: colors["identifier"],  # Identifier
+                8: colors["identifier"],  # Scalar
             }
         elif isinstance(lexer, QsciLexerSQL):
             color_map = {
                 0: colors["default"],
                 1: colors["comment"],
-                2: colors["comment"],       # CommentLine
+                2: colors["comment"],  # CommentLine
                 5: colors["keyword"],
                 6: colors["string"],
                 7: colors["string"],
@@ -358,9 +356,7 @@ class EditorTab(QWidget):
         if self._file_path is None:
             return False
         try:
-            self._file_path.write_text(
-                self._editor.text(), encoding="utf-8"
-            )
+            self._file_path.write_text(self._editor.text(), encoding="utf-8")
             self._editor.setModified(False)
             self._is_modified = False
             logger.info("Saved file: %s", self._file_path)
@@ -403,7 +399,7 @@ class EditorTab(QWidget):
             lines = text.split("\n")
 
             # Get prefix (up to cursor) and suffix (after cursor)
-            prefix_lines = lines[max(0, line - 50):line]
+            prefix_lines = lines[max(0, line - 50) : line]
             if line < len(lines):
                 prefix_lines.append(lines[line][:col])
             prefix = "\n".join(prefix_lines)
@@ -411,18 +407,27 @@ class EditorTab(QWidget):
             suffix_lines = []
             if line < len(lines):
                 suffix_lines.append(lines[line][col:])
-            suffix_lines.extend(lines[line + 1:line + 51])
+            suffix_lines.extend(lines[line + 1 : line + 51])
             suffix = "\n".join(suffix_lines)
 
             # Determine language from file extension
             language = "text"
             if self._file_path:
                 ext_map = {
-                    ".py": "python", ".js": "javascript", ".ts": "typescript",
-                    ".html": "html", ".css": "css", ".json": "json",
-                    ".go": "go", ".rs": "rust", ".java": "java",
-                    ".sh": "bash", ".sql": "sql", ".yaml": "yaml",
-                    ".c": "c", ".cpp": "cpp",
+                    ".py": "python",
+                    ".js": "javascript",
+                    ".ts": "typescript",
+                    ".html": "html",
+                    ".css": "css",
+                    ".json": "json",
+                    ".go": "go",
+                    ".rs": "rust",
+                    ".java": "java",
+                    ".sh": "bash",
+                    ".sql": "sql",
+                    ".yaml": "yaml",
+                    ".c": "c",
+                    ".cpp": "cpp",
                 }
                 language = ext_map.get(self._file_path.suffix.lower(), "text")
 
@@ -465,7 +470,8 @@ class EditorTab(QWidget):
             return
         self._completion_annotation_line = line
         self._editor.annotate(
-            line, f"  💡 {preview}  (Tab to accept)",
+            line,
+            f"  💡 {preview}  (Tab to accept)",
             self._editor.SendScintilla(self._editor.SCI_GETSTYLEAT, 0),
         )
 
@@ -477,9 +483,13 @@ class EditorTab(QWidget):
     def keyPressEvent(self, event) -> None:
         """Override to handle Tab for accepting completions."""
         from PyQt6.QtCore import Qt
-        if (event.key() == Qt.Key.Key_Tab
-                and self._completion_annotation_line is not None
-                and self._completion_task and self._completion_task.done()):
+
+        if (
+            event.key() == Qt.Key.Key_Tab
+            and self._completion_annotation_line is not None
+            and self._completion_task
+            and self._completion_task.done()
+        ):
             # Accept the completion (insert the text)
             self._clear_completion_annotation()
             # The actual insertion would need the full completion text

@@ -17,6 +17,7 @@ async def file_write(sandbox, file_ops, args: dict) -> str:
     content = args.get("content", "")
 
     from polyglot_ai.core.file_safety import validate_python_syntax, is_sensitive_path
+
     if is_sensitive_path(path):
         return (
             f"Error: '{path}' is a CI/workflow/hooks config path. "
@@ -31,6 +32,7 @@ async def file_write(sandbox, file_ops, args: dict) -> str:
     resolved = sandbox.validate_path(path)
     if resolved.is_file():
         from polyglot_ai.core.ai.code_applier import _create_backup
+
         _create_backup(resolved)
 
     file_ops.write(path, content)
@@ -46,6 +48,7 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         return "Error: No file path provided"
 
     from polyglot_ai.core.file_safety import is_sensitive_path
+
     if is_sensitive_path(path):
         return (
             f"Error: '{path}' is a CI/workflow/hooks config path. "
@@ -71,6 +74,7 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         new_content = content.replace(old_text, new_text, 1)
 
         from polyglot_ai.core.ai.code_applier import _create_backup
+
         _create_backup(resolved)
 
         file_ops.write(path, new_content)

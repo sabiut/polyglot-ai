@@ -180,6 +180,7 @@ class ContextBuilder:
             # Check scripts
             try:
                 import json as _json
+
                 pkg = _json.loads((root / "package.json").read_text(encoding="utf-8"))
                 scripts = pkg.get("scripts", {})
                 if "test" in scripts:
@@ -228,8 +229,15 @@ class ContextBuilder:
 
         # Priority files to always include
         priority = [
-            "pyproject.toml", "package.json", "Cargo.toml", "go.mod",
-            "Makefile", "Dockerfile", "README.md", "setup.py", "setup.cfg",
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "Makefile",
+            "Dockerfile",
+            "README.md",
+            "setup.py",
+            "setup.cfg",
         ]
 
         files_to_read: list[Path] = []
@@ -264,7 +272,8 @@ class ContextBuilder:
                     rel = file_path.relative_to(self._project_root)
                     logger.warning(
                         "Skipping %s from AI context: detected %d secret pattern(s)",
-                        rel, len(findings),
+                        rel,
+                        len(findings),
                     )
                     continue
 
@@ -291,8 +300,7 @@ class ContextBuilder:
                 if entry.is_file():
                     if is_secret_file(entry):
                         continue  # Never send secrets to AI providers
-                    if (entry.suffix in CODE_EXTENSIONS
-                            or entry.name in CODE_EXTENSIONS):
+                    if entry.suffix in CODE_EXTENSIONS or entry.name in CODE_EXTENSIONS:
                         files.append(entry)
                 elif entry.is_dir():
                     files.extend(self._walk_files(entry, depth - 1))

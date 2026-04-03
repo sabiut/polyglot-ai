@@ -177,9 +177,12 @@ class ActivityBarButton(QWidget):
         cable.moveTo(ox + 12, oy + 15)
         cable.lineTo(ox + 12, oy + 19)
         cable.cubicTo(
-            ox + 12, oy + 23,
-            ox + 12, oy + 23,
-            ox + 12, oy + 23,
+            ox + 12,
+            oy + 23,
+            ox + 12,
+            oy + 23,
+            ox + 12,
+            oy + 23,
         )
         p.drawPath(cable)
         p.drawLine(QPointF(ox + 12, oy + 15), QPointF(ox + 12, oy + 23))
@@ -287,11 +290,11 @@ class ActivityBar(QWidget):
 
         # Update active state
         for key, btn in self._buttons.items():
-            btn.active = (key == view_name)
+            btn.active = key == view_name
 
         self.view_changed.emit(view_name)
 
     def set_active(self, view_name: str) -> None:
         """Programmatically set the active view."""
         for key, btn in self._buttons.items():
-            btn.active = (key == view_name)
+            btn.active = key == view_name

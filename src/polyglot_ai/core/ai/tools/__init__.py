@@ -82,43 +82,55 @@ class ToolRegistry:
             # File tools
             if tool_name == "file_read":
                 from .file_tools import file_read
+
                 return await file_read(self._file_ops, args)
             elif tool_name == "file_write":
                 from .file_tools import file_write
+
                 return await file_write(self._sandbox, self._file_ops, args)
             elif tool_name == "file_patch":
                 from .file_tools import file_patch
+
                 return await file_patch(self._sandbox, self._file_ops, args)
             elif tool_name == "file_search":
                 from .file_tools import file_search
+
                 return await file_search(self._file_ops, args)
             elif tool_name == "list_directory":
                 from .file_tools import list_directory
+
                 return await list_directory(self._file_ops, args)
 
             # Shell tools
             elif tool_name == "shell_exec":
                 from .shell_tools import shell_exec
+
                 return await shell_exec(self._sandbox, args)
             elif tool_name == "web_search":
                 from .shell_tools import web_search
+
                 return await web_search(args)
 
             # Git tools
             elif tool_name == "git_status":
                 from .git_tools import git_status
+
                 return await git_status(self._sandbox, args)
             elif tool_name == "git_diff":
                 from .git_tools import git_diff
+
                 return await git_diff(self._sandbox, args)
             elif tool_name == "git_log":
                 from .git_tools import git_log
+
                 return await git_log(self._sandbox, args)
             elif tool_name == "git_commit":
                 from .git_tools import git_commit
+
                 return await git_commit(self._sandbox, args)
             elif tool_name == "git_show_file":
                 from .git_tools import git_show_file
+
                 return await git_show_file(self._sandbox, args)
 
             # Plan tool

@@ -289,12 +289,18 @@ TOOL_DEFINITIONS = [
 # Any tool not listed in either set defaults to REQUIRES_APPROVAL (fail-safe).
 
 AUTO_APPROVE = {
-    "file_read", "file_search", "list_directory",
-    "git_status", "git_diff", "git_log", "git_show_file",
+    "file_read",
+    "file_search",
+    "list_directory",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_show_file",
     "create_plan",
 }
 REQUIRES_APPROVAL = {
-    "file_write", "file_patch",
+    "file_write",
+    "file_patch",
     "shell_exec",
     "git_commit",
     "web_search",  # network access — user should approve

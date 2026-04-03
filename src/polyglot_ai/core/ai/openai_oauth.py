@@ -70,6 +70,7 @@ class OpenAIOAuthClient(AIProvider):
 
         # Security: reject symlinks and files not owned by current user
         from polyglot_ai.core.security import check_secure_file
+
         secure, reason = check_secure_file(CODEX_AUTH_FILE)
         if not secure:
             logger.warning("Insecure auth file: %s — %s", CODEX_AUTH_FILE, reason)
@@ -136,6 +137,7 @@ class OpenAIOAuthClient(AIProvider):
             return
         try:
             from polyglot_ai.core.security import secure_write
+
             data = json.loads(CODEX_AUTH_FILE.read_text())
             if "tokens" in data and isinstance(data["tokens"], dict):
                 data["tokens"]["access_token"] = self._access_token
@@ -225,13 +227,17 @@ class OpenAIOAuthClient(AIProvider):
                     input_messages.append({"role": role, "content": parts})
                 else:
                     ct = "input_text" if role == "user" else "output_text"
-                    input_messages.append({
-                        "role": role,
-                        "content": [{"type": ct, "text": str(content)}],
-                    })
+                    input_messages.append(
+                        {
+                            "role": role,
+                            "content": [{"type": ct, "text": str(content)}],
+                        }
+                    )
 
         if not input_messages:
-            input_messages = [{"role": "user", "content": [{"type": "input_text", "text": "Hello"}]}]
+            input_messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Hello"}]}
+            ]
 
         payload = {
             "model": model,
@@ -247,12 +253,14 @@ class OpenAIOAuthClient(AIProvider):
             for tool in tools:
                 if tool.get("type") == "function":
                     fn = tool["function"]
-                    responses_tools.append({
-                        "type": "function",
-                        "name": fn["name"],
-                        "description": fn.get("description", ""),
-                        "parameters": fn.get("parameters", {}),
-                    })
+                    responses_tools.append(
+                        {
+                            "type": "function",
+                            "name": fn["name"],
+                            "description": fn.get("description", ""),
+                            "parameters": fn.get("parameters", {}),
+                        }
+                    )
             if responses_tools:
                 payload["tools"] = responses_tools
 
@@ -271,8 +279,12 @@ class OpenAIOAuthClient(AIProvider):
                         if resp.status_code == 401:
                             if await self._refresh_access_token():
                                 async for chunk in self.stream_chat(
-                                    messages, model, tools, temperature,
-                                    max_tokens, system_prompt,
+                                    messages,
+                                    model,
+                                    tools,
+                                    temperature,
+                                    max_tokens,
+                                    system_prompt,
                                 ):
                                     yield chunk
                                 return
@@ -300,14 +312,14 @@ class OpenAIOAuthClient(AIProvider):
                             if status == 403:
                                 user_msg = "Access denied. Check your subscription status."
                             elif status == 422:
-                                user_msg = "Invalid request. The model may not support this operation."
+                                user_msg = (
+                                    "Invalid request. The model may not support this operation."
+                                )
                             elif 500 <= status < 600:
                                 user_msg = "Provider server error. Please try again later."
                             else:
                                 user_msg = f"Provider returned HTTP {status}. See logs for details."
-                            yield StreamChunk(
-                                delta_content=f"\n\n**Error:** {user_msg}"
-                            )
+                            yield StreamChunk(delta_content=f"\n\n**Error:** {user_msg}")
                             return
 
                         # Track unique tool call indices by call_id so
@@ -331,8 +343,11 @@ class OpenAIOAuthClient(AIProvider):
                             event_type = data.get("type", "")
                             # Log tool-related events for debugging
                             if "function_call" in event_type or "output_item" in event_type:
-                                logger.debug("Responses API event: %s data_keys=%s",
-                                             event_type, list(data.keys())[:10])
+                                logger.debug(
+                                    "Responses API event: %s data_keys=%s",
+                                    event_type,
+                                    list(data.keys())[:10],
+                                )
                             if event_type == "response.output_text.delta":
                                 delta = data.get("delta", "")
                                 if delta:
@@ -352,14 +367,16 @@ class OpenAIOAuthClient(AIProvider):
                                         call_id_names[call_id] = name
                                     tidx = call_id_to_idx.get(call_id, 0)
                                     yield StreamChunk(
-                                        tool_calls=[{
-                                            "index": tidx,
-                                            "id": call_id,
-                                            "function": {
-                                                "name": name,
-                                                "arguments": "",
-                                            },
-                                        }],
+                                        tool_calls=[
+                                            {
+                                                "index": tidx,
+                                                "id": call_id,
+                                                "function": {
+                                                    "name": name,
+                                                    "arguments": "",
+                                                },
+                                            }
+                                        ],
                                     )
 
                             elif event_type == "response.function_call_arguments.delta":
@@ -371,14 +388,16 @@ class OpenAIOAuthClient(AIProvider):
                                 name = data.get("name") or call_id_names.get(call_id)
                                 call_id_has_deltas.add(call_id)
                                 yield StreamChunk(
-                                    tool_calls=[{
-                                        "index": tidx,
-                                        "id": call_id,
-                                        "function": {
-                                            "name": name,
-                                            "arguments": data.get("delta", ""),
-                                        },
-                                    }],
+                                    tool_calls=[
+                                        {
+                                            "index": tidx,
+                                            "id": call_id,
+                                            "function": {
+                                                "name": name,
+                                                "arguments": data.get("delta", ""),
+                                            },
+                                        }
+                                    ],
                                 )
 
                             elif event_type == "response.function_call_arguments.done":
@@ -393,14 +412,16 @@ class OpenAIOAuthClient(AIProvider):
                                     tidx = call_id_to_idx[call_id]
                                     name = data.get("name") or call_id_names.get(call_id, "")
                                     yield StreamChunk(
-                                        tool_calls=[{
-                                            "index": tidx,
-                                            "id": call_id,
-                                            "function": {
-                                                "name": name,
-                                                "arguments": data.get("arguments", ""),
-                                            },
-                                        }],
+                                        tool_calls=[
+                                            {
+                                                "index": tidx,
+                                                "id": call_id,
+                                                "function": {
+                                                    "name": name,
+                                                    "arguments": data.get("arguments", ""),
+                                                },
+                                            }
+                                        ],
                                     )
 
                             elif event_type == "response.output_item.done":
@@ -416,38 +437,44 @@ class OpenAIOAuthClient(AIProvider):
                                             next_tool_idx += 1
                                         tidx = call_id_to_idx[call_id]
                                         yield StreamChunk(
-                                            tool_calls=[{
-                                                "index": tidx,
-                                                "id": call_id,
-                                                "function": {
-                                                    "name": name,
-                                                    "arguments": item.get("arguments", ""),
-                                                },
-                                            }],
+                                            tool_calls=[
+                                                {
+                                                    "index": tidx,
+                                                    "id": call_id,
+                                                    "function": {
+                                                        "name": name,
+                                                        "arguments": item.get("arguments", ""),
+                                                    },
+                                                }
+                                            ],
                                             finish_reason="tool_calls",
                                         )
                                     else:
                                         tidx = call_id_to_idx.get(call_id, 0)
                                         yield StreamChunk(
-                                            tool_calls=[{
-                                                "index": tidx,
-                                                "id": call_id,
-                                                "function": {
-                                                    "name": name,
-                                                    "arguments": "",
-                                                },
-                                            }],
+                                            tool_calls=[
+                                                {
+                                                    "index": tidx,
+                                                    "id": call_id,
+                                                    "function": {
+                                                        "name": name,
+                                                        "arguments": "",
+                                                    },
+                                                }
+                                            ],
                                             finish_reason="tool_calls",
                                         )
 
                             elif event_type == "response.completed":
                                 usage = data.get("response", {}).get("usage", {})
                                 if usage:
-                                    yield StreamChunk(usage={
-                                        "prompt_tokens": usage.get("input_tokens", 0),
-                                        "completion_tokens": usage.get("output_tokens", 0),
-                                        "total_tokens": usage.get("total_tokens", 0),
-                                    })
+                                    yield StreamChunk(
+                                        usage={
+                                            "prompt_tokens": usage.get("input_tokens", 0),
+                                            "completion_tokens": usage.get("output_tokens", 0),
+                                            "total_tokens": usage.get("total_tokens", 0),
+                                        }
+                                    )
 
                 self._event_bus.emit(EVT_AI_STREAM_DONE)
                 return  # Success — exit retry loop
@@ -457,7 +484,10 @@ class OpenAIOAuthClient(AIProvider):
                     wait = 3 * (attempt + 1)
                     logger.warning(
                         "Connection failed (attempt %d/%d): %s. Retrying in %ds...",
-                        attempt + 1, max_retries, type(e).__name__, wait,
+                        attempt + 1,
+                        max_retries,
+                        type(e).__name__,
+                        wait,
                     )
                     await asyncio.sleep(wait)
                 else:
@@ -467,9 +497,7 @@ class OpenAIOAuthClient(AIProvider):
                 error_msg = sanitize_error(str(e))
                 logger.exception("OpenAI subscription streaming error")
                 self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
-                yield StreamChunk(
-                    delta_content=f"\n\n**Error:** {error_msg}"
-                )
+                yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg}")
                 return
 
         # All retries exhausted
@@ -492,7 +520,9 @@ class OpenAIOAuthClient(AIProvider):
                     json={
                         "model": "gpt-5.4-mini",
                         "instructions": "Be brief.",
-                        "input": [{"role": "user", "content": [{"type": "input_text", "text": "Say ok"}]}],
+                        "input": [
+                            {"role": "user", "content": [{"type": "input_text", "text": "Say ok"}]}
+                        ],
                         "store": False,
                         "stream": True,
                     },
@@ -500,8 +530,11 @@ class OpenAIOAuthClient(AIProvider):
                     if resp.status_code == 200:
                         return True, "Connected via ChatGPT subscription"
                     body = await resp.aread()
-                    logger.error("OpenAI test_connection failed %d: %s",
-                                 resp.status_code, sanitize_error(body.decode(errors="replace")[:500]))
+                    logger.error(
+                        "OpenAI test_connection failed %d: %s",
+                        resp.status_code,
+                        sanitize_error(body.decode(errors="replace")[:500]),
+                    )
                     return False, f"HTTP {resp.status_code}: Connection test failed"
         except Exception as e:
             return False, sanitize_error(str(e))
@@ -526,6 +559,7 @@ class OpenAIOAuthClient(AIProvider):
         if clear_disk and CODEX_AUTH_FILE.exists():
             try:
                 from polyglot_ai.core.security import secure_write
+
                 data = json.loads(CODEX_AUTH_FILE.read_text())
                 if "tokens" in data and isinstance(data["tokens"], dict):
                     data["tokens"]["access_token"] = None

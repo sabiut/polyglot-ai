@@ -188,15 +188,17 @@ class ReviewEngine:
         findings: list[ReviewFinding] = []
         for f in data.get("findings", []):
             try:
-                findings.append(ReviewFinding(
-                    file=f.get("file", "unknown"),
-                    line=int(f.get("line", 0)),
-                    severity=Severity(f.get("severity", "info")),
-                    category=Category(f.get("category", "other")),
-                    title=f.get("title", ""),
-                    body=f.get("body", ""),
-                    suggestion=f.get("suggestion"),
-                ))
+                findings.append(
+                    ReviewFinding(
+                        file=f.get("file", "unknown"),
+                        line=int(f.get("line", 0)),
+                        severity=Severity(f.get("severity", "info")),
+                        category=Category(f.get("category", "other")),
+                        title=f.get("title", ""),
+                        body=f.get("body", ""),
+                        suggestion=f.get("suggestion"),
+                    )
+                )
             except (ValueError, KeyError) as e:
                 logger.warning("Skipping malformed finding: %s", e)
 
@@ -226,7 +228,10 @@ async def get_git_diff(project_root: str, mode: str = "working") -> str:
         # Try main, then master
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "rev-parse", "--verify", "main",
+                "git",
+                "rev-parse",
+                "--verify",
+                "main",
                 cwd=project_root,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

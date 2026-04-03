@@ -82,8 +82,7 @@ class PlanExecutor:
         """Execute a single plan step with tool calling loop."""
         # Build step prompt
         step_prompt = (
-            f"Execute step {step.index + 1}: {step.title}\n\n"
-            f"Description: {step.description}\n"
+            f"Execute step {step.index + 1}: {step.title}\n\nDescription: {step.description}\n"
         )
         if step.files_affected:
             step_prompt += f"Files: {', '.join(step.files_affected)}\n"
@@ -183,8 +182,10 @@ class PlanExecutor:
                 else:
                     result = "No tool registry available"
 
-                self._messages.append({
-                    "role": "tool",
-                    "content": result,
-                    "tool_call_id": tool_call_id,
-                })
+                self._messages.append(
+                    {
+                        "role": "tool",
+                        "content": result,
+                        "tool_call_id": tool_call_id,
+                    }
+                )

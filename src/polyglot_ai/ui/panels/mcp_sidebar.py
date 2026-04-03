@@ -111,8 +111,11 @@ class MCPSidebar(QWidget):
 
         for cfg in configs:
             is_connected = cfg.name in connected
-            tools = [t for t in self._mcp_client.available_tools.values()
-                     if t.server_name == cfg.name] if is_connected else []
+            tools = (
+                [t for t in self._mcp_client.available_tools.values() if t.server_name == cfg.name]
+                if is_connected
+                else []
+            )
 
             card = self._create_server_item(cfg.name, is_connected, len(tools))
             self._content_layout.addWidget(card)
@@ -128,8 +131,7 @@ class MCPSidebar(QWidget):
         item = QWidget()
         item.setFixedHeight(32)
         item.setStyleSheet(
-            "QWidget { background: transparent; }"
-            "QWidget:hover { background: #2a2d2e; }"
+            "QWidget { background: transparent; }QWidget:hover { background: #2a2d2e; }"
         )
         layout = QHBoxLayout(item)
         layout.setContentsMargins(12, 0, 8, 0)
@@ -139,8 +141,7 @@ class MCPSidebar(QWidget):
         dot = QLabel("●")
         dot.setFixedWidth(12)
         dot.setStyleSheet(
-            f"color: {'#4ec9b0' if connected else '#666'}; "
-            f"font-size: 8px; background: transparent;"
+            f"color: {'#4ec9b0' if connected else '#666'}; font-size: 8px; background: transparent;"
         )
         layout.addWidget(dot)
 
@@ -171,8 +172,7 @@ class MCPSidebar(QWidget):
         item.setFixedHeight(24)
         item.setToolTip(description)
         item.setStyleSheet(
-            "QWidget { background: transparent; }"
-            "QWidget:hover { background: #2a2d2e; }"
+            "QWidget { background: transparent; }QWidget:hover { background: #2a2d2e; }"
         )
         layout = QHBoxLayout(item)
         layout.setContentsMargins(30, 0, 8, 0)

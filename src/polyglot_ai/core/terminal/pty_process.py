@@ -65,9 +65,7 @@ class PtyProcess:
             fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
             # Start reader thread
-            self._reader_thread = threading.Thread(
-                target=self._read_loop, daemon=True
-            )
+            self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
             self._reader_thread.start()
             logger.info("PTY started: pid=%d, shell=%s", pid, shell)
 
@@ -83,9 +81,7 @@ class PtyProcess:
                     try:
                         data = os.read(fd, 65536)
                         if data:
-                            self._event_bus.emit(
-                                EVT_TERMINAL_OUTPUT, data=data
-                            )
+                            self._event_bus.emit(EVT_TERMINAL_OUTPUT, data=data)
                         else:
                             # EOF — process exited
                             break

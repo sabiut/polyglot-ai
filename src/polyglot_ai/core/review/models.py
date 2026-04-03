@@ -36,6 +36,7 @@ class FileStatus(str, Enum):
 @dataclass
 class DiffHunk:
     """A single hunk in a unified diff."""
+
     old_start: int
     old_count: int
     new_start: int
@@ -77,6 +78,7 @@ class DiffHunk:
 @dataclass
 class DiffFile:
     """A single file's diff."""
+
     path: str
     status: FileStatus
     old_path: str | None = None  # For renames
@@ -92,6 +94,7 @@ class DiffFile:
 @dataclass
 class ReviewFinding:
     """A single review finding/comment."""
+
     file: str
     line: int
     severity: Severity
@@ -104,6 +107,7 @@ class ReviewFinding:
 @dataclass
 class ReviewResult:
     """Complete review result."""
+
     summary: str
     findings: list[ReviewFinding] = field(default_factory=list)
     files_reviewed: int = 0

@@ -16,12 +16,14 @@ def parse_plan_from_tool_call(arguments: str, original_request: str = "") -> Pla
     data = json.loads(arguments)
     steps = []
     for i, step_data in enumerate(data.get("steps", [])):
-        steps.append(PlanStep(
-            index=i,
-            title=step_data.get("title", f"Step {i + 1}"),
-            description=step_data.get("description", ""),
-            files_affected=step_data.get("files_affected", []),
-        ))
+        steps.append(
+            PlanStep(
+                index=i,
+                title=step_data.get("title", f"Step {i + 1}"),
+                description=step_data.get("description", ""),
+                files_affected=step_data.get("files_affected", []),
+            )
+        )
     return Plan(
         title=data.get("title", "Implementation Plan"),
         summary=data.get("summary", ""),
@@ -43,9 +45,9 @@ def parse_plan_from_markdown(text: str, original_request: str = "") -> Plan | No
 
     # Find numbered steps
     step_pattern = re.compile(
-        r"^(\d+)[.)]\s+"              # Step number
+        r"^(\d+)[.)]\s+"  # Step number
         r"(?:\*\*(.+?)\*\*\s*[-—:]?\s*)?"  # Optional bold title
-        r"(.+)$",                      # Description
+        r"(.+)$",  # Description
         re.MULTILINE,
     )
 
@@ -56,12 +58,14 @@ def parse_plan_from_markdown(text: str, original_request: str = "") -> Plan | No
         description = match.group(3).strip()
         files = extract_file_paths(description)
 
-        steps.append(PlanStep(
-            index=idx,
-            title=step_title[:80],
-            description=description,
-            files_affected=files,
-        ))
+        steps.append(
+            PlanStep(
+                index=idx,
+                title=step_title[:80],
+                description=description,
+                files_affected=files,
+            )
+        )
 
     if not steps:
         return None

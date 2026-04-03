@@ -32,8 +32,12 @@ MCP_CATALOG = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.1.14"],
         "config_fields": [
-            {"key": "path", "label": "Allowed Directory", "type": "directory",
-             "description": "Directory the server can access"},
+            {
+                "key": "path",
+                "label": "Allowed Directory",
+                "type": "directory",
+                "description": "Directory the server can access",
+            },
         ],
     },
     {
@@ -62,8 +66,12 @@ MCP_CATALOG = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-github@2025.1.14"],
         "config_fields": [
-            {"key": "GITHUB_PERSONAL_ACCESS_TOKEN", "label": "GitHub Token",
-             "type": "password", "description": "Personal access token from github.com/settings/tokens"},
+            {
+                "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
+                "label": "GitHub Token",
+                "type": "password",
+                "description": "Personal access token from github.com/settings/tokens",
+            },
         ],
     },
     {
@@ -83,9 +91,12 @@ MCP_CATALOG = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-postgres@2025.1.14"],
         "config_fields": [
-            {"key": "connection_string", "label": "Connection String",
-             "type": "password",
-             "description": "postgresql://user:pass@host:5432/dbname (stored securely, passed via env)"},
+            {
+                "key": "connection_string",
+                "label": "Connection String",
+                "type": "password",
+                "description": "postgresql://user:pass@host:5432/dbname (stored securely, passed via env)",
+            },
         ],
     },
     {
@@ -114,8 +125,12 @@ MCP_CATALOG = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-gitlab@2025.1.14"],
         "config_fields": [
-            {"key": "GITLAB_PERSONAL_ACCESS_TOKEN", "label": "GitLab Token",
-             "type": "password", "description": "Personal access token from gitlab.com/-/user_settings/personal_access_tokens"},
+            {
+                "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
+                "label": "GitLab Token",
+                "type": "password",
+                "description": "Personal access token from gitlab.com/-/user_settings/personal_access_tokens",
+            },
         ],
     },
 ]
@@ -124,6 +139,7 @@ MCP_CATALOG = [
 @dataclass
 class MCPServerConfig:
     """Configuration for a single MCP server."""
+
     name: str
     command: str  # e.g. "python", "node", "npx"
     args: list[str] = field(default_factory=list)  # e.g. ["-m", "my_server"]
@@ -134,6 +150,7 @@ class MCPServerConfig:
 @dataclass
 class MCPTool:
     """A tool discovered from an MCP server."""
+
     server_name: str
     name: str
     description: str
@@ -153,7 +170,9 @@ class MCPClient:
     def add_server(self, config: MCPServerConfig) -> None:
         """Register an MCP server configuration."""
         self._servers[config.name] = config
-        logger.info("Registered MCP server: %s (%s %s)", config.name, config.command, " ".join(config.args))
+        logger.info(
+            "Registered MCP server: %s (%s %s)", config.name, config.command, " ".join(config.args)
+        )
 
     def remove_server(self, name: str) -> None:
         """Remove and disconnect an MCP server."""
@@ -179,6 +198,7 @@ class MCPClient:
 
         # Validate command and args against allowlist
         from polyglot_ai.core.security import validate_mcp_command
+
         allowed, reason = validate_mcp_command(config.command, args=config.args)
         if not allowed:
             logger.warning("MCP server '%s' blocked: %s", server_name, reason)
@@ -193,6 +213,7 @@ class MCPClient:
             if command in ("uvx", "uv"):
                 import shutil
                 import sys
+
                 if not shutil.which(command):
                     # Try the venv's bin directory
                     venv_cmd = Path(sys.executable).parent / command
@@ -203,11 +224,23 @@ class MCPClient:
 
             # Build a minimal environment — don't inherit everything from parent
             import os as _os
+
             safe_env = {}
             # Inherit only essential system env vars
-            for k in ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM",
-                       "SHELL", "TMPDIR", "XDG_RUNTIME_DIR", "DISPLAY",
-                       "WAYLAND_DISPLAY", "NODE_PATH"):
+            for k in (
+                "PATH",
+                "HOME",
+                "USER",
+                "LANG",
+                "LC_ALL",
+                "TERM",
+                "SHELL",
+                "TMPDIR",
+                "XDG_RUNTIME_DIR",
+                "DISPLAY",
+                "WAYLAND_DISPLAY",
+                "NODE_PATH",
+            ):
                 if k in _os.environ:
                     safe_env[k] = _os.environ[k]
             # Add configured env vars (secrets restored from keyring)
@@ -249,12 +282,13 @@ class MCPClient:
                     server_name=server_name,
                     name=tool.name,
                     description=tool.description or "",
-                    input_schema=tool.inputSchema if hasattr(tool, 'inputSchema') else {},
+                    input_schema=tool.inputSchema if hasattr(tool, "inputSchema") else {},
                 )
 
             logger.info(
                 "Connected to MCP server '%s': %d tools discovered",
-                server_name, len(tools_result.tools),
+                server_name,
+                len(tools_result.tools),
             )
             return True
 
@@ -263,7 +297,10 @@ class MCPClient:
             return False
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
-            logger.error("Failed to connect to MCP server '%s': %s", server_name, sanitize_error(str(e)))
+
+            logger.error(
+                "Failed to connect to MCP server '%s': %s", server_name, sanitize_error(str(e))
+            )
             return False
 
     async def disconnect(self, server_name: str) -> None:
@@ -276,7 +313,10 @@ class MCPClient:
                     await transport_ctx.__aexit__(None, None, None)
             except Exception as e:
                 from polyglot_ai.core.security import sanitize_error
-                logger.warning("Error disconnecting MCP server '%s': %s", server_name, sanitize_error(str(e)))
+
+                logger.warning(
+                    "Error disconnecting MCP server '%s': %s", server_name, sanitize_error(str(e))
+                )
             self._connected.discard(server_name)
 
             # Remove its tools
@@ -300,17 +340,20 @@ class MCPClient:
         """Get OpenAI function-calling format definitions for all MCP tools."""
         definitions = []
         for qualified_name, tool in self._tools.items():
-            definitions.append({
-                "type": "function",
-                "function": {
-                    "name": qualified_name,
-                    "description": f"[MCP:{tool.server_name}] {tool.description}",
-                    "parameters": tool.input_schema or {
-                        "type": "object",
-                        "properties": {},
+            definitions.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": qualified_name,
+                        "description": f"[MCP:{tool.server_name}] {tool.description}",
+                        "parameters": tool.input_schema
+                        or {
+                            "type": "object",
+                            "properties": {},
+                        },
                     },
-                },
-            })
+                }
+            )
         return definitions
 
     async def call_tool(self, qualified_name: str, arguments: dict) -> str:
@@ -326,10 +369,10 @@ class MCPClient:
         try:
             result = await session.call_tool(tool.name, arguments=arguments)
             # Extract text content from result
-            if hasattr(result, 'content') and result.content:
+            if hasattr(result, "content") and result.content:
                 texts = []
                 for part in result.content:
-                    if hasattr(part, 'text'):
+                    if hasattr(part, "text"):
                         texts.append(part.text)
                     else:
                         texts.append(str(part))
@@ -339,11 +382,17 @@ class MCPClient:
 
             # Redact any secrets that may appear in tool output
             from polyglot_ai.core.security import sanitize_error
+
             return sanitize_error(output, max_length=10_000)
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
-            logger.error("MCP tool call failed: %s/%s: %s",
-                         tool.server_name, tool.name, sanitize_error(str(e)))
+
+            logger.error(
+                "MCP tool call failed: %s/%s: %s",
+                tool.server_name,
+                tool.name,
+                sanitize_error(str(e)),
+            )
             return "Error calling MCP tool. See logs for details."
 
     def is_mcp_tool(self, tool_name: str) -> bool:
@@ -361,7 +410,9 @@ class MCPClient:
     def get_server_configs(self) -> list[MCPServerConfig]:
         return list(self._servers.values())
 
-    def install_from_catalog(self, catalog_id: str, config_values: dict | None = None) -> MCPServerConfig:
+    def install_from_catalog(
+        self, catalog_id: str, config_values: dict | None = None
+    ) -> MCPServerConfig:
         """Install a server from the built-in catalog and save to config.
 
         Returns the MCPServerConfig that was created.
@@ -405,18 +456,48 @@ class MCPClient:
         self._save_config()
 
     # Env var names that are explicitly non-secret (safe to store in plaintext)
-    _NON_SECRET_ENV_KEYS = frozenset({
-        "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM",
-        "NODE_ENV", "PYTHONPATH", "VIRTUAL_ENV", "SHELL",
-        "DISPLAY", "XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP",
-        "LOG_LEVEL", "DEBUG", "VERBOSE", "CI", "PORT", "HOST",
-    })
+    _NON_SECRET_ENV_KEYS = frozenset(
+        {
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            "TERM",
+            "NODE_ENV",
+            "PYTHONPATH",
+            "VIRTUAL_ENV",
+            "SHELL",
+            "DISPLAY",
+            "XDG_RUNTIME_DIR",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "LOG_LEVEL",
+            "DEBUG",
+            "VERBOSE",
+            "CI",
+            "PORT",
+            "HOST",
+        }
+    )
 
     # Patterns that indicate an env var value is likely a secret
     _SECRET_NAME_PATTERNS = (
-        "_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_CREDENTIAL",
-        "_AUTH", "_PASS", "API_KEY", "ACCESS_KEY", "PRIVATE",
-        "BEARER", "CONNECTION_STRING", "DATABASE_URL", "DB_URL",
+        "_KEY",
+        "_TOKEN",
+        "_SECRET",
+        "_PASSWORD",
+        "_CREDENTIAL",
+        "_AUTH",
+        "_PASS",
+        "API_KEY",
+        "ACCESS_KEY",
+        "PRIVATE",
+        "BEARER",
+        "CONNECTION_STRING",
+        "DATABASE_URL",
+        "DB_URL",
     )
 
     @classmethod
@@ -490,6 +571,7 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
 
     # Validate config file security before reading (may contain keyring refs)
     from polyglot_ai.core.security import check_secure_file
+
     secure, reason = check_secure_file(config_path)
     if not secure:
         if config_path.is_symlink():
@@ -506,6 +588,7 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
 
     try:
         import keyring
+
         data = json.loads(config_path.read_text(encoding="utf-8"))
         servers = []
         for name, cfg in data.get("servers", {}).items():
@@ -515,15 +598,18 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
                 if v == "__KEYRING__":
                     secret = keyring.get_password("polyglot-ai-mcp", f"{name}/{k}")
                     env[k] = secret or ""
-            servers.append(MCPServerConfig(
-                name=name,
-                command=cfg.get("command", ""),
-                args=cfg.get("args", []),
-                env=env,
-                enabled=cfg.get("enabled", True),
-            ))
+            servers.append(
+                MCPServerConfig(
+                    name=name,
+                    command=cfg.get("command", ""),
+                    args=cfg.get("args", []),
+                    env=env,
+                    enabled=cfg.get("enabled", True),
+                )
+            )
         return servers
     except Exception as e:
         from polyglot_ai.core.security import sanitize_error
+
         logger.error("Failed to load MCP config from %s: %s", config_path, sanitize_error(str(e)))
         return []

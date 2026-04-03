@@ -36,6 +36,7 @@ def _ensure_close_icons() -> str:
 
     import os
     import tempfile
+
     _ICON_DIR = tempfile.mkdtemp(prefix="codex-icons-")
 
     for name, color in [("close", "#cccccc"), ("close-hover", "#ffffff")]:
@@ -106,9 +107,7 @@ class EditorPanel(QTabWidget):
     def open_file(self, path: Path | None = None) -> None:
         """Open a file in a new tab (or switch to existing tab)."""
         if path is None:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Open File", "", "All Files (*)"
-            )
+            file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "All Files (*)")
             if not file_path:
                 return
             path = Path(file_path)
@@ -140,7 +139,9 @@ class EditorPanel(QTabWidget):
 
         # Track modification state for editable tabs
         if isinstance(tab, EditorTab):
-            tab.editor.modificationChanged.connect(lambda _: self._update_tab_title(self.indexOf(tab)))
+            tab.editor.modificationChanged.connect(
+                lambda _: self._update_tab_title(self.indexOf(tab))
+            )
         elif isinstance(tab, DocumentTab):
             tab.source_editor.textChanged.connect(lambda: self._update_tab_title(self.indexOf(tab)))
 
@@ -150,8 +151,7 @@ class EditorPanel(QTabWidget):
         """Create a new untitled file tab."""
         self._remove_placeholder()
         tab = EditorTab()
-        count = sum(1 for i in range(self.count())
-                    if self.tabText(i).startswith("Untitled"))
+        count = sum(1 for i in range(self.count()) if self.tabText(i).startswith("Untitled"))
         name = f"Untitled-{count + 1}"
         index = self.addTab(tab, name)
         self.setCurrentIndex(index)
@@ -185,9 +185,7 @@ class EditorPanel(QTabWidget):
                     self._update_tab_title(i)
 
     def _save_as(self, tab: EditorTab) -> bool:
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save File", "", "All Files (*)"
-        )
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save File", "", "All Files (*)")
         if not file_path:
             return False
         path = Path(file_path)

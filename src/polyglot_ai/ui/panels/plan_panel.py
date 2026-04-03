@@ -171,9 +171,7 @@ class PlanPanel(QWidget):
             summary_layout.addWidget(plan_summary)
 
         stats = QLabel(f"{len(plan.steps)} steps · {plan.status.value}")
-        stats.setStyleSheet(
-            "font-size: 11px; color: #666; background: transparent; border: none;"
-        )
+        stats.setStyleSheet("font-size: 11px; color: #666; background: transparent; border: none;")
         summary_layout.addWidget(stats)
 
         self._content_layout.addWidget(summary_card)
@@ -197,9 +195,7 @@ class PlanPanel(QWidget):
 
         # Update progress
         progress = self._plan.progress
-        self._progress_label.setText(
-            f"{self._plan.completed_count}/{self._plan.total_count} steps"
-        )
+        self._progress_label.setText(f"{self._plan.completed_count}/{self._plan.total_count} steps")
         self._progress_bar.setValue(int(progress * 100))
         self._progress_bar.show()
 

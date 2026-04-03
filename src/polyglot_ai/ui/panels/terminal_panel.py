@@ -130,7 +130,10 @@ class TerminalWidget(QWidget):
 
                 if bg != DEFAULT_BG:
                     painter.fillRect(
-                        x, y, self._char_width, self._char_height,
+                        x,
+                        y,
+                        self._char_width,
+                        self._char_height,
                         QColor(bg),
                     )
 
@@ -149,8 +152,10 @@ class TerminalWidget(QWidget):
                 # Underscore
                 if cell.underscore:
                     painter.drawLine(
-                        x, y + self._char_height - 1,
-                        x + self._char_width, y + self._char_height - 1,
+                        x,
+                        y + self._char_height - 1,
+                        x + self._char_width,
+                        y + self._char_height - 1,
                     )
 
         # Draw cursor
@@ -158,7 +163,10 @@ class TerminalWidget(QWidget):
             cx = self._cursor_col * self._char_width
             cy = self._cursor_row * self._char_height
             painter.fillRect(
-                cx, cy, self._char_width, self._char_height,
+                cx,
+                cy,
+                self._char_width,
+                self._char_height,
                 QColor(200, 200, 200, 128),
             )
 

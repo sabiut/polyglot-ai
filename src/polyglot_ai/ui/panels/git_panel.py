@@ -49,7 +49,9 @@ class GitPanel(QWidget):
         # Header
         header = QWidget()
         header.setFixedHeight(34)
-        header.setStyleSheet(f"background-color: {tc.get('bg_surface')}; border-bottom: 1px solid {tc.get('border_secondary')};")
+        header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 8, 0)
         title = QLabel("SOURCE CONTROL")
@@ -187,6 +189,7 @@ class GitPanel(QWidget):
             # Run git commands in a thread to avoid qasync task conflicts.
             # Qt widgets are updated via QTimer.singleShot from the thread result.
             import threading
+
             threading.Thread(
                 target=self._do_refresh_threaded,
                 daemon=True,
@@ -197,17 +200,22 @@ class GitPanel(QWidget):
     def _do_refresh_threaded(self) -> None:
         """Run git commands in a background thread, then update UI on main thread."""
         import subprocess
+
         try:
             branch = subprocess.run(
                 ["git", "branch", "--show-current"],
                 cwd=str(self._project_root),
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             ).stdout.strip()
 
             status = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=str(self._project_root),
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             ).stdout.strip()
 
             # Schedule UI update on the main thread
@@ -231,8 +239,10 @@ class GitPanel(QWidget):
 
                 if index_status in ("A", "M", "D", "R"):
                     color = {
-                        "A": tc.get("git_added"), "M": tc.get("git_modified"),
-                        "D": tc.get("git_deleted"), "R": tc.get("git_added"),
+                        "A": tc.get("git_added"),
+                        "M": tc.get("git_modified"),
+                        "D": tc.get("git_deleted"),
+                        "R": tc.get("git_added"),
                     }
                     item = QListWidgetItem(f"  {index_status}  {filepath}")
                     item.setForeground(QColor(color.get(index_status, tc.get("text_primary"))))
@@ -241,7 +251,8 @@ class GitPanel(QWidget):
 
                 if work_status in ("M", "D", "?"):
                     color = {
-                        "M": tc.get("git_modified"), "D": tc.get("git_deleted"),
+                        "M": tc.get("git_modified"),
+                        "D": tc.get("git_deleted"),
                         "?": tc.get("git_untracked"),
                     }
                     label = "U" if work_status == "?" else work_status
@@ -277,14 +288,12 @@ class GitPanel(QWidget):
 
         if staged:
             unstage = menu.addAction("Unstage")
-            unstage.triggered.connect(lambda: asyncio.ensure_future(
-                self._run_git("restore", "--staged", filepath)
-            ))
+            unstage.triggered.connect(
+                lambda: asyncio.ensure_future(self._run_git("restore", "--staged", filepath))
+            )
         else:
             stage = menu.addAction("Stage")
-            stage.triggered.connect(lambda: asyncio.ensure_future(
-                self._run_git("add", filepath)
-            ))
+            stage.triggered.connect(lambda: asyncio.ensure_future(self._run_git("add", filepath)))
 
         menu.exec(lst.viewport().mapToGlobal(pos))
 
@@ -308,7 +317,8 @@ class GitPanel(QWidget):
         if not self._project_root:
             return ""
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             cwd=str(self._project_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -48,20 +48,104 @@ _ATTACH_DIR = Path.home() / ".local" / "share" / "polyglot-ai" / "attachments"
 
 # Model capability info
 _MODEL_CAPS = {
-    "gpt-5.4": {"vision": True, "tools": True, "reasoning": False, "fast": False, "desc": "Most capable for complex tasks"},
-    "gpt-5.4-mini": {"vision": True, "tools": True, "reasoning": False, "fast": True, "desc": "Balanced speed and capability"},
-    "gpt-5.4-nano": {"vision": False, "tools": True, "reasoning": False, "fast": True, "desc": "Fastest for quick answers"},
-    "o3": {"vision": False, "tools": True, "reasoning": True, "fast": False, "desc": "Advanced reasoning model"},
-    "o3-mini": {"vision": False, "tools": True, "reasoning": True, "fast": True, "desc": "Fast reasoning model"},
-    "o4-mini": {"vision": False, "tools": True, "reasoning": True, "fast": True, "desc": "Efficient reasoning model"},
-    "claude-opus-4-6": {"vision": True, "tools": True, "reasoning": True, "fast": False, "desc": "Most capable for ambitious work"},
-    "claude-sonnet-4-6": {"vision": True, "tools": True, "reasoning": False, "fast": False, "desc": "Most efficient for everyday tasks"},
-    "claude-haiku-4-5": {"vision": True, "tools": True, "reasoning": False, "fast": True, "desc": "Fastest for quick answers"},
-    "claude-sonnet-4-5": {"vision": True, "tools": True, "reasoning": False, "fast": False, "desc": "Strong balanced model"},
-    "claude-sonnet-4-0": {"vision": True, "tools": True, "reasoning": False, "fast": False, "desc": "Reliable everyday model"},
-    "gemini-3.1-pro-preview": {"vision": True, "tools": True, "reasoning": False, "fast": False, "desc": "Most capable Gemini model"},
-    "gemini-3-flash-preview": {"vision": True, "tools": True, "reasoning": False, "fast": True, "desc": "Fast and efficient"},
-    "gemini-3.1-flash-lite-preview": {"vision": True, "tools": False, "reasoning": False, "fast": True, "desc": "Lightweight and fast"},
+    "gpt-5.4": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Most capable for complex tasks",
+    },
+    "gpt-5.4-mini": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Balanced speed and capability",
+    },
+    "gpt-5.4-nano": {
+        "vision": False,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Fastest for quick answers",
+    },
+    "o3": {
+        "vision": False,
+        "tools": True,
+        "reasoning": True,
+        "fast": False,
+        "desc": "Advanced reasoning model",
+    },
+    "o3-mini": {
+        "vision": False,
+        "tools": True,
+        "reasoning": True,
+        "fast": True,
+        "desc": "Fast reasoning model",
+    },
+    "o4-mini": {
+        "vision": False,
+        "tools": True,
+        "reasoning": True,
+        "fast": True,
+        "desc": "Efficient reasoning model",
+    },
+    "claude-opus-4-6": {
+        "vision": True,
+        "tools": True,
+        "reasoning": True,
+        "fast": False,
+        "desc": "Most capable for ambitious work",
+    },
+    "claude-sonnet-4-6": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Most efficient for everyday tasks",
+    },
+    "claude-haiku-4-5": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Fastest for quick answers",
+    },
+    "claude-sonnet-4-5": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Strong balanced model",
+    },
+    "claude-sonnet-4-0": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Reliable everyday model",
+    },
+    "gemini-3.1-pro-preview": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Most capable Gemini model",
+    },
+    "gemini-3-flash-preview": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Fast and efficient",
+    },
+    "gemini-3.1-flash-lite-preview": {
+        "vision": True,
+        "tools": False,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Lightweight and fast",
+    },
 }
 
 
@@ -132,10 +216,10 @@ class ChatPanel(QWidget):
         self._search_input.setStyleSheet(f"""
             QLineEdit {{
                 font-size: {tc.FONT_MD}px; padding: 4px 8px;
-                background: {tc.get('bg_card')}; border: 1px solid {tc.get('border_primary')};
-                border-radius: {tc.RADIUS_MD}px; color: {tc.get('text_primary')}; margin: 4px;
+                background: {tc.get("bg_card")}; border: 1px solid {tc.get("border_primary")};
+                border-radius: {tc.RADIUS_MD}px; color: {tc.get("text_primary")}; margin: 4px;
             }}
-            QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}
+            QLineEdit:focus {{ border-color: {tc.get("accent_primary")}; }}
         """)
         self._search_input.textChanged.connect(self._on_search)
         sidebar_layout.addWidget(self._search_input)
@@ -149,13 +233,13 @@ class ChatPanel(QWidget):
         self._active_category = "all"
         _cat_pill = f"""
             QPushButton {{
-                background: transparent; color: {tc.get('text_tertiary')};
+                background: transparent; color: {tc.get("text_tertiary")};
                 font-size: {tc.FONT_XS}px; border: none;
                 border-radius: {tc.RADIUS_SM}px; padding: 2px 8px;
             }}
-            QPushButton:hover {{ color: {tc.get('text_heading')}; background: {tc.get('bg_hover_subtle')}; }}
+            QPushButton:hover {{ color: {tc.get("text_heading")}; background: {tc.get("bg_hover_subtle")}; }}
             QPushButton:checked {{
-                background: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')};
+                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
             }}
         """
         self._cat_buttons = {}
@@ -173,14 +257,14 @@ class ChatPanel(QWidget):
         self._conv_list = QListWidget()
         self._conv_list.setStyleSheet(f"""
             QListWidget {{
-                font-size: {tc.FONT_MD}px; background: {tc.get('bg_surface')}; border: none;
+                font-size: {tc.FONT_MD}px; background: {tc.get("bg_surface")}; border: none;
                 outline: none;
             }}
             QListWidget::item {{
                 padding: 6px 8px; border-radius: {tc.RADIUS_SM}px; margin: 1px 4px;
             }}
-            QListWidget::item:selected {{ background: {tc.get('bg_active')}; }}
-            QListWidget::item:hover:!selected {{ background: {tc.get('bg_hover_subtle')}; }}
+            QListWidget::item:selected {{ background: {tc.get("bg_active")}; }}
+            QListWidget::item:hover:!selected {{ background: {tc.get("bg_hover_subtle")}; }}
         """)
         self._conv_list.currentRowChanged.connect(self._on_conversation_selected)
         self._conv_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -255,7 +339,9 @@ class ChatPanel(QWidget):
         # ── Attachment preview bar (hidden by default) ──
         self._attach_bar = QWidget()
         self._attach_bar.setFixedHeight(40)
-        self._attach_bar.setStyleSheet(f"background: {tc.get('bg_surface_overlay')}; border-top: 1px solid {tc.get('border_primary')};")
+        self._attach_bar.setStyleSheet(
+            f"background: {tc.get('bg_surface_overlay')}; border-top: 1px solid {tc.get('border_primary')};"
+        )
         self._attach_bar.hide()
         self._attach_bar_layout = QHBoxLayout(self._attach_bar)
         self._attach_bar_layout.setContentsMargins(12, 4, 12, 4)
@@ -275,8 +361,8 @@ class ChatPanel(QWidget):
         input_card.setObjectName("inputCard")
         input_card.setStyleSheet(f"""
             QWidget#inputCard {{
-                background-color: {tc.get('bg_chat_input')};
-                border: 1px solid {tc.get('border_input')};
+                background-color: {tc.get("bg_chat_input")};
+                border: 1px solid {tc.get("border_input")};
                 border-radius: {tc.RADIUS_LG}px;
             }}
         """)
@@ -291,9 +377,9 @@ class ChatPanel(QWidget):
         self._input.setStyleSheet(f"""
             QTextEdit {{
                 font-size: {tc.FONT_LG}px; background-color: transparent;
-                color: {tc.get('text_heading')}; border: none;
+                color: {tc.get("text_heading")}; border: none;
                 padding: 8px 14px 6px 14px;
-                selection-background-color: {tc.get('bg_active')};
+                selection-background-color: {tc.get("bg_active")};
             }}
         """)
         self._input.submit_requested.connect(self._on_send)
@@ -315,7 +401,7 @@ class ChatPanel(QWidget):
                 background-color: transparent; border: none;
                 border-radius: {tc.RADIUS_SM}px; padding: 4px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('bg_hover')}; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_hover")}; }}
         """
 
         # Attach button — painted icon
@@ -330,13 +416,14 @@ class ChatPanel(QWidget):
                 background-color: transparent; border: none;
                 border-radius: {tc.RADIUS_SM}px; padding: 4px;
             }}
-            #toolbarIconBtn:hover {{ background-color: {tc.get('bg_hover')}; }}
+            #toolbarIconBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
         """)
         self._plus_btn.clicked.connect(self._show_plus_menu)
         toolbar_layout.addWidget(self._plus_btn)
 
         # Model combo — compact
         from polyglot_ai.ui.widgets.styled_combo import StyledComboBox
+
         self._model_combo = StyledComboBox()
         self._model_combo.setFixedHeight(28)
         self._model_combo.setMaximumWidth(200)
@@ -353,14 +440,14 @@ class ChatPanel(QWidget):
         self._plan_btn.setCheckable(True)
         self._plan_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {tc.get('text_tertiary')};
-                font-size: {tc.FONT_SM}px; border: 1px solid {tc.get('border_card')};
+                background: transparent; color: {tc.get("text_tertiary")};
+                font-size: {tc.FONT_SM}px; border: 1px solid {tc.get("border_card")};
                 border-radius: {tc.RADIUS_LG}px; padding: 2px 10px;
             }}
-            QPushButton:hover {{ color: {tc.get('text_heading')}; border-color: {tc.get('border_input')}; }}
+            QPushButton:hover {{ color: {tc.get("text_heading")}; border-color: {tc.get("border_input")}; }}
             QPushButton:checked {{
-                background: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')};
-                border-color: {tc.get('accent_primary')};
+                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
+                border-color: {tc.get("accent_primary")};
             }}
         """)
         self._plan_btn.clicked.connect(self._toggle_plan_mode)
@@ -380,9 +467,9 @@ class ChatPanel(QWidget):
                 background-color: transparent; border: none;
                 border-radius: {tc.RADIUS_SM}px; padding: 4px;
             }}
-            #toolbarSearchBtn:hover {{ background-color: {tc.get('bg_hover')}; }}
+            #toolbarSearchBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
             #toolbarSearchBtn:checked {{
-                background-color: {tc.get('accent_info')};
+                background-color: {tc.get("accent_info")};
                 border-radius: {tc.RADIUS_SM}px;
             }}
         """)
@@ -402,7 +489,7 @@ class ChatPanel(QWidget):
                 background-color: transparent; border: none;
                 border-radius: {tc.RADIUS_SM}px; padding: 4px;
             }}
-            #toolbarTplBtn:hover {{ background-color: {tc.get('bg_hover')}; }}
+            #toolbarTplBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
         """)
         self._template_btn.clicked.connect(self._show_template_menu)
         toolbar_layout.addWidget(self._template_btn)
@@ -444,10 +531,10 @@ class ChatPanel(QWidget):
         self._stop_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: {tc.FONT_SM}px; font-weight: bold;
-                padding: 2px 12px; background-color: {tc.get('accent_danger')};
-                color: {tc.get('text_on_accent')}; border: none; border-radius: {tc.RADIUS_SM}px;
+                padding: 2px 12px; background-color: {tc.get("accent_danger")};
+                color: {tc.get("text_on_accent")}; border: none; border-radius: {tc.RADIUS_SM}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('accent_danger_hover')}; }}
+            QPushButton:hover {{ background-color: {tc.get("accent_danger_hover")}; }}
         """)
         self._stop_btn.clicked.connect(self._stop_generation)
         self._stop_btn.hide()
@@ -464,8 +551,8 @@ class ChatPanel(QWidget):
                 padding: 4px;
             }}
             QPushButton:hover {{ background-color: #ffffff; }}
-            QPushButton:pressed {{ background-color: {tc.get('text_primary')}; }}
-            QPushButton:disabled {{ background-color: {tc.get('bg_hover')}; }}
+            QPushButton:pressed {{ background-color: {tc.get("text_primary")}; }}
+            QPushButton:disabled {{ background-color: {tc.get("bg_hover")}; }}
         """)
         self._send_btn.clicked.connect(self._on_send)
         toolbar_layout.addWidget(self._send_btn)
@@ -491,18 +578,29 @@ class ChatPanel(QWidget):
         self._default_grouped = {
             "OpenAI": ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "o3-mini", "o4-mini"],
             "Anthropic": [
-                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
-                "claude-sonnet-4-5", "claude-sonnet-4-0",
+                "claude-opus-4-6",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+                "claude-sonnet-4-5",
+                "claude-sonnet-4-0",
             ],
-            "Google": ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
+            "Google": [
+                "gemini-3.1-pro-preview",
+                "gemini-3-flash-preview",
+                "gemini-3.1-flash-lite-preview",
+            ],
             "xAI (Grok)": [
-                "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
-                "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning",
+                "grok-4.20-0309-reasoning",
+                "grok-4.20-0309-non-reasoning",
+                "grok-4-1-fast-reasoning",
+                "grok-4-1-fast-non-reasoning",
             ],
         }
         provider_data_map = {
-            "OpenAI": "openai", "Anthropic": "anthropic",
-            "Google": "google", "xAI (Grok)": "xai",
+            "OpenAI": "openai",
+            "Anthropic": "anthropic",
+            "Google": "google",
+            "xAI (Grok)": "xai",
         }
         for provider_display, models in self._default_grouped.items():
             self._model_combo.addHeader(f"── {provider_display} ──")
@@ -586,15 +684,15 @@ class ChatPanel(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background-color: {tc.get('bg_surface_overlay')}; border: 1px solid {tc.get('border_input')};
+                background-color: {tc.get("bg_surface_overlay")}; border: 1px solid {tc.get("border_input")};
                 border-radius: 10px; padding: 6px 4px;
             }}
             QMenu::item {{
-                padding: 8px 16px 8px 12px; color: {tc.get('text_heading')};
+                padding: 8px 16px 8px 12px; color: {tc.get("text_heading")};
                 border-radius: {tc.RADIUS_MD}px; margin: 2px 4px;
             }}
-            QMenu::item:selected {{ background-color: {tc.get('bg_hover')}; }}
-            QMenu::separator {{ height: 1px; background-color: {tc.get('bg_hover')}; margin: 4px 12px; }}
+            QMenu::item:selected {{ background-color: {tc.get("bg_hover")}; }}
+            QMenu::separator {{ height: 1px; background-color: {tc.get("bg_hover")}; margin: 4px 12px; }}
         """)
 
         attach_icon = self._create_menu_icon("paperclip")
@@ -634,8 +732,10 @@ class ChatPanel(QWidget):
 
     def _attach_file(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Add files or photos", "",
-            "All Files (*);;Images (*.png *.jpg *.jpeg *.gif *.webp);;Code Files (*.py *.js *.ts *.html *.css)"
+            self,
+            "Add files or photos",
+            "",
+            "All Files (*);;Images (*.png *.jpg *.jpeg *.gif *.webp);;Code Files (*.py *.js *.ts *.html *.css)",
         )
         for f in files:
             self._add_attachment_from_path(f)
@@ -653,6 +753,7 @@ class ChatPanel(QWidget):
         # Copy to attachments dir
         _ATTACH_DIR.mkdir(parents=True, exist_ok=True)
         import uuid
+
         dest = _ATTACH_DIR / f"{uuid.uuid4().hex}_{p.name}"
         shutil.copy2(p, dest)
 
@@ -670,6 +771,7 @@ class ChatPanel(QWidget):
         """Handle image paste from clipboard."""
         _ATTACH_DIR.mkdir(parents=True, exist_ok=True)
         import uuid
+
         filename = f"pasted_{uuid.uuid4().hex[:8]}.png"
         dest = _ATTACH_DIR / filename
         pixmap.save(str(dest), "PNG")
@@ -710,19 +812,25 @@ class ChatPanel(QWidget):
             if attach["mime_type"].startswith("image/"):
                 thumb = QLabel()
                 pm = QPixmap(attach["path"]).scaled(
-                    24, 24, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
+                    24,
+                    24,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
                 )
                 thumb.setPixmap(pm)
                 chip_layout.addWidget(thumb)
 
             name = QLabel(attach["filename"][:20])
-            name.setStyleSheet(f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; background: transparent;")
+            name.setStyleSheet(
+                f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; background: transparent;"
+            )
             chip_layout.addWidget(name)
 
             size_kb = attach["size"] / 1024
             size_label = QLabel(f"({size_kb:.0f}KB)")
-            size_label.setStyleSheet(f"color: {tc.get('text_muted')}; font-size: 10px; background: transparent;")
+            size_label.setStyleSheet(
+                f"color: {tc.get('text_muted')}; font-size: 10px; background: transparent;"
+            )
             chip_layout.addWidget(size_label)
 
             remove_btn = QPushButton("✕")
@@ -756,12 +864,12 @@ class ChatPanel(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background-color: {tc.get('bg_surface_overlay')}; border: 1px solid {tc.get('border_menu')};
-                padding: 4px 0; color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px;
+                background-color: {tc.get("bg_surface_overlay")}; border: 1px solid {tc.get("border_menu")};
+                padding: 4px 0; color: {tc.get("text_primary")}; font-size: {tc.FONT_MD}px;
             }}
             QMenu::item {{ padding: 4px 20px; }}
-            QMenu::item:selected {{ background-color: {tc.get('bg_active')}; }}
-            QMenu::separator {{ height: 1px; background: {tc.get('border_menu')}; margin: 4px 8px; }}
+            QMenu::item:selected {{ background-color: {tc.get("bg_active")}; }}
+            QMenu::separator {{ height: 1px; background: {tc.get("border_menu")}; margin: 4px 8px; }}
         """)
 
         rename_act = menu.addAction("Rename...")
@@ -793,7 +901,8 @@ class ChatPanel(QWidget):
 
     def _delete_conversation(self, item: QListWidgetItem, conv_id: int) -> None:
         reply = QMessageBox.question(
-            self, "Delete Conversation",
+            self,
+            "Delete Conversation",
             f"Delete '{item.text()}'? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -825,6 +934,7 @@ class ChatPanel(QWidget):
             )
             if path:
                 Path(path).write_text(text, encoding="utf-8")
+
         asyncio.ensure_future(do_export())
 
     def _on_search(self, query: str) -> None:
@@ -844,7 +954,7 @@ class ChatPanel(QWidget):
             self._plan_btn.setText("▾ Plan ✓")
             self._plan_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {tc.get('bg_feedback_pos')}; color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_MD}px;
+                    background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
                     border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
@@ -856,12 +966,12 @@ class ChatPanel(QWidget):
             self._plan_btn.setText("▾ Plan")
             self._plan_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent; color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px;
-                    border: 1px solid {tc.get('border_card')}; border-radius: {tc.RADIUS_LG}px;
+                    background: transparent; color: {tc.get("text_tertiary")}; font-size: {tc.FONT_MD}px;
+                    border: 1px solid {tc.get("border_card")}; border-radius: {tc.RADIUS_LG}px;
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
                 }}
-                QPushButton:hover {{ background: {tc.get('bg_user_bubble_long')}; color: {tc.get('text_heading')}; border-color: #666; }}
+                QPushButton:hover {{ background: {tc.get("bg_user_bubble_long")}; color: {tc.get("text_heading")}; border-color: #666; }}
             """)
             self._input.setPlaceholderText("Reply... (Shift+Enter for new line)")
 
@@ -877,7 +987,8 @@ class ChatPanel(QWidget):
             plan = parse_plan_from_tool_call(
                 tool_call.arguments,
                 original_request=self._current_conversation.messages[-2].content
-                if len(self._current_conversation.messages) >= 2 else "",
+                if len(self._current_conversation.messages) >= 2
+                else "",
             )
         except Exception as e:
             logger.error("Failed to parse plan: %s", e)
@@ -889,7 +1000,8 @@ class ChatPanel(QWidget):
 
         # Show plan summary in chat
         step_list = "\n".join(
-            f"  {i+1}. **{s.title}**" + (f" — {', '.join(s.files_affected)}" if s.files_affected else "")
+            f"  {i + 1}. **{s.title}**"
+            + (f" — {', '.join(s.files_affected)}" if s.files_affected else "")
             for i, s in enumerate(plan.steps)
         )
         plan_summary = (
@@ -915,8 +1027,11 @@ class ChatPanel(QWidget):
 
         # Add tool result to conversation so context stays consistent
         self._current_conversation.messages.append(
-            Message(role="tool", content=f"Plan created: {plan.title} with {len(plan.steps)} steps",
-                    tool_call_id=tool_call.id)
+            Message(
+                role="tool",
+                content=f"Plan created: {plan.title} with {len(plan.steps)} steps",
+                tool_call_id=tool_call.id,
+            )
         )
 
         self._set_streaming_ui(False)
@@ -925,6 +1040,7 @@ class ChatPanel(QWidget):
     def _execute_plan(self, plan) -> None:
         """Start executing a plan — called from Plan panel."""
         import asyncio
+
         asyncio.ensure_future(self._run_plan_execution(plan))
 
     async def _run_plan_execution(self, plan) -> None:
@@ -952,6 +1068,7 @@ class ChatPanel(QWidget):
 
         # Create executor
         from polyglot_ai.core.bridge import EventBus
+
         executor = PlanExecutor(
             provider=provider,
             model_id=model_id,
@@ -981,6 +1098,7 @@ class ChatPanel(QWidget):
         # Tool approval callback
         async def on_tool_approval(tool_name, args):
             from polyglot_ai.ui.dialogs.approval_dialog import ApprovalDialog
+
             dialog = ApprovalDialog(tool_name, args, parent=self)
             return dialog.exec() == 1  # QDialog.Accepted
 
@@ -1023,18 +1141,21 @@ class ChatPanel(QWidget):
                             "github", {"GITHUB_PERSONAL_ACCESS_TOKEN": token}
                         )
                         import asyncio
+
                         asyncio.ensure_future(window._mcp_client.connect("github"))
                         self._github_btn.setText("⌥ GitHub ✓")
                         self._github_btn.setStyleSheet(f"""
                             QPushButton {{
-                                background: {tc.get('bg_feedback_pos')}; color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_MD}px;
+                                background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
                                 border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
                                 padding: 4px 12px;
                                 font-family: -apple-system, 'Segoe UI', sans-serif;
                             }}
                             QPushButton:hover {{ background: #1f4a35; }}
                         """)
-                        self._add_system_message("GitHub connected! The AI can now access your repositories.")
+                        self._add_system_message(
+                            "GitHub connected! The AI can now access your repositories."
+                        )
                     except Exception as e:
                         self._add_system_message(f"Failed to connect GitHub: {e}")
                 else:
@@ -1094,9 +1215,13 @@ class ChatPanel(QWidget):
                 for i in range(self._model_combo.count()):
                     if arg.lower() in self._model_combo.itemText(i).lower():
                         self._model_combo.setCurrentIndex(i)
-                        self._add_system_message(f"Switched to model: {self._model_combo.itemText(i).strip()}")
+                        self._add_system_message(
+                            f"Switched to model: {self._model_combo.itemText(i).strip()}"
+                        )
                         return True
-                self._add_system_message(f"Model '{arg}' not found. Available models are in the dropdown.")
+                self._add_system_message(
+                    f"Model '{arg}' not found. Available models are in the dropdown."
+                )
             else:
                 _, display = self._get_selected_model()
                 self._add_system_message(f"Current model: {display}")
@@ -1108,8 +1233,12 @@ class ChatPanel(QWidget):
 
         if cmd == "/status":
             project_root = self._get_project_root()
-            provider_count = len(self._provider_manager.get_all_providers()) if self._provider_manager else 0
-            msg_count = len(self._current_conversation.messages) if self._current_conversation else 0
+            provider_count = (
+                len(self._provider_manager.get_all_providers()) if self._provider_manager else 0
+            )
+            msg_count = (
+                len(self._current_conversation.messages) if self._current_conversation else 0
+            )
             mcp_servers = self._mcp_client.connected_servers if self._mcp_client else []
             mcp_tools = len(self._mcp_client.available_tools) if self._mcp_client else 0
             self._add_system_message(
@@ -1123,14 +1252,18 @@ class ChatPanel(QWidget):
         if cmd == "/fix":
             # Ask AI to fix the last error or a specified issue
             issue = arg or "the last error or failing test"
-            self._inject_ai_prompt(f"Please analyze and fix: {issue}. Read the relevant files, identify the problem, and propose a fix.")
+            self._inject_ai_prompt(
+                f"Please analyze and fix: {issue}. Read the relevant files, identify the problem, and propose a fix."
+            )
             return True
 
         if cmd == "/test":
             # Ask AI to run tests and handle failures
             test_cmd = arg or ""
             if test_cmd:
-                self._inject_ai_prompt(f"Run this test command: `{test_cmd}`. If it fails, analyze the output and fix the issues.")
+                self._inject_ai_prompt(
+                    f"Run this test command: `{test_cmd}`. If it fails, analyze the output and fix the issues."
+                )
             else:
                 self._inject_ai_prompt(
                     "Detect the test framework for this project (pytest, jest, go test, etc.), "
@@ -1140,13 +1273,15 @@ class ChatPanel(QWidget):
 
         if cmd == "/explain":
             target = arg or "the current project"
-            self._inject_ai_prompt(f"Explain {target} clearly and concisely. Include purpose, key components, and how they fit together.")
+            self._inject_ai_prompt(
+                f"Explain {target} clearly and concisely. Include purpose, key components, and how they fit together."
+            )
             return True
 
         if cmd == "/commit":
             msg = arg or ""
             if msg:
-                self._inject_ai_prompt(f"Stage all changes and commit with message: \"{msg}\"")
+                self._inject_ai_prompt(f'Stage all changes and commit with message: "{msg}"')
             else:
                 self._inject_ai_prompt(
                     "Look at the current git diff, generate a clear conventional commit message, "
@@ -1158,7 +1293,9 @@ class ChatPanel(QWidget):
             if arg:
                 self._inject_ai_prompt(f"Run `git {arg}` and show me the output.")
             else:
-                self._inject_ai_prompt("Show me the current git status including branch, staged/unstaged changes, and recent commits.")
+                self._inject_ai_prompt(
+                    "Show me the current git status including branch, staged/unstaged changes, and recent commits."
+                )
             return True
 
         if cmd == "/help":
@@ -1206,26 +1343,38 @@ class ChatPanel(QWidget):
                     break
             # Trigger the review
             window._review_panel._on_run_review()
-            self._add_system_message("Review started — switch to the **🔍 Review** tab to see results.")
+            self._add_system_message(
+                "Review started — switch to the **🔍 Review** tab to see results."
+            )
             return
 
         # Fallback: run in chat if Review panel isn't available
         import subprocess
+
         try:
             if branch:
                 result = subprocess.run(
                     ["git", "diff", branch],
-                    capture_output=True, text=True, cwd=project_root, timeout=15,
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=15,
                 )
             else:
                 result = subprocess.run(
                     ["git", "diff", "HEAD"],
-                    capture_output=True, text=True, cwd=project_root, timeout=15,
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=15,
                 )
                 if not result.stdout.strip():
                     result = subprocess.run(
                         ["git", "diff"],
-                        capture_output=True, text=True, cwd=project_root, timeout=15,
+                        capture_output=True,
+                        text=True,
+                        cwd=project_root,
+                        timeout=15,
                     )
 
             diff = result.stdout.strip()
@@ -1290,6 +1439,7 @@ class ChatPanel(QWidget):
 
         # Resolve @file mentions — read referenced files into context
         import re as _re
+
         mentioned_files: list[str] = []
         project_root = self._get_project_root()
         if project_root:
@@ -1300,6 +1450,7 @@ class ChatPanel(QWidget):
 
         # Build message content with attachments
         from polyglot_ai.core.ai.models import Attachment
+
         content = text
         if mentioned_files:
             for mf in mentioned_files:
@@ -1316,18 +1467,51 @@ class ChatPanel(QWidget):
                 attachment_info.append(att)
                 if att["mime_type"].startswith("image/"):
                     # Store as image attachment for vision API
-                    message_attachments.append(Attachment(
-                        path=att["path"], filename=att["filename"],
-                        mime_type=att["mime_type"], size=att.get("size", 0),
-                    ))
+                    message_attachments.append(
+                        Attachment(
+                            path=att["path"],
+                            filename=att["filename"],
+                            mime_type=att["mime_type"],
+                            size=att.get("size", 0),
+                        )
+                    )
                 elif att["mime_type"].startswith("text/") or att["filename"].endswith(
-                    (".py", ".js", ".ts", ".html", ".css", ".json", ".yaml", ".yml",
-                     ".toml", ".md", ".rst", ".txt", ".sh", ".bash", ".sql", ".xml",
-                     ".cfg", ".ini", ".env", ".rs", ".go", ".java", ".c", ".cpp",
-                     ".h", ".rb", ".php", ".swift", ".kt")
+                    (
+                        ".py",
+                        ".js",
+                        ".ts",
+                        ".html",
+                        ".css",
+                        ".json",
+                        ".yaml",
+                        ".yml",
+                        ".toml",
+                        ".md",
+                        ".rst",
+                        ".txt",
+                        ".sh",
+                        ".bash",
+                        ".sql",
+                        ".xml",
+                        ".cfg",
+                        ".ini",
+                        ".env",
+                        ".rs",
+                        ".go",
+                        ".java",
+                        ".c",
+                        ".cpp",
+                        ".h",
+                        ".rb",
+                        ".php",
+                        ".swift",
+                        ".kt",
+                    )
                 ):
                     try:
-                        file_content = Path(att["path"]).read_text(encoding="utf-8", errors="replace")
+                        file_content = Path(att["path"]).read_text(
+                            encoding="utf-8", errors="replace"
+                        )
                         content += f"\n\n--- {att['filename']} ---\n```\n{file_content}\n```"
                     except Exception:
                         content += f"\n\n[Attached: {att['filename']}]"
@@ -1337,7 +1521,8 @@ class ChatPanel(QWidget):
             self._update_attach_bar()
 
         user_msg = Message(
-            role="user", content=content,
+            role="user",
+            content=content,
             attachments=message_attachments if message_attachments else None,
         )
         self._current_conversation.messages.append(user_msg)
@@ -1490,9 +1675,13 @@ class ChatPanel(QWidget):
                 if plan_tc:
                     await self._handle_plan_creation(plan_tc, full_content)
                 elif self._tool_registry:
-                    await self._execute_tool_calls(tool_calls_list, provider, model_id, display_model, system_prompt)
+                    await self._execute_tool_calls(
+                        tool_calls_list, provider, model_id, display_model, system_prompt
+                    )
 
-            if full_content and not (tool_calls_list and any(tc.function_name == "create_plan" for tc in tool_calls_list)):
+            if full_content and not (
+                tool_calls_list and any(tc.function_name == "create_plan" for tc in tool_calls_list)
+            ):
                 await self._auto_apply(full_content)
 
             if usage_info:
@@ -1506,7 +1695,11 @@ class ChatPanel(QWidget):
             if full_content and self._current_assistant_msg:
                 self._current_assistant_msg.append_content("\n\n*[Generation stopped]*")
                 self._current_conversation.messages.append(
-                    Message(role="assistant", content=full_content + "\n\n[Generation stopped]", model=model_id)
+                    Message(
+                        role="assistant",
+                        content=full_content + "\n\n[Generation stopped]",
+                        model=model_id,
+                    )
                 )
                 await self._persist_conversation()
             self._add_system_message("Generation stopped.")
@@ -1518,7 +1711,9 @@ class ChatPanel(QWidget):
                 thinking_widget.deleteLater()
                 self._message_layout.removeWidget(thinking_widget)
             error_msg = str(e)[:200]
-            self._add_error_message(f"Error: {error_msg}", provider, model_id, display_model, system_prompt)
+            self._add_error_message(
+                f"Error: {error_msg}", provider, model_id, display_model, system_prompt
+            )
 
         finally:
             # Clean up thinking indicator if stream ended with no content
@@ -1614,8 +1809,9 @@ class ChatPanel(QWidget):
 
     # ─── Error recovery ─────────────────────────────────────────────
 
-    def _add_error_message(self, error_text: str, provider=None, model_id=None,
-                            display_model=None, system_prompt=None) -> None:
+    def _add_error_message(
+        self, error_text: str, provider=None, model_id=None, display_model=None, system_prompt=None
+    ) -> None:
         """Show error with retry button."""
         self._add_separator()
         error_widget = QWidget()
@@ -1626,7 +1822,9 @@ class ChatPanel(QWidget):
 
         error_label = QLabel(f"⚠ {error_text}")
         error_label.setWordWrap(True)
-        error_label.setStyleSheet(f"color: #ff6b6b; font-size: {tc.FONT_BASE}px; background: transparent;")
+        error_label.setStyleSheet(
+            f"color: #ff6b6b; font-size: {tc.FONT_BASE}px; background: transparent;"
+        )
         error_layout.addWidget(error_label)
 
         btn_row = QHBoxLayout()
@@ -1637,10 +1835,10 @@ class ChatPanel(QWidget):
         retry_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: {tc.FONT_MD}px; padding: 5px 14px;
-                background-color: {tc.get('accent_primary')}; color: white;
+                background-color: {tc.get("accent_primary")}; color: white;
                 border: none; border-radius: {tc.RADIUS_MD}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('accent_primary_hover')}; }}
+            QPushButton:hover {{ background-color: {tc.get("accent_primary_hover")}; }}
         """)
         retry_btn.clicked.connect(lambda: self._retry_last(error_widget))
         btn_row.addWidget(retry_btn)
@@ -1666,7 +1864,9 @@ class ChatPanel(QWidget):
 
     # ─── Tool execution ─────────────────────────────────────────────
 
-    async def _execute_tool_calls(self, tool_calls_list, provider, model_id, display_model, system_prompt) -> None:
+    async def _execute_tool_calls(
+        self, tool_calls_list, provider, model_id, display_model, system_prompt
+    ) -> None:
         _tool_status_map = {
             "file_read": "Reading file...",
             "file_write": "Writing file...",
@@ -1682,34 +1882,53 @@ class ChatPanel(QWidget):
             "git_show_file": "Reading file from git...",
         }
         for tool_call in tool_calls_list:
-            status = _tool_status_map.get(tool_call.function_name, f"Running {tool_call.function_name}...")
+            status = _tool_status_map.get(
+                tool_call.function_name, f"Running {tool_call.function_name}..."
+            )
             self._set_agent_status(status)
             if self._current_assistant_msg:
-                self._current_assistant_msg.append_content(f"\n\n> Requested **{tool_call.function_name}**...")
+                self._current_assistant_msg.append_content(
+                    f"\n\n> Requested **{tool_call.function_name}**..."
+                )
                 self._scroll_to_bottom()
 
             # Check if this is an MCP tool
             is_mcp = self._mcp_client and self._mcp_client.is_mcp_tool(tool_call.function_name)
 
-            if not is_mcp and self._tool_registry and self._tool_registry.needs_approval(tool_call.function_name):
-                approved = await self._request_tool_approval(tool_call.function_name, tool_call.arguments)
+            if (
+                not is_mcp
+                and self._tool_registry
+                and self._tool_registry.needs_approval(tool_call.function_name)
+            ):
+                approved = await self._request_tool_approval(
+                    tool_call.function_name, tool_call.arguments
+                )
                 if not approved:
                     self._add_separator()
-                    self._add_message_widget("tool", f"**{tool_call.function_name}** rejected by user.")
+                    self._add_message_widget(
+                        "tool", f"**{tool_call.function_name}** rejected by user."
+                    )
                     self._current_conversation.messages.append(
-                        Message(role="tool", content="User rejected this tool call.", tool_call_id=tool_call.id)
+                        Message(
+                            role="tool",
+                            content="User rejected this tool call.",
+                            tool_call_id=tool_call.id,
+                        )
                     )
                     continue
 
             if is_mcp:
                 import json as _json
+
                 try:
                     args = _json.loads(tool_call.arguments) if tool_call.arguments else {}
                 except (ValueError, TypeError):
                     args = {}
                 result = await self._mcp_client.call_tool(tool_call.function_name, args)
             elif self._tool_registry:
-                result = await self._tool_registry.execute(tool_call.function_name, tool_call.arguments)
+                result = await self._tool_registry.execute(
+                    tool_call.function_name, tool_call.arguments
+                )
             else:
                 result = f"Error: No tool registry available for '{tool_call.function_name}'"
             result_preview = result[:500] if len(result) > 500 else result
@@ -1728,6 +1947,7 @@ class ChatPanel(QWidget):
 
     async def _request_tool_approval(self, tool_name: str, arguments: str) -> bool:
         import json
+
         current_content = None
         if tool_name in ("file_write", "file_patch"):
             try:
@@ -1795,7 +2015,7 @@ class ChatPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, conv.id)
             self._conv_list.insertItem(0, item)
 
-        new_messages = conv.messages[self._persisted_message_count:]
+        new_messages = conv.messages[self._persisted_message_count :]
         for msg in new_messages:
             await self._db.insert_message(
                 conv.id,
@@ -1804,7 +2024,9 @@ class ChatPanel(QWidget):
                 tool_calls=[
                     {"id": tc.id, "function": {"name": tc.function_name, "arguments": tc.arguments}}
                     for tc in msg.tool_calls
-                ] if msg.tool_calls else None,
+                ]
+                if msg.tool_calls
+                else None,
                 tool_call_id=msg.tool_call_id,
                 model=msg.model,
                 tokens_in=msg.tokens_in,
@@ -1998,10 +2220,10 @@ class ChatPanel(QWidget):
             apply_btn.setStyleSheet(f"""
                 QPushButton {{
                     font-size: {tc.FONT_MD}px; padding: 5px 14px;
-                    background-color: {tc.get('accent_primary')}; color: white;
+                    background-color: {tc.get("accent_primary")}; color: white;
                     border: none; border-radius: {tc.RADIUS_MD}px; font-weight: bold;
                 }}
-                QPushButton:hover {{ background-color: {tc.get('accent_primary_hover')}; }}
+                QPushButton:hover {{ background-color: {tc.get("accent_primary_hover")}; }}
             """)
             apply_btn.clicked.connect(lambda: self._approve_and_apply(blocks, btn_bar))
             btn_layout.addWidget(apply_btn)
@@ -2014,10 +2236,10 @@ class ChatPanel(QWidget):
                 run_btn.setStyleSheet(f"""
                     QPushButton {{
                         font-size: {tc.FONT_MD}px; padding: 5px 14px;
-                        background-color: {tc.get('bg_hover')}; color: {tc.get('text_heading')};
+                        background-color: {tc.get("bg_hover")}; color: {tc.get("text_heading")};
                         border: none; border-radius: {tc.RADIUS_MD}px;
                     }}
-                    QPushButton:hover {{ background-color: {tc.get('bg_hover')}; }}
+                    QPushButton:hover {{ background-color: {tc.get("bg_hover")}; }}
                 """)
                 run_btn.clicked.connect(lambda checked, c=cmd: self._approve_and_run(c))
                 btn_layout.addWidget(run_btn)
@@ -2027,10 +2249,10 @@ class ChatPanel(QWidget):
         no_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: {tc.FONT_MD}px; padding: 5px 14px;
-                background-color: transparent; color: {tc.get('text_tertiary')};
-                border: 1px solid {tc.get('border_card')}; border-radius: {tc.RADIUS_MD}px;
+                background-color: transparent; color: {tc.get("text_tertiary")};
+                border: 1px solid {tc.get("border_card")}; border-radius: {tc.RADIUS_MD}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('bg_hover')}; color: {tc.get('text_primary')}; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_hover")}; color: {tc.get("text_primary")}; }}
         """)
         no_btn.clicked.connect(lambda: self._reject_changes(btn_bar))
         btn_layout.addWidget(no_btn)
@@ -2052,9 +2274,14 @@ class ChatPanel(QWidget):
             results.append(f"{'✓' if ok else '✗'} {msg}")
             window = self.window()
             if hasattr(window, "audit"):
-                window.audit.log("file_apply", {
-                    "path": block["path"], "success": ok, "message": msg,
-                })
+                window.audit.log(
+                    "file_apply",
+                    {
+                        "path": block["path"],
+                        "success": ok,
+                        "message": msg,
+                    },
+                )
 
         bar.setParent(None)
         bar.deleteLater()
@@ -2078,6 +2305,7 @@ class ChatPanel(QWidget):
 
         async def do_run():
             from polyglot_ai.core.ai.code_applier import run_command_safe
+
             output, code = await run_command_safe(project_root, command)
             status = "✓" if code == 0 else f"✗ Exit {code}"
             self._add_system_message(f"**{status}**\n```\n{output}\n```")
@@ -2094,6 +2322,7 @@ class ChatPanel(QWidget):
 
     def _apply_code_blocks(self, blocks: list[dict]) -> None:
         from polyglot_ai.core.ai.code_applier import apply_code_block
+
         project_root = self._get_project_root()
         if not project_root:
             self._add_system_message("No project open. Open a project first (File → Open Project).")
@@ -2112,6 +2341,7 @@ class ChatPanel(QWidget):
 
     def _run_command(self, command: str) -> None:
         from polyglot_ai.core.ai.code_applier import run_command_safe
+
         project_root = self._get_project_root()
         if not project_root:
             self._add_system_message("No project open.")
@@ -2180,7 +2410,11 @@ class ChatPanel(QWidget):
         self._message_layout.addWidget(sep)
 
     def _add_message_widget(
-        self, role: str, content: str, model: str | None = None, db_id: int | None = None,
+        self,
+        role: str,
+        content: str,
+        model: str | None = None,
+        db_id: int | None = None,
     ) -> None:
         if self._message_layout.count() > 1:
             self._add_separator()
@@ -2204,9 +2438,12 @@ class ChatPanel(QWidget):
         self._scroll_to_bottom()
 
     def _scroll_to_bottom(self) -> None:
-        QTimer.singleShot(50, lambda: self._scroll.verticalScrollBar().setValue(
-            self._scroll.verticalScrollBar().maximum()
-        ))
+        QTimer.singleShot(
+            50,
+            lambda: self._scroll.verticalScrollBar().setValue(
+                self._scroll.verticalScrollBar().maximum()
+            ),
+        )
 
     # ─── Conversation forking ────────────────────────────────────────
 
@@ -2236,26 +2473,70 @@ class ChatPanel(QWidget):
 
     _BUILTIN_TEMPLATES = [
         # ── Code Quality ──
-        ("Bug hunt", "Look at the open file and find bugs — logic errors, off-by-one mistakes, unhandled edge cases, race conditions, or incorrect assumptions. For each bug, explain the problem, show where it is, and suggest a fix.", "review"),
-        ("Security audit", "Audit this code for security vulnerabilities:\n- Injection attacks (SQL, command, XSS)\n- Authentication/authorization flaws\n- Data exposure or leaks\n- Unsafe deserialization\n- Hardcoded secrets\n\nRate each finding as Critical/High/Medium/Low and provide a fix.", "review"),
-        ("Performance review", "Analyze this code for performance issues:\n- Unnecessary allocations or copies\n- O(n²) or worse algorithms that could be faster\n- Missing caching opportunities\n- Database N+1 queries\n- Blocking calls that should be async\n\nSuggest concrete optimizations with before/after examples.", "review"),
-
+        (
+            "Bug hunt",
+            "Look at the open file and find bugs — logic errors, off-by-one mistakes, unhandled edge cases, race conditions, or incorrect assumptions. For each bug, explain the problem, show where it is, and suggest a fix.",
+            "review",
+        ),
+        (
+            "Security audit",
+            "Audit this code for security vulnerabilities:\n- Injection attacks (SQL, command, XSS)\n- Authentication/authorization flaws\n- Data exposure or leaks\n- Unsafe deserialization\n- Hardcoded secrets\n\nRate each finding as Critical/High/Medium/Low and provide a fix.",
+            "review",
+        ),
+        (
+            "Performance review",
+            "Analyze this code for performance issues:\n- Unnecessary allocations or copies\n- O(n²) or worse algorithms that could be faster\n- Missing caching opportunities\n- Database N+1 queries\n- Blocking calls that should be async\n\nSuggest concrete optimizations with before/after examples.",
+            "review",
+        ),
         # ── Writing Code ──
-        ("Write unit tests", "Write thorough unit tests for this code. Include:\n- Happy path tests\n- Edge cases (empty input, None, boundary values)\n- Error conditions (invalid input, exceptions)\n- Use descriptive test names that explain the scenario\n\nUse the project's existing test framework and patterns.", "testing"),
-        ("Add type hints", "Add complete Python type hints to all functions, methods, and class attributes in this file. Use modern syntax (X | None instead of Optional[X]). Add return types, parameter types, and generic types where appropriate.", "refactoring"),
-        ("Refactor this", "Refactor this code to be cleaner and more maintainable:\n- Extract repeated logic into helper functions\n- Simplify complex conditionals\n- Improve variable and function names\n- Reduce nesting depth\n- Keep the same behavior — no functional changes\n\nShow the full refactored code.", "refactoring"),
-
+        (
+            "Write unit tests",
+            "Write thorough unit tests for this code. Include:\n- Happy path tests\n- Edge cases (empty input, None, boundary values)\n- Error conditions (invalid input, exceptions)\n- Use descriptive test names that explain the scenario\n\nUse the project's existing test framework and patterns.",
+            "testing",
+        ),
+        (
+            "Add type hints",
+            "Add complete Python type hints to all functions, methods, and class attributes in this file. Use modern syntax (X | None instead of Optional[X]). Add return types, parameter types, and generic types where appropriate.",
+            "refactoring",
+        ),
+        (
+            "Refactor this",
+            "Refactor this code to be cleaner and more maintainable:\n- Extract repeated logic into helper functions\n- Simplify complex conditionals\n- Improve variable and function names\n- Reduce nesting depth\n- Keep the same behavior — no functional changes\n\nShow the full refactored code.",
+            "refactoring",
+        ),
         # ── Understanding ──
-        ("Explain this code", "Explain this code in plain English:\n1. What does it do? (one-sentence summary)\n2. How does it work? (step by step)\n3. What are the key design decisions?\n4. What are the gotchas or non-obvious parts?", "understanding"),
-        ("How would you improve this?", "Review this code and suggest improvements. Don't make changes yet — just list what you'd do differently and why. Consider:\n- Architecture and design patterns\n- Error handling\n- Testability\n- Readability\n- Edge cases", "understanding"),
-
+        (
+            "Explain this code",
+            "Explain this code in plain English:\n1. What does it do? (one-sentence summary)\n2. How does it work? (step by step)\n3. What are the key design decisions?\n4. What are the gotchas or non-obvious parts?",
+            "understanding",
+        ),
+        (
+            "How would you improve this?",
+            "Review this code and suggest improvements. Don't make changes yet — just list what you'd do differently and why. Consider:\n- Architecture and design patterns\n- Error handling\n- Testability\n- Readability\n- Edge cases",
+            "understanding",
+        ),
         # ── Documentation ──
-        ("Generate docstrings", "Add clear docstrings to all public functions, methods, and classes in this file. Include:\n- One-line summary\n- Args with types and descriptions\n- Returns description\n- Raises (if applicable)\n- Brief usage example for complex functions\n\nFollow the project's existing docstring style.", "documentation"),
-        ("Write README section", "Based on this code, write a clear README section that explains:\n- What this module/component does\n- How to use it (with code examples)\n- Configuration options\n- Common pitfalls", "documentation"),
-
+        (
+            "Generate docstrings",
+            "Add clear docstrings to all public functions, methods, and classes in this file. Include:\n- One-line summary\n- Args with types and descriptions\n- Returns description\n- Raises (if applicable)\n- Brief usage example for complex functions\n\nFollow the project's existing docstring style.",
+            "documentation",
+        ),
+        (
+            "Write README section",
+            "Based on this code, write a clear README section that explains:\n- What this module/component does\n- How to use it (with code examples)\n- Configuration options\n- Common pitfalls",
+            "documentation",
+        ),
         # ── Debugging ──
-        ("Debug this error", "I'm getting an error with this code. Help me debug it:\n1. Identify the likely root cause\n2. Explain why it's happening\n3. Show the fix\n4. Suggest how to prevent similar issues\n\n[Paste your error message below]", "debugging"),
-        ("Add error handling", "Add robust error handling to this code:\n- Catch specific exceptions (not bare except)\n- Add meaningful error messages\n- Log errors appropriately\n- Handle edge cases gracefully\n- Add input validation where missing\n\nKeep the happy path clean and readable.", "debugging"),
+        (
+            "Debug this error",
+            "I'm getting an error with this code. Help me debug it:\n1. Identify the likely root cause\n2. Explain why it's happening\n3. Show the fix\n4. Suggest how to prevent similar issues\n\n[Paste your error message below]",
+            "debugging",
+        ),
+        (
+            "Add error handling",
+            "Add robust error handling to this code:\n- Catch specific exceptions (not bare except)\n- Add meaningful error messages\n- Log errors appropriately\n- Handle edge cases gracefully\n- Add input validation where missing\n\nKeep the happy path clean and readable.",
+            "debugging",
+        ),
     ]
 
     async def _init_builtin_templates(self) -> None:
@@ -2271,9 +2552,7 @@ class ChatPanel(QWidget):
         # Remove old builtins and re-seed
         for t in existing:
             if t.get("is_builtin"):
-                await self._db.execute(
-                    "DELETE FROM prompt_templates WHERE id = ?", (t["id"],)
-                )
+                await self._db.execute("DELETE FROM prompt_templates WHERE id = ?", (t["id"],))
         for name, content, category in self._BUILTIN_TEMPLATES:
             await self._db.create_prompt_template(name, content, category, is_builtin=True)
 
@@ -2298,11 +2577,13 @@ class ChatPanel(QWidget):
         # Schedule synchronous menu display outside the async task
         # so menu.exec() doesn't block the asyncio event loop.
         from functools import partial
+
         QTimer.singleShot(0, partial(self._show_template_menu_sync, templates))
 
     def _show_template_menu_sync(self, templates: list[dict]) -> None:
         """Build and display the template menu synchronously."""
         from polyglot_ai.ui import theme_colors as tc
+
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
@@ -2402,9 +2683,21 @@ class ChatPanel(QWidget):
         if not project_root:
             return
         import os
+
         root = Path(project_root)
-        skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__",
-                     ".mypy_cache", ".pytest_cache", "dist", "build", ".tox", ".eggs"}
+        skip_dirs = {
+            ".git",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            "dist",
+            "build",
+            ".tox",
+            ".eggs",
+        }
         files: list[str] = []
         try:
             for dirpath, dirnames, filenames in os.walk(root):
@@ -2430,7 +2723,7 @@ class ChatPanel(QWidget):
             self._github_btn.setText("⌥ GitHub ✓")
             self._github_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {tc.get('bg_feedback_pos')}; color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_MD}px;
+                    background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
                     border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
@@ -2452,6 +2745,7 @@ class ChatPanel(QWidget):
     def _make_toolbar_icon(icon_type: str):
         """Create white toolbar icons (plus, template, etc.)."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 20
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -2470,6 +2764,7 @@ class ChatPanel(QWidget):
         elif icon_type == "search":
             # Magnifying glass icon
             from PyQt6.QtCore import QRectF
+
             painter.drawEllipse(QRectF(3, 3, 10, 10))
             painter.drawLine(12, 12, 17, 17)
         elif icon_type == "template":
@@ -2485,6 +2780,7 @@ class ChatPanel(QWidget):
     def _create_send_icon():
         """Up-arrow send icon (dark on light circle, like ChatGPT)."""
         from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
         size = 18
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -2545,9 +2841,11 @@ class ChatPanel(QWidget):
             painter.drawLine(5, 14, 12, 14)
         elif icon_type == "gear":
             from PyQt6.QtCore import QRectF
+
             painter.drawEllipse(QRectF(5, 5, 8, 8))
             for angle in range(0, 360, 45):
                 import math
+
                 r = 8.5
                 x = 9 + r * math.cos(math.radians(angle))
                 y = 9 + r * math.sin(math.radians(angle))
@@ -2559,9 +2857,11 @@ class ChatPanel(QWidget):
     @staticmethod
     def _create_plus_icon() -> str:
         import tempfile
+
         cache_dir = tempfile.mkdtemp(prefix="codex_icons_")
         path = f"{cache_dir}/plus.png"
         from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap as QPixmap2
+
         pixmap = QPixmap2(16, 16)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -2579,9 +2879,11 @@ class ChatPanel(QWidget):
     @staticmethod
     def _create_arrow_icon() -> str:
         import tempfile
+
         cache_dir = tempfile.mkdtemp(prefix="codex_icons_")
         path = f"{cache_dir}/arrow.png"
         from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap as QPixmap2
+
         pixmap = QPixmap2(12, 12)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -2606,16 +2908,17 @@ class ChatPanel(QWidget):
         """Open Settings dialog directly on MCP Servers tab."""
         window = self.window()
         from polyglot_ai.ui.dialogs.settings_dialog import SettingsDialog
+
         # Get keyring and settings from the main window
-        if hasattr(window, 'db'):
+        if hasattr(window, "db"):
             dialog = SettingsDialog(window._settings, window._keyring, window)
-            if hasattr(window, '_mcp_client'):
+            if hasattr(window, "_mcp_client"):
                 dialog.set_mcp_client(window._mcp_client)
             # Pre-select MCP tab (index 4)
             dialog._nav_list.setCurrentRow(4)
             if dialog.exec():
                 # Re-register providers if keys changed
-                if hasattr(window, '_on_settings_saved'):
+                if hasattr(window, "_on_settings_saved"):
                     window._on_settings_saved()
         else:
             # Fallback: just open settings normally
@@ -2641,6 +2944,7 @@ class GitHubConnectDialog(QDialog):
         # Request dark title bar on GNOME/KDE via Qt platform hints
         try:
             from PyQt6.QtGui import QPalette
+
             dark_palette = self.palette()
             dark_palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
             dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#e0e0e0"))
@@ -2675,6 +2979,7 @@ class GitHubConnectDialog(QDialog):
         icons_row.setSpacing(10)
 
         from polyglot_ai.ui.panels.chat_message import AvatarWidget
+
         icons_row.addWidget(AvatarWidget("C", "#10a37f"))  # Codex
         dots = QLabel("···")
         dots.setStyleSheet("color: #555; font-size: 18px; background: transparent;")
@@ -2703,15 +3008,21 @@ class GitHubConnectDialog(QDialog):
 
         # Info sections — simple divider-separated list, not cards
         info_items = [
-            ("Permissions always respected",
-             "Access is limited to permissions you explicitly grant.\n"
-             "Disable access anytime to revoke."),
-            ("You're in control",
-             "Your token is stored locally in your system keyring.\n"
-             "It is never sent to any third party."),
-            ("Connectors may introduce risk",
-             "Use fine-grained tokens with minimal scopes.\n"
-             "Only grant access to repos you need."),
+            (
+                "Permissions always respected",
+                "Access is limited to permissions you explicitly grant.\n"
+                "Disable access anytime to revoke.",
+            ),
+            (
+                "You're in control",
+                "Your token is stored locally in your system keyring.\n"
+                "It is never sent to any third party.",
+            ),
+            (
+                "Connectors may introduce risk",
+                "Use fine-grained tokens with minimal scopes.\n"
+                "Only grant access to repos you need.",
+            ),
         ]
         for i, (heading, desc) in enumerate(info_items):
             if i > 0:
@@ -2735,9 +3046,7 @@ class GitHubConnectDialog(QDialog):
             d = QLabel(desc)
             d.setWordWrap(True)
             d.setMinimumHeight(36)
-            d.setStyleSheet(
-                "font-size: 12px; color: #9a9a9a; background: transparent;"
-            )
+            d.setStyleSheet("font-size: 12px; color: #9a9a9a; background: transparent;")
             sec_layout.addWidget(d)
 
             layout.addWidget(section)
@@ -2803,6 +3112,7 @@ class FileMentionPopup(QWidget):
             QListWidget::item:hover { background: #3e3e40; }
         """)
         from PyQt6.QtWidgets import QListWidget
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         self._list = QListWidget()
@@ -2843,6 +3153,7 @@ class ChatInput(QTextEdit):
     """Text input with Enter-to-send, drag-drop files, clipboard paste, and @mention."""
 
     from PyQt6.QtCore import pyqtSignal as _pyqtSignal
+
     submit_requested = _pyqtSignal()
     file_dropped = _pyqtSignal(str)
     image_pasted = _pyqtSignal(QPixmap)
@@ -2897,7 +3208,7 @@ class ChatInput(QTextEdit):
         elif self._mention_popup.isVisible() and self._mention_start >= 0:
             # Update filter as user types after @
             if cursor_pos > self._mention_start:
-                query = text[self._mention_start:cursor_pos]
+                query = text[self._mention_start : cursor_pos]
                 self._show_mention_popup(query)
             else:
                 self._mention_popup.hide()
@@ -2916,8 +3227,10 @@ class ChatInput(QTextEdit):
         cursor = self.textCursor()
         # Select from @ to current position
         cursor.setPosition(self._mention_start - 1)  # -1 for the @ char
-        cursor.setPosition(cursor.position() + (self.textCursor().position() - self._mention_start + 1),
-                           cursor.MoveMode.KeepAnchor)
+        cursor.setPosition(
+            cursor.position() + (self.textCursor().position() - self._mention_start + 1),
+            cursor.MoveMode.KeepAnchor,
+        )
         cursor.insertText(f"@{filepath} ")
         self.setTextCursor(cursor)
         self._mention_start = -1

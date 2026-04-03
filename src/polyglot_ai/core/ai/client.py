@@ -41,10 +41,7 @@ class OpenAIClient(AIProvider):
         try:
             response = await self._client.models.list()
             chat_prefixes = ("gpt-3.5", "gpt-4", "gpt-5", "o1", "o3", "o4")
-            models = [
-                m.id for m in response.data
-                if any(m.id.startswith(p) for p in chat_prefixes)
-            ]
+            models = [m.id for m in response.data if any(m.id.startswith(p) for p in chat_prefixes)]
             return sorted(models)
         except Exception:
             logger.exception("Failed to list OpenAI models")
@@ -111,7 +108,9 @@ class OpenAIClient(AIProvider):
                             "index": tc.index,
                             "id": tc.id,
                             "function": {
-                                "name": tc.function.name if tc.function and tc.function.name else None,
+                                "name": tc.function.name
+                                if tc.function and tc.function.name
+                                else None,
                                 "arguments": tc.function.arguments if tc.function else "",
                             },
                         }
@@ -127,6 +126,7 @@ class OpenAIClient(AIProvider):
 
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             error_msg = sanitize_error(str(e))
             logger.exception("OpenAI API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
@@ -138,4 +138,5 @@ class OpenAIClient(AIProvider):
             return True, "Connection successful"
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
+
             return False, sanitize_error(str(e))

@@ -71,7 +71,9 @@ class TwoLineDelegate(QStyledItemDelegate):
             name_rect = QRect(rect.x() + 14, rect.y() + 5, rect.width() - 44, 18)
         else:
             name_rect = QRect(rect.x() + 14, rect.y(), rect.width() - 44, rect.height())
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.drawText(
+            name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text
+        )
 
         # Description (second line)
         if description:
@@ -79,7 +81,9 @@ class TwoLineDelegate(QStyledItemDelegate):
             painter.setFont(desc_font)
             painter.setPen(QColor("#777777"))
             desc_rect = QRect(rect.x() + 14, rect.y() + 22, rect.width() - 44, 16)
-            painter.drawText(desc_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, description)
+            painter.drawText(
+                desc_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, description
+            )
 
         # Checkmark for current selection
         if is_current:

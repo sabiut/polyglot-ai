@@ -36,9 +36,7 @@ class DiffViewer(QWidget):
         self._left_editor = QPlainTextEdit()
         self._left_editor.setReadOnly(True)
         self._left_editor.setFont(QFont("Monospace", 11))
-        self._left_editor.setStyleSheet(
-            "background-color: #1e1e1e; color: #d4d4d4; border: none;"
-        )
+        self._left_editor.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; border: none;")
         left_layout.addWidget(self._left_editor)
         splitter.addWidget(left_container)
 
@@ -54,9 +52,7 @@ class DiffViewer(QWidget):
         self._right_editor = QPlainTextEdit()
         self._right_editor.setReadOnly(True)
         self._right_editor.setFont(QFont("Monospace", 11))
-        self._right_editor.setStyleSheet(
-            "background-color: #1e1e1e; color: #d4d4d4; border: none;"
-        )
+        self._right_editor.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; border: none;")
         right_layout.addWidget(self._right_editor)
         splitter.addWidget(right_container)
 

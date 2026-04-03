@@ -48,6 +48,7 @@ class FileOperations:
         # Symlink protection — same policy as writes
         if self._project_root:
             from polyglot_ai.core.security import check_no_symlinks_in_path
+
             safe, reason = check_no_symlinks_in_path(resolved, self._project_root)
             if not safe:
                 raise PermissionError(f"Blocked read: {reason}")
@@ -62,6 +63,7 @@ class FileOperations:
 
         # Block dangerous files (shared policy)
         from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
+
         blocked = check_blocked_file(path)
         if blocked:
             raise PermissionError(blocked)
@@ -76,6 +78,7 @@ class FileOperations:
         # Symlink protection — reject writes through symlinks
         if self._project_root:
             from polyglot_ai.core.security import check_no_symlinks_in_path
+
             safe, reason = check_no_symlinks_in_path(resolved, self._project_root)
             if not safe:
                 raise PermissionError(f"Blocked: {reason}")
@@ -107,6 +110,7 @@ class FileOperations:
                     "Pass force_directory=True to confirm."
                 )
             import shutil
+
             shutil.rmtree(resolved)
             self._event_bus.emit(EVT_FILE_DELETED, path=str(resolved))
             logger.info("Deleted directory: %s", resolved)
@@ -140,7 +144,8 @@ class FileOperations:
             )
             # Filter results: exclude files that match secret patterns
             from polyglot_ai.core.security import is_secret_file
-            files = result.stdout.strip().split("\n")[:max_results * 2]
+
+            files = result.stdout.strip().split("\n")[: max_results * 2]
             filtered = []
             for f in files:
                 if not f:

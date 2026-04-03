@@ -51,6 +51,7 @@ def _create_core_services():
 
 def _register_ai_providers(provider_manager, keyring_store, event_bus):
     """Register/unregister AI providers based on current API keys."""
+
     def _sync_provider(name, key, factory):
         if key:
             existing = provider_manager.get_provider(name)
@@ -62,23 +63,26 @@ def _register_ai_providers(provider_manager, keyring_store, event_bus):
             provider_manager.unregister(name)
 
     from polyglot_ai.core.ai.client import OpenAIClient
-    _sync_provider("openai", keyring_store.get_key("openai"),
-                    lambda k: OpenAIClient(k, event_bus))
+
+    _sync_provider("openai", keyring_store.get_key("openai"), lambda k: OpenAIClient(k, event_bus))
 
     from polyglot_ai.core.ai.anthropic_client import AnthropicClient
-    _sync_provider("anthropic", keyring_store.get_key("anthropic"),
-                    lambda k: AnthropicClient(k, event_bus))
+
+    _sync_provider(
+        "anthropic", keyring_store.get_key("anthropic"), lambda k: AnthropicClient(k, event_bus)
+    )
 
     from polyglot_ai.core.ai.google_client import GoogleClient
-    _sync_provider("google", keyring_store.get_key("google"),
-                    lambda k: GoogleClient(k, event_bus))
+
+    _sync_provider("google", keyring_store.get_key("google"), lambda k: GoogleClient(k, event_bus))
 
     from polyglot_ai.core.ai.xai_client import XAIClient
-    _sync_provider("xai", keyring_store.get_key("xai"),
-                    lambda k: XAIClient(k, event_bus))
+
+    _sync_provider("xai", keyring_store.get_key("xai"), lambda k: XAIClient(k, event_bus))
 
     # OpenAI OAuth (subscription login)
     from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
+
     openai_oauth = OpenAIOAuthClient(event_bus)
     if openai_oauth.is_authenticated:
         if not provider_manager.get_provider("openai_oauth"):
@@ -113,6 +117,7 @@ def _wire_chat_panel(window, db, context_builder, provider_manager, mcp_client):
 def _wire_review_panel(window, provider_manager):
     """Set up the review engine and connect it to the review panel."""
     from polyglot_ai.core.review.review_engine import ReviewEngine
+
     review_engine = ReviewEngine(provider_manager)
     review = window.review_panel
     review.set_review_engine(review_engine)
@@ -122,6 +127,7 @@ def _wire_review_panel(window, provider_manager):
 
 def _wire_plan_events(event_bus, plan_panel):
     """Subscribe Plan panel to plan lifecycle events."""
+
     def _on_plan_step_update(**kwargs):
         plan_panel.update_plan()
 
@@ -133,12 +139,17 @@ def _wire_plan_events(event_bus, plan_panel):
 
 def _wire_changeset_events(event_bus, changeset):
     """Subscribe Changes panel to file change/create events."""
+
     def _on_file_changed(path: str = "", **kwargs):
         if not changeset.project_root or not path:
             return
         try:
             rel = str(Path(path).relative_to(changeset.project_root))
-            current = Path(path).read_text(encoding="utf-8", errors="replace") if Path(path).exists() else ""
+            current = (
+                Path(path).read_text(encoding="utf-8", errors="replace")
+                if Path(path).exists()
+                else ""
+            )
             changeset.update_change(rel, current)
         except (ValueError, OSError):
             pass
@@ -148,7 +159,15 @@ def _wire_changeset_events(event_bus, changeset):
 
 
 def _wire_project_events(
-    event_bus, window, chat, review, file_ops, context_builder, mcp_client, audit, settings,
+    event_bus,
+    window,
+    chat,
+    review,
+    file_ops,
+    context_builder,
+    mcp_client,
+    audit,
+    settings,
     indexer=None,
 ):
     """Wire up everything that happens when a project is opened."""
@@ -184,6 +203,7 @@ def _wire_project_events(
 
         # Build search index
         if indexer:
+
             async def _build_index():
                 try:
                     await indexer.build_index(project_path)
@@ -204,8 +224,9 @@ def _wire_project_events(
     event_bus.subscribe("project:opened", _on_project_opened)
 
 
-def _wire_settings_dialog(window, settings, keyring_store, mcp_client, provider_manager,
-                           chat, theme_manager, event_bus):
+def _wire_settings_dialog(
+    window, settings, keyring_store, mcp_client, provider_manager, chat, theme_manager, event_bus
+):
     """Connect settings dialog and related menu actions."""
     from polyglot_ai.ui.dialogs.settings_dialog import SettingsDialog
     from polyglot_ai.ui.dialogs.about_dialog import AboutDialog
@@ -232,6 +253,7 @@ def _wire_open_project(window, event_bus):
 
     def _open_project_with_manager():
         from PyQt6.QtWidgets import QFileDialog
+
         directory = QFileDialog.getExistingDirectory(
             window, "Open Project", "", QFileDialog.Option.ShowDirsOnly
         )
@@ -253,6 +275,7 @@ def _run_onboarding(window, settings, keyring_store, provider_manager, event_bus
     """Show first-run onboarding wizard if needed."""
     if not settings.get("app.onboarding_done"):
         from polyglot_ai.ui.dialogs.onboarding_dialog import OnboardingDialog
+
         onboarding = OnboardingDialog(window)
         if onboarding.exec():
             if onboarding.api_key:
@@ -270,6 +293,7 @@ def main() -> None:
 
     # Migrate legacy data from Codex Desktop if needed
     from polyglot_ai.migration import migrate_legacy_data
+
     migrate_legacy_data()
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -280,6 +304,7 @@ def main() -> None:
 
     # Set application icon
     from PyQt6.QtGui import QIcon
+
     icon_path = Path(__file__).parent / "resources" / "icons" / "polyglot-ai.png"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
@@ -298,6 +323,7 @@ def main() -> None:
 
     # Async event loop (qasync)
     import qasync
+
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
@@ -310,6 +336,7 @@ def main() -> None:
 
     # Load custom fonts if available
     from PyQt6.QtGui import QFontDatabase
+
     fonts_dir = Path(__file__).parent / "resources" / "fonts"
     if fonts_dir.is_dir():
         for font_file in fonts_dir.glob("*.ttf"):
@@ -358,7 +385,10 @@ def main() -> None:
 
     # Provide minimal tools for standalone chat (no project needed)
     from polyglot_ai.core.ai.tools.definitions import TOOL_DEFINITIONS
-    standalone_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] in ("web_search", "create_plan")]
+
+    standalone_tools = [
+        t for t in TOOL_DEFINITIONS if t["function"]["name"] in ("web_search", "create_plan")
+    ]
     chat.set_tools(standalone_tools, registry=None)
     window.mcp_sidebar.set_mcp_client(mcp_client)
     window._file_explorer.set_event_bus(event_bus)
@@ -370,13 +400,27 @@ def main() -> None:
     _wire_plan_events(event_bus, window.plan_panel)
     _wire_changeset_events(event_bus, window.changeset_panel)
     _wire_project_events(
-        event_bus, window, chat, review, file_ops, context_builder,
-        mcp_client, audit, settings, indexer=indexer,
+        event_bus,
+        window,
+        chat,
+        review,
+        file_ops,
+        context_builder,
+        mcp_client,
+        audit,
+        settings,
+        indexer=indexer,
     )
     _wire_open_project(window, event_bus)
     _wire_settings_dialog(
-        window, settings, keyring_store, mcp_client, provider_manager,
-        chat, theme_manager, event_bus,
+        window,
+        settings,
+        keyring_store,
+        mcp_client,
+        provider_manager,
+        chat,
+        theme_manager,
+        event_bus,
     )
 
     # Start terminal

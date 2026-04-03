@@ -55,9 +55,7 @@ class BarChartWidget(QWidget):
             painter.end()
             return
 
-        max_val = max(
-            (d.get("tokens_in", 0) + d.get("tokens_out", 0)) for d in self._data
-        ) or 1
+        max_val = max((d.get("tokens_in", 0) + d.get("tokens_out", 0)) for d in self._data) or 1
 
         bar_count = len(self._data)
         bar_width = max(8, chart_w // (bar_count * 2))
@@ -88,7 +86,8 @@ class BarChartWidget(QWidget):
             painter.setFont(QFont("sans-serif", 8))
             painter.drawText(
                 QRectF(x - 4, h - margin + 4, bar_width + 8, 16),
-                Qt.AlignmentFlag.AlignCenter, date_str,
+                Qt.AlignmentFlag.AlignCenter,
+                date_str,
             )
 
         # Legend
@@ -142,7 +141,9 @@ class UsagePanel(QWidget):
         # Per-model table
         self._table = QTableWidget()
         self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["Model", "Tokens In", "Tokens Out", "Messages", "Est. Cost"])
+        self._table.setHorizontalHeaderLabels(
+            ["Model", "Tokens In", "Tokens Out", "Messages", "Est. Cost"]
+        )
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setStyleSheet(f"""
             QTableWidget {{
@@ -185,7 +186,9 @@ class UsagePanel(QWidget):
         card_layout.setSpacing(2)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: {tc.FONT_XS}px; color: {tc.get('text_tertiary')}; background: transparent; border: none;")
+        title_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_tertiary')}; background: transparent; border: none;"
+        )
         card_layout.addWidget(title_label)
 
         value_label = QLabel(value)

@@ -16,6 +16,7 @@ class ToolCall:
 @dataclass
 class Attachment:
     """File or image attachment on a message."""
+
     path: str
     filename: str
     mime_type: str
@@ -55,13 +56,15 @@ class Message:
                     try:
                         with open(att.path, "rb") as f:
                             b64 = base64.b64encode(f.read()).decode("utf-8")
-                        parts.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{att.mime_type};base64,{b64}",
-                                "detail": "auto",
-                            },
-                        })
+                        parts.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{att.mime_type};base64,{b64}",
+                                    "detail": "auto",
+                                },
+                            }
+                        )
                     except (OSError, IOError):
                         pass  # Skip unreadable images
                 msg["content"] = parts if parts else self.content

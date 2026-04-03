@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelEntry:
     """A model in the combined dropdown."""
+
     provider_name: str
     provider_display: str
     model_id: str
@@ -86,15 +87,15 @@ class ProviderManager:
             try:
                 models = await provider.list_models()
                 for model_id in models:
-                    entries.append(ModelEntry(
-                        provider_name=provider.name,
-                        provider_display=provider.display_name,
-                        model_id=model_id,
-                    ))
+                    entries.append(
+                        ModelEntry(
+                            provider_name=provider.name,
+                            provider_display=provider.display_name,
+                            model_id=model_id,
+                        )
+                    )
             except Exception:
-                logger.exception(
-                    "Failed to fetch models from %s", provider.display_name
-                )
+                logger.exception("Failed to fetch models from %s", provider.display_name)
         return entries
 
     @property

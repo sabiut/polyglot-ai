@@ -70,7 +70,9 @@ class PlanStepCard(QWidget):
 
         step_num = QLabel(f"{step.index + 1}.")
         step_num.setFixedWidth(20)
-        step_num.setStyleSheet("color: #888; font-size: 12px; font-weight: bold; background: transparent;")
+        step_num.setStyleSheet(
+            "color: #888; font-size: 12px; font-weight: bold; background: transparent;"
+        )
         top_row.addWidget(step_num)
 
         title_label = QLabel(step.title)
@@ -89,7 +91,9 @@ class PlanStepCard(QWidget):
 
         if step.status == PlanStepStatus.PENDING:
             approve_btn = QPushButton("Approve")
-            approve_btn.setStyleSheet(_BTN_STYLE.format(bg="#0e4429", fg="#4ec9b0", hover="#1a5c3a"))
+            approve_btn.setStyleSheet(
+                _BTN_STYLE.format(bg="#0e4429", fg="#4ec9b0", hover="#1a5c3a")
+            )
             approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             approve_btn.clicked.connect(lambda: self.approve_clicked.emit(step.index))
             btn_layout.addWidget(approve_btn)
@@ -130,8 +134,7 @@ class PlanStepCard(QWidget):
             desc = QLabel(step.description[:150])
             desc.setWordWrap(True)
             desc.setStyleSheet(
-                "color: #888; font-size: 11px; background: transparent; "
-                "padding-left: 26px;"
+                "color: #888; font-size: 11px; background: transparent; padding-left: 26px;"
             )
             layout.addWidget(desc)
 

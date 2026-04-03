@@ -99,6 +99,7 @@ class OnboardingDialog(QDialog):
         # App icon
         from pathlib import Path
         from PyQt6.QtGui import QPixmap
+
         icon_row = QHBoxLayout()
         icon_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_path = Path(__file__).parent.parent / "resources" / "icons" / "polyglot-ai.png"
@@ -106,7 +107,9 @@ class OnboardingDialog(QDialog):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if icon_path.exists():
             pixmap = QPixmap(str(icon_path)).scaled(
-                64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                64,
+                64,
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             icon_lbl.setPixmap(pixmap)
@@ -120,9 +123,7 @@ class OnboardingDialog(QDialog):
 
         title = QLabel("Welcome to Polyglot AI")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 22px; font-weight: bold; color: #e8e8e8;"
-        )
+        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #e8e8e8;")
         layout.addWidget(title)
         layout.addSpacing(8)
 
@@ -155,7 +156,9 @@ class OnboardingDialog(QDialog):
             text_col = QVBoxLayout()
             text_col.setSpacing(1)
             h = QLabel(heading)
-            h.setStyleSheet("font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent;")
+            h.setStyleSheet(
+                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent;"
+            )
             text_col.addWidget(h)
             d = QLabel(desc)
             d.setStyleSheet("font-size: 12px; color: #888; background: transparent;")
@@ -269,10 +272,26 @@ class OnboardingDialog(QDialog):
         layout.addSpacing(16)
 
         steps = [
-            ("1", "Open a project", "Use File → Open Project to load your codebase. The AI will understand your project structure."),
-            ("2", "Chat with AI", "Ask questions, request changes, or use /review to analyze your code."),
-            ("3", "Review & approve", "The AI proposes changes — you review diffs and approve before anything is written."),
-            ("4", "Plan before coding", "Toggle Plan mode to get a structured step-by-step plan before implementation."),
+            (
+                "1",
+                "Open a project",
+                "Use File → Open Project to load your codebase. The AI will understand your project structure.",
+            ),
+            (
+                "2",
+                "Chat with AI",
+                "Ask questions, request changes, or use /review to analyze your code.",
+            ),
+            (
+                "3",
+                "Review & approve",
+                "The AI proposes changes — you review diffs and approve before anything is written.",
+            ),
+            (
+                "4",
+                "Plan before coding",
+                "Toggle Plan mode to get a structured step-by-step plan before implementation.",
+            ),
         ]
         for num, heading, desc in steps:
             card = QWidget()
@@ -295,7 +314,9 @@ class OnboardingDialog(QDialog):
             text_col = QVBoxLayout()
             text_col.setSpacing(2)
             h = QLabel(heading)
-            h.setStyleSheet("font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent; border: none;")
+            h.setStyleSheet(
+                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent; border: none;"
+            )
             text_col.addWidget(h)
             d = QLabel(desc)
             d.setWordWrap(True)
@@ -318,9 +339,7 @@ class OnboardingDialog(QDialog):
         # Big checkmark
         check = QLabel("✓")
         check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        check.setStyleSheet(
-            "font-size: 48px; color: #4ec9b0; background: transparent;"
-        )
+        check.setStyleSheet("font-size: 48px; color: #4ec9b0; background: transparent;")
         layout.addWidget(check)
         layout.addSpacing(16)
 
@@ -377,6 +396,7 @@ class OnboardingDialog(QDialog):
 
     def _login_chatgpt(self) -> None:
         from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
+
         if not OpenAIOAuthClient.is_codex_available():
             self._chatgpt_status.setText("Node.js required. Install: sudo apt install nodejs npm")
             self._chatgpt_status.setStyleSheet("font-size: 11px; color: #f44747;")
@@ -386,10 +406,12 @@ class OnboardingDialog(QDialog):
         self._chatgpt_status.setStyleSheet("font-size: 11px; color: #969696;")
 
         import threading
+
         def run():
             success = OpenAIOAuthClient.run_codex_login()
             if success:
                 from polyglot_ai.core.bridge import EventBus
+
                 client = OpenAIOAuthClient(EventBus())
                 if client.is_authenticated:
                     self._login_result.emit(True, "✓ Signed in successfully!")
@@ -406,8 +428,11 @@ class OnboardingDialog(QDialog):
 
     def _login_claude(self) -> None:
         from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
+
         if not ClaudeOAuthClient.is_claude_available():
-            self._claude_status.setText("Claude Code CLI not found. Install from claude.ai/download")
+            self._claude_status.setText(
+                "Claude Code CLI not found. Install from claude.ai/download"
+            )
             self._claude_status.setStyleSheet("font-size: 11px; color: #f44747;")
             return
 
@@ -415,10 +440,12 @@ class OnboardingDialog(QDialog):
         self._claude_status.setStyleSheet("font-size: 11px; color: #969696;")
 
         import threading
+
         def run():
             success = ClaudeOAuthClient.run_claude_login()
             if success:
                 from polyglot_ai.core.bridge import EventBus
+
                 client = ClaudeOAuthClient(EventBus())
                 if client.is_authenticated:
                     self._claude_login_result.emit(True, "✓ Signed in to Claude!")
