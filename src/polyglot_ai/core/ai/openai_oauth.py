@@ -211,6 +211,41 @@ class OpenAIOAuthClient(AIProvider):
                 if not system_prompt:
                     system_prompt = content
                 continue
+            if role == "tool":
+                # Tool result → Responses API function_call_output
+                input_messages.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": msg.get("tool_call_id", ""),
+                        "output": str(content) if content else "",
+                    }
+                )
+                continue
+            if role == "assistant" and msg.get("tool_calls"):
+                # Assistant message with tool calls → emit text + function_call items
+                if content:
+                    input_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": str(content)}],
+                        }
+                    )
+                for tc in msg["tool_calls"]:
+                    fn = tc.get("function", {})
+                    call_id = tc.get("id", "")
+                    # Responses API: 'id' must start with 'fc_',
+                    # 'call_id' is the call_xxx identifier.
+                    fc_id = call_id.replace("call_", "fc_", 1) if call_id.startswith("call_") else call_id
+                    input_messages.append(
+                        {
+                            "type": "function_call",
+                            "id": fc_id,
+                            "call_id": call_id,
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", ""),
+                        }
+                    )
+                continue
             if role in ("user", "assistant"):
                 # Responses API requires structured content items
                 if isinstance(content, list):
@@ -326,6 +361,8 @@ class OpenAIOAuthClient(AIProvider):
                         # multiple parallel tool calls don't get merged.
                         call_id_to_idx: dict[str, int] = {}
                         call_id_names: dict[str, str] = {}
+                        # Map item_id -> call_id (delta events use item_id)
+                        item_id_to_call_id: dict[str, str] = {}
                         # Track which calls got their args via deltas vs done
                         call_id_has_deltas: set[str] = set()
                         next_tool_idx = 0
@@ -359,7 +396,11 @@ class OpenAIOAuthClient(AIProvider):
                                 item = data.get("item", {})
                                 if item.get("type") == "function_call":
                                     call_id = item.get("call_id", "")
+                                    item_id = item.get("id", "")
                                     name = item.get("name", "")
+                                    # Map item_id to call_id for delta events
+                                    if item_id and call_id:
+                                        item_id_to_call_id[item_id] = call_id
                                     if call_id and call_id not in call_id_to_idx:
                                         call_id_to_idx[call_id] = next_tool_idx
                                         next_tool_idx += 1
@@ -380,7 +421,9 @@ class OpenAIOAuthClient(AIProvider):
                                     )
 
                             elif event_type == "response.function_call_arguments.delta":
-                                call_id = data.get("call_id", "")
+                                # Delta events use item_id, not call_id
+                                item_id = data.get("item_id", "")
+                                call_id = data.get("call_id") or item_id_to_call_id.get(item_id, item_id)
                                 if call_id not in call_id_to_idx:
                                     call_id_to_idx[call_id] = next_tool_idx
                                     next_tool_idx += 1
@@ -404,7 +447,8 @@ class OpenAIOAuthClient(AIProvider):
                                 # Complete arguments for one call. If we
                                 # already got deltas, skip (they accumulated).
                                 # If no deltas arrived, use this as the source.
-                                call_id = data.get("call_id", "")
+                                item_id = data.get("item_id", "")
+                                call_id = data.get("call_id") or item_id_to_call_id.get(item_id, item_id)
                                 if call_id not in call_id_has_deltas:
                                     if call_id not in call_id_to_idx:
                                         call_id_to_idx[call_id] = next_tool_idx

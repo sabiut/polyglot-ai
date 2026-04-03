@@ -1,0 +1,1 @@
+needs_approval = self._tools and not self._tools.is_auto_approved(tool_name)

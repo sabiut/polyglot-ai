@@ -1555,8 +1555,16 @@ class ChatPanel(QWidget):
         self._current_conversation.model = full_id
 
         system_prompt = None
-        if self._context_builder:
+        if self._context_builder and self._context_builder._project_root:
             system_prompt = self._context_builder.build_system_prompt()
+        if not system_prompt:
+            system_prompt = (
+                "You are Polyglot AI, a helpful general-purpose assistant. "
+                "You can answer questions on any topic, have conversations, "
+                "and help with coding tasks. When you need current information, "
+                "use the web_search tool. For general knowledge questions, "
+                "answer directly without using tools."
+            )
 
         # Plan mode: instruct AI to use create_plan tool
         if self._plan_mode:
@@ -1644,6 +1652,10 @@ class ChatPanel(QWidget):
 
             tool_calls_list = None
             if tool_calls_data:
+                logger.info(
+                    "Tool calls accumulated: %s",
+                    {k: {"id": v["id"], "name": v["function"]["name"], "args_len": len(v["function"]["arguments"])} for k, v in tool_calls_data.items()},
+                )
                 tool_calls_list = [
                     ToolCall(
                         id=tc["id"],
@@ -1654,6 +1666,7 @@ class ChatPanel(QWidget):
                     if tc["function"]["name"]  # skip tool calls with empty names
                 ]
                 if not tool_calls_list:
+                    logger.warning("All tool calls filtered out (empty names)")
                     tool_calls_list = None
 
             assistant_msg = Message(
@@ -1667,6 +1680,11 @@ class ChatPanel(QWidget):
             self._current_conversation.messages.append(assistant_msg)
 
             if tool_calls_list:
+                logger.info(
+                    "Executing %d tool call(s): %s",
+                    len(tool_calls_list),
+                    [(tc.function_name, tc.id) for tc in tool_calls_list],
+                )
                 # Check for create_plan tool call — intercept it
                 plan_tc = next(
                     (tc for tc in tool_calls_list if tc.function_name == "create_plan"),
@@ -1674,7 +1692,7 @@ class ChatPanel(QWidget):
                 )
                 if plan_tc:
                     await self._handle_plan_creation(plan_tc, full_content)
-                elif self._tool_registry:
+                else:
                     await self._execute_tool_calls(
                         tool_calls_list, provider, model_id, display_model, system_prompt
                     )
@@ -1882,15 +1900,17 @@ class ChatPanel(QWidget):
             "git_show_file": "Reading file from git...",
         }
         for tool_call in tool_calls_list:
+            logger.info(
+                "Executing tool: %s (id=%s, needs_approval=%s)",
+                tool_call.function_name,
+                tool_call.id,
+                self._tool_registry.needs_approval(tool_call.function_name) if self._tool_registry else "no_registry",
+            )
             status = _tool_status_map.get(
                 tool_call.function_name, f"Running {tool_call.function_name}..."
             )
             self._set_agent_status(status)
-            if self._current_assistant_msg:
-                self._current_assistant_msg.append_content(
-                    f"\n\n> Requested **{tool_call.function_name}**..."
-                )
-                self._scroll_to_bottom()
+            # Don't pollute the assistant message with tool status
 
             # Check if this is an MCP tool
             is_mcp = self._mcp_client and self._mcp_client.is_mcp_tool(tool_call.function_name)
@@ -1929,14 +1949,45 @@ class ChatPanel(QWidget):
                 result = await self._tool_registry.execute(
                     tool_call.function_name, tool_call.arguments
                 )
+            elif tool_call.function_name == "web_search":
+                # Standalone mode (no project) — web_search still works
+                import json as _json
+
+                try:
+                    args = _json.loads(tool_call.arguments) if tool_call.arguments else {}
+                except (ValueError, TypeError):
+                    args = {}
+                from polyglot_ai.core.ai.tools.shell_tools import web_search
+
+                result = await web_search(args)
             else:
-                result = f"Error: No tool registry available for '{tool_call.function_name}'"
-            result_preview = result[:500] if len(result) > 500 else result
-            self._add_separator()
-            self._add_message_widget(
-                "tool",
-                f"**{tool_call.function_name}** result:\n```\n{result_preview}\n```",
+                result = f"Error: Open a project to use '{tool_call.function_name}'"
+            # Show compact tool status — not the raw output
+            _tool_done_labels = {
+                "web_search": "Searched the web",
+                "file_read": "Read file",
+                "file_search": "Searched files",
+                "list_directory": "Listed directory",
+                "git_status": "Checked git status",
+                "git_diff": "Got git diff",
+                "git_log": "Got git log",
+                "git_show_file": "Read file from git",
+                "shell_exec": "Ran command",
+                "file_write": "Wrote file",
+                "file_patch": "Patched file",
+                "git_commit": "Committed changes",
+            }
+            done_label = _tool_done_labels.get(
+                tool_call.function_name, f"Ran {tool_call.function_name}"
             )
+            # Show compact inline status — not the raw tool output
+            from PyQt6.QtWidgets import QLabel
+
+            status_label = QLabel(f"  {done_label}")
+            status_label.setStyleSheet(
+                "color: #888; font-size: 12px; font-style: italic; padding: 2px 0;"
+            )
+            self._message_layout.addWidget(status_label)
 
             self._current_conversation.messages.append(
                 Message(role="tool", content=result, tool_call_id=tool_call.id)
@@ -1960,14 +2011,33 @@ class ChatPanel(QWidget):
                         current_content = full.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-        dialog = ApprovalDialog(tool_name, arguments, current_content=current_content, parent=self)
-        dialog.exec()
-        return dialog.approved
 
-    async def _stream_followup(self, provider, model_id, display_model, system_prompt) -> None:
-        if not self._current_conversation:
+        # qasync cannot suspend an async task while a blocking Qt dialog
+        # is open.  Use a non-blocking dialog with a Future so the async
+        # coroutine properly yields control back to the event loop.
+        from PyQt6.QtCore import QEventLoop
+
+        approved = False
+
+        def _on_finished(_result: int) -> None:
+            nonlocal approved
+            approved = dialog.approved
+            inner_loop.quit()
+
+        dialog = ApprovalDialog(tool_name, arguments, current_content=current_content, parent=self)
+        inner_loop = QEventLoop(self)
+        dialog.finished.connect(_on_finished)
+        dialog.open()
+        inner_loop.exec()
+        return approved
+
+    async def _stream_followup(
+        self, provider, model_id, display_model, system_prompt, _depth: int = 0
+    ) -> None:
+        if not self._current_conversation or _depth > 5:
             return
 
+        logger.info("Starting follow-up stream (depth=%d)", _depth)
         self._set_agent_status("Analyzing results...")
         messages = self._current_conversation.get_api_messages()
 
@@ -1979,6 +2049,8 @@ class ChatPanel(QWidget):
         self._current_assistant_msg.on_regenerate = lambda: self._regenerate_last()
         self._message_layout.addWidget(self._current_assistant_msg)
 
+        full_content = ""
+        tool_calls_data: dict[int, dict] = {}
         try:
             async for chunk in provider.stream_chat(
                 messages=messages,
@@ -1987,19 +2059,73 @@ class ChatPanel(QWidget):
                 system_prompt=system_prompt,
             ):
                 if chunk.delta_content:
+                    full_content += chunk.delta_content
                     self._current_assistant_msg.append_content(chunk.delta_content)
                     self._scroll_to_bottom()
+                if chunk.tool_calls:
+                    for tc in chunk.tool_calls:
+                        idx = tc["index"]
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {
+                                "id": tc.get("id", ""),
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        if tc.get("id"):
+                            tool_calls_data[idx]["id"] = tc["id"]
+                        func = tc.get("function", {})
+                        if func.get("name"):
+                            tool_calls_data[idx]["function"]["name"] = func["name"]
+                        if func.get("arguments"):
+                            tool_calls_data[idx]["function"]["arguments"] += func["arguments"]
 
-            content = self._current_assistant_msg.content
-            if content:
-                self._current_conversation.messages.append(
-                    Message(role="assistant", content=content, model=model_id)
+            logger.info(
+                "Follow-up stream done, content length: %d, tool_calls: %d",
+                len(full_content),
+                len(tool_calls_data),
+            )
+
+            # Build tool calls list
+            tool_calls_list = None
+            if tool_calls_data:
+                tool_calls_list = [
+                    ToolCall(
+                        id=tc["id"],
+                        function_name=tc["function"]["name"],
+                        arguments=tc["function"]["arguments"],
+                    )
+                    for tc in tool_calls_data.values()
+                    if tc["function"]["name"]
+                ]
+                if not tool_calls_list:
+                    tool_calls_list = None
+
+            # Save assistant message
+            self._current_conversation.messages.append(
+                Message(
+                    role="assistant",
+                    content=full_content if full_content else None,
+                    tool_calls=tool_calls_list,
+                    model=model_id,
                 )
-                await self._auto_apply(content)
+            )
+
+            # Execute any tool calls and recurse
+            if tool_calls_list:
+                self._current_assistant_msg = None
+                await self._execute_tool_calls(
+                    tool_calls_list, provider, model_id, display_model, system_prompt
+                )
+            elif full_content:
+                await self._auto_apply(full_content)
+
+            await self._persist_conversation()
         except asyncio.CancelledError:
             pass
         except Exception:
             logger.exception("Error during follow-up streaming")
+        finally:
+            self._set_streaming_ui(False)
+            self._current_assistant_msg = None
 
     # ─── Conversation persistence ───────────────────────────────────
 

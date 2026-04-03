@@ -9,6 +9,20 @@ logger = logging.getLogger(__name__)
 
 async def file_read(file_ops, args: dict) -> str:
     path = args.get("path", "")
+
+    # Block AI from reading secret/sensitive files
+    from polyglot_ai.core.security import is_secret_file
+    from polyglot_ai.core.file_safety import check_blocked_file
+
+    from pathlib import Path
+
+    p = Path(path)
+    blocked = check_blocked_file(path)
+    if blocked:
+        return f"Error: Cannot read {p.name} — {blocked}"
+    if is_secret_file(p):
+        return f"Error: Cannot read {p.name} — file appears to contain secrets"
+
     return file_ops.read(path)
 
 

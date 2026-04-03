@@ -87,14 +87,11 @@ async def git_commit(sandbox, args: dict) -> str:
     if returncode != 0:
         return f"Staging failed: {output}"
 
-    # Step 2: git commit -m '...'
-    safe_message = message.replace("'", "'\\''")
-    commit_cmd = f"git commit -m '{safe_message}'"
-    allowed, reason = sandbox.validate_command(commit_cmd)
-    if not allowed:
-        return f"Command blocked: {reason}"
-
-    output, returncode = await sandbox.exec_command(commit_cmd)
+    # Step 2: git commit -m <message>
+    # Use exec_argv to avoid shell-style quoting issues with the message
+    output, returncode = await sandbox.exec_argv(
+        ["git", "commit", "-m", message]
+    )
     if returncode != 0:
         return f"Commit failed: {output}"
     return f"Commit successful:\n{output.strip()}" if output else "Commit successful."

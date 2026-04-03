@@ -127,9 +127,9 @@ class ChatMessage(QWidget):
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             self._content_label.setStyleSheet(
-                "QTextBrowser { color: #d1d5db; font-size: 13px; background: transparent; "
-                "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', sans-serif; "
-                "line-height: 145%; }"
+                "QTextBrowser { color: #d1d5db; font-size: 14px; background: transparent; "
+                "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif; "
+                "line-height: 150%; }"
                 "QTextBrowser a { color: #7cacf8; text-decoration: none; }"
             )
             self._content_label.anchorClicked.connect(self._on_link_clicked)
@@ -692,43 +692,68 @@ class ChatMessage(QWidget):
         # Escape HTML in remaining text
         text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        # Inline code — subtle pill style
+        # Inline code — dark pill, warm accent like Claude
         text = re.sub(
             r"`([^`]+)`",
-            r'<code style="background:#2f2f2f; padding:2px 6px; '
-            r"border-radius:4px; font-family:\'Consolas\',monospace; "
-            r'font-size:13px; color:#f97583;">\1</code>',
+            r'<code style="background:rgba(255,255,255,0.06); padding:2px 7px; '
+            r"border-radius:6px; font-family:'Consolas','Monaco','SF Mono',monospace; "
+            r'font-size:13px; color:#e06c75; border:1px solid rgba(255,255,255,0.08);">'
+            r"\1</code>",
             text,
         )
 
-        # Bold
-        text = re.sub(r"\*\*(.+?)\*\*", r'<b style="color:#e0e0e0;">\1</b>', text)
+        # Bold — bright white for emphasis
+        text = re.sub(r"\*\*(.+?)\*\*", r'<b style="color:#f5f5f5; font-weight:600;">\1</b>', text)
 
         # Italic
-        text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<i>\1</i>", text)
+        text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r'<i style="color:#b8b8b8;">\1</i>', text)
 
-        # Links
+        # Links — underline on hover feel
         text = re.sub(
             r"\[(.+?)\]\((.+?)\)",
-            r'<a href="\2" style="color:#7cacf8; text-decoration:none;">\1</a>',
+            r'<a href="\2" style="color:#7cacf8; text-decoration:none; '
+            r'border-bottom:1px solid rgba(124,172,248,0.3);">\1</a>',
             text,
         )
 
-        # Process line by line — compact spacing like ChatGPT
+        # Process line by line
         lines = text.split("\n")
         html_lines: list[str] = []
         in_list = False
         prev_empty = False
 
+        # Table-based list items give proper hanging indent in QTextBrowser.
+        # The marker goes in a fixed-width left cell, content wraps in the right cell.
+        def _bullet_item(content: str) -> str:
+            return (
+                '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
+                '<tr>'
+                '<td style="width:8px;"></td>'
+                '<td style="vertical-align:top; padding-right:8px; color:#888; width:12px;">•</td>'
+                f'<td style="vertical-align:top;">{content}</td>'
+                '</tr></table>'
+            )
+
+        def _numbered_item(num: str, content: str) -> str:
+            return (
+                '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
+                '<tr>'
+                '<td style="width:6px;"></td>'
+                f'<td style="vertical-align:top; padding-right:6px; color:#888; '
+                f'font-weight:600; width:18px; text-align:right;">{num}.</td>'
+                f'<td style="vertical-align:top;">{content}</td>'
+                '</tr></table>'
+            )
+
         for line in lines:
             stripped = line.strip()
 
-            # Empty line = small paragraph gap (collapse multiple)
+            # Empty line = paragraph break
             if not stripped:
                 if not prev_empty:
                     if in_list:
                         in_list = False
-                    html_lines.append('<div style="height:4px;"></div>')
+                    html_lines.append('<div style="height:6px;"></div>')
                 prev_empty = True
                 continue
             prev_empty = False
@@ -737,57 +762,74 @@ class ChatMessage(QWidget):
             if stripped.startswith("\x00CODE") and stripped.endswith("\x00"):
                 idx = int(stripped.replace("\x00CODE", "").replace("\x00", ""))
                 html_lines.append(code_blocks[idx])
+                in_list = False
                 continue
 
-            # Headers — compact, bold
+            # Headers
             if stripped.startswith("### "):
+                in_list = False
                 html_lines.append(
                     f'<div style="font-size:14px; font-weight:600; '
-                    f'margin:8px 0 2px 0; color:#e0e0e0;">{stripped[4:]}</div>'
+                    f'margin:10px 0 3px 0; color:#e8e8e8;">{stripped[4:]}</div>'
                 )
                 continue
             if stripped.startswith("## "):
+                in_list = False
                 html_lines.append(
-                    f'<div style="font-size:15px; font-weight:600; '
-                    f'margin:10px 0 2px 0; color:#e0e0e0;">{stripped[3:]}</div>'
+                    f'<div style="font-size:15px; font-weight:700; '
+                    f'margin:12px 0 4px 0; padding-bottom:3px; '
+                    f'border-bottom:1px solid rgba(255,255,255,0.08); '
+                    f'color:#f0f0f0;">{stripped[3:]}</div>'
                 )
                 continue
             if stripped.startswith("# "):
+                in_list = False
                 html_lines.append(
                     f'<div style="font-size:16px; font-weight:700; '
-                    f'margin:10px 0 3px 0; color:#fff;">{stripped[2:]}</div>'
+                    f'margin:14px 0 4px 0; padding-bottom:4px; '
+                    f'border-bottom:1px solid rgba(255,255,255,0.1); '
+                    f'color:#ffffff;">{stripped[2:]}</div>'
                 )
                 continue
 
             # Horizontal rule
             if re.match(r"^---+$", stripped):
+                in_list = False
                 html_lines.append(
-                    '<hr style="border:none; border-top:1px solid #374151; margin:6px 0;">'
+                    '<hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); '
+                    'margin:8px 0;">'
                 )
                 continue
 
-            # Bullet list items — tight
+            # Bullet list items — table layout for proper hanging indent
             m = re.match(r"^[-*•]\s+(.+)$", stripped)
             if m:
                 in_list = True
-                html_lines.append(
-                    f'<div style="margin:1px 0; padding-left:16px; text-indent:-12px;">'
-                    f'<span style="color:#666;">•</span> {m.group(1)}</div>'
-                )
+                html_lines.append(_bullet_item(m.group(1)))
                 continue
 
-            # Numbered list items — tight
+            # Numbered list items — table layout
             m = re.match(r"^(\d+)[.)]\s+(.+)$", stripped)
             if m:
                 in_list = True
+                html_lines.append(_numbered_item(m.group(1), m.group(2)))
+                continue
+
+            # Blockquote
+            if stripped.startswith("&gt; "):
+                in_list = False
                 html_lines.append(
-                    f'<div style="margin:1px 0; padding-left:16px; text-indent:-14px;">'
-                    f'<span style="color:#666;">{m.group(1)}.</span> {m.group(2)}</div>'
+                    f'<div style="margin:4px 0; padding:3px 12px; '
+                    f'border-left:3px solid rgba(124,172,248,0.4); '
+                    f'color:#aaa; font-style:italic;">{stripped[5:]}</div>'
                 )
                 continue
 
-            # Regular text — minimal margin
-            html_lines.append(f'<div style="margin:1px 0;">{stripped}</div>')
+            # Regular text
+            in_list = False
+            html_lines.append(
+                f'<div style="margin:2px 0;">{stripped}</div>'
+            )
 
         return "\n".join(html_lines)
 

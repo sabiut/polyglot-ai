@@ -22,15 +22,27 @@ BLOCKED_FILENAMES = {
     ".zshrc",
     ".profile",
     ".bash_profile",
+    ".bash_logout",
+    ".login",
+    ".cshrc",
     ".gitconfig",
     ".npmrc",
     ".pypirc",
+    ".netrc",
+    ".docker/config.json",
     "id_rsa",
     "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    "known_hosts",
     "authorized_keys",
     "shadow",
     "passwd",
     "sudoers",
+    ".env.local",
+    ".env.production",
+    "credentials.json",
+    "service_account.json",
 }
 
 # Hidden directories that ARE allowed (common repo config)
@@ -53,6 +65,7 @@ SENSITIVE_HIDDEN_PATHS = {
     ".circleci",
     ".gitlab/ci",
     ".gitlab-ci.yml",
+    ".git/hooks",
 }
 
 

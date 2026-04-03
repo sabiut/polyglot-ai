@@ -25,14 +25,20 @@ logger = logging.getLogger(__name__)
 
 def setup_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / "polyglot-ai.log"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(LOG_DIR / "polyglot-ai.log"),
+            logging.FileHandler(log_path),
         ],
     )
+    # Restrict log file permissions — logs may contain sensitive paths/errors
+    try:
+        log_path.chmod(0o600)
+    except OSError:
+        pass
 
 
 # ── Bootstrap helpers ────────────────────────────────────────────

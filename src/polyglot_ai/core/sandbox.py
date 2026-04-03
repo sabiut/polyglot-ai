@@ -137,6 +137,8 @@ class Sandbox:
                 "--no-preserve-root",
                 "eval",
                 "exec",
+                "-ok",
+                "-execdir",
             }
         )
         for part in parts[1:]:
@@ -145,6 +147,55 @@ class Sandbox:
             # Block env-var-like injection in arguments
             if part.startswith("$") or part.startswith("`"):
                 return False, f"Shell expansion '{part}' is not allowed in arguments"
+
+        # Git subcommand restrictions — only allow read-only subcommands
+        # without explicit approval. Mutating git ops go through the
+        # git_commit tool which has its own approval flow.
+        if base_cmd == "git" and len(parts) > 1:
+            _SAFE_GIT_SUBCMDS = frozenset(
+                {
+                    "status",
+                    "diff",
+                    "log",
+                    "show",
+                    "branch",
+                    "tag",
+                    "remote",
+                    "stash",
+                    "blame",
+                    "shortlog",
+                    "describe",
+                    "rev-parse",
+                    "ls-files",
+                    "ls-tree",
+                    "cat-file",
+                    "reflog",
+                    "config",  # read-only by default
+                }
+            )
+            subcmd = parts[1]
+            # Skip flags before the subcommand (e.g. git -C /path status)
+            if subcmd.startswith("-"):
+                for p in parts[2:]:
+                    if not p.startswith("-"):
+                        subcmd = p
+                        break
+            if subcmd not in _SAFE_GIT_SUBCMDS:
+                return False, (
+                    f"Git subcommand '{subcmd}' requires approval. "
+                    f"Only read-only git commands are auto-allowed."
+                )
+            # Block git config --global/--system writes
+            if subcmd == "config" and any(
+                p in ("--global", "--system", "--unset") for p in parts[2:]
+            ):
+                return False, "Modifying global/system git config is not allowed"
+
+        # find restrictions — block dangerous flags not caught above
+        if base_cmd == "find":
+            for part in parts[1:]:
+                if part in ("-ok", "-execdir", "-fls", "-fprintf"):
+                    return False, f"Dangerous find flag '{part}' is not allowed"
 
         return True, "Allowed"
 
@@ -164,6 +215,48 @@ class Sandbox:
         base_cmd = Path(parts[0]).name
         return base_cmd in DANGEROUS_COMMANDS
 
+    async def exec_argv(
+        self,
+        argv: list[str],
+        workdir: str | None = None,
+        timeout: int = COMMAND_TIMEOUT,
+    ) -> tuple[str, int]:
+        """Execute a pre-split command as argv list.
+
+        Bypasses shlex parsing — caller provides the exact argv.
+        Still enforces path confinement for workdir.
+        Returns (output, returncode).
+        """
+        if not argv:
+            return "Empty command", 1
+
+        cwd = self._root
+        if workdir:
+            cwd = self.validate_path(workdir)
+            if not cwd.is_dir():
+                return f"Not a directory: {workdir}", 1
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+            if len(output) > 10000:
+                output = output[:10000] + "\n... (output truncated)"
+            return output, proc.returncode or 0
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            return f"Command timed out after {timeout}s", 1
+        except Exception as e:
+            return f"Error executing command: {e}", 1
+
     async def exec_command(
         self,
         command: str,
@@ -172,9 +265,16 @@ class Sandbox:
     ) -> tuple[str, int]:
         """Execute a command in the sandbox with timeout.
 
+        Enforces command validation at the execution boundary —
+        callers do NOT need to call validate_command() separately.
         Uses create_subprocess_exec (not shell) to prevent shell injection.
         Returns (output, returncode).
         """
+        # Enforce policy at execution boundary
+        allowed, reason = self.validate_command(command)
+        if not allowed:
+            return f"Command blocked: {reason}", 1
+
         cwd = self._root
         if workdir:
             cwd = self.validate_path(workdir)

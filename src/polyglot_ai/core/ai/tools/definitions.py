@@ -297,11 +297,11 @@ AUTO_APPROVE = {
     "git_log",
     "git_show_file",
     "create_plan",
+    "web_search",  # read-only external fetch; auto-approved for UX
 }
 REQUIRES_APPROVAL = {
     "file_write",
     "file_patch",
     "shell_exec",
     "git_commit",
-    "web_search",  # network access — user should approve
 }
