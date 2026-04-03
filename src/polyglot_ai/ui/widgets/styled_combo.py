@@ -6,7 +6,7 @@ import tempfile
 from typing import Any
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
     QListView,

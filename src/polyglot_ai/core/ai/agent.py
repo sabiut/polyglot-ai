@@ -7,7 +7,6 @@ import logging
 
 from polyglot_ai.constants import (
     EVT_AI_ERROR,
-    EVT_AI_STREAM_DONE,
     EVT_AI_TOOL_CALL_REQUEST,
     EVT_APPROVAL_REQUESTED,
     EVT_APPROVAL_RESPONSE,

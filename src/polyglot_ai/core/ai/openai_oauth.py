@@ -257,7 +257,6 @@ class OpenAIOAuthClient(AIProvider):
                 payload["tools"] = responses_tools
 
         max_retries = 3
-        last_error = None
 
         for attempt in range(max_retries):
             try:
@@ -454,7 +453,6 @@ class OpenAIOAuthClient(AIProvider):
                 return  # Success — exit retry loop
 
             except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as e:
-                last_error = e
                 if attempt < max_retries - 1:
                     wait = 3 * (attempt + 1)
                     logger.warning(

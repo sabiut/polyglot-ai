@@ -8,9 +8,9 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from polyglot_ai.constants import CODE_EXTENSIONS, MAX_FILE_SIZE, SKIP_DIRS
+
+logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> list[str]:

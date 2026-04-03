@@ -14,7 +14,8 @@ def test_subscribe_and_emit():
 def test_unsubscribe():
     bus = EventBus()
     received = []
-    handler = lambda **kw: received.append(kw)
+    def handler(**kw):
+        received.append(kw)
     bus.subscribe("test", handler)
     bus.unsubscribe("test", handler)
     bus.emit("test", data="hello")

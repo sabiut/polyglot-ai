@@ -270,7 +270,7 @@ class MCPClient:
         """Disconnect from an MCP server."""
         if server_name in self._sessions:
             try:
-                session = self._sessions.pop(server_name)
+                self._sessions.pop(server_name)
                 transport_ctx = self._transports.pop(server_name, None)
                 if transport_ctx:
                     await transport_ctx.__aexit__(None, None, None)
@@ -344,7 +344,7 @@ class MCPClient:
             from polyglot_ai.core.security import sanitize_error
             logger.error("MCP tool call failed: %s/%s: %s",
                          tool.server_name, tool.name, sanitize_error(str(e)))
-            return f"Error calling MCP tool. See logs for details."
+            return "Error calling MCP tool. See logs for details."
 
     def is_mcp_tool(self, tool_name: str) -> bool:
         """Check if a tool name belongs to an MCP server."""

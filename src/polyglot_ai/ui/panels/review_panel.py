@@ -6,18 +6,16 @@ import asyncio
 import logging
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from polyglot_ai.core.review.models import ReviewFinding, ReviewResult, Severity
+from polyglot_ai.core.review.models import ReviewFinding, ReviewResult
 
 logger = logging.getLogger(__name__)
 

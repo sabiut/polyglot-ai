@@ -1,7 +1,6 @@
 """Tests for Sandbox."""
 
 import pytest
-from pathlib import Path
 
 from polyglot_ai.core.sandbox import Sandbox
 

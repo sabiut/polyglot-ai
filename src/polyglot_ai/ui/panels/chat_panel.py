@@ -263,7 +263,7 @@ class ChatPanel(QWidget):
         msg_layout.addWidget(self._attach_bar)
 
         # ── Input area ──
-        arrow_path = self._create_arrow_icon()
+        self._create_arrow_icon()
 
         input_wrapper = QWidget()
         input_wrapper.setStyleSheet("background: transparent;")
@@ -1681,46 +1681,46 @@ class ChatPanel(QWidget):
             "git_commit": "Committing changes...",
             "git_show_file": "Reading file from git...",
         }
-        for tc in tool_calls_list:
-            status = _tool_status_map.get(tc.function_name, f"Running {tc.function_name}...")
+        for tool_call in tool_calls_list:
+            status = _tool_status_map.get(tool_call.function_name, f"Running {tool_call.function_name}...")
             self._set_agent_status(status)
             if self._current_assistant_msg:
-                self._current_assistant_msg.append_content(f"\n\n> Requested **{tc.function_name}**...")
+                self._current_assistant_msg.append_content(f"\n\n> Requested **{tool_call.function_name}**...")
                 self._scroll_to_bottom()
 
             # Check if this is an MCP tool
-            is_mcp = self._mcp_client and self._mcp_client.is_mcp_tool(tc.function_name)
+            is_mcp = self._mcp_client and self._mcp_client.is_mcp_tool(tool_call.function_name)
 
-            if not is_mcp and self._tool_registry and self._tool_registry.needs_approval(tc.function_name):
-                approved = await self._request_tool_approval(tc.function_name, tc.arguments)
+            if not is_mcp and self._tool_registry and self._tool_registry.needs_approval(tool_call.function_name):
+                approved = await self._request_tool_approval(tool_call.function_name, tool_call.arguments)
                 if not approved:
                     self._add_separator()
-                    self._add_message_widget("tool", f"**{tc.function_name}** rejected by user.")
+                    self._add_message_widget("tool", f"**{tool_call.function_name}** rejected by user.")
                     self._current_conversation.messages.append(
-                        Message(role="tool", content="User rejected this tool call.", tool_call_id=tc.id)
+                        Message(role="tool", content="User rejected this tool call.", tool_call_id=tool_call.id)
                     )
                     continue
 
             if is_mcp:
                 import json as _json
                 try:
-                    args = _json.loads(tc.arguments) if tc.arguments else {}
+                    args = _json.loads(tool_call.arguments) if tool_call.arguments else {}
                 except (ValueError, TypeError):
                     args = {}
-                result = await self._mcp_client.call_tool(tc.function_name, args)
+                result = await self._mcp_client.call_tool(tool_call.function_name, args)
             elif self._tool_registry:
-                result = await self._tool_registry.execute(tc.function_name, tc.arguments)
+                result = await self._tool_registry.execute(tool_call.function_name, tool_call.arguments)
             else:
-                result = f"Error: No tool registry available for '{tc.function_name}'"
+                result = f"Error: No tool registry available for '{tool_call.function_name}'"
             result_preview = result[:500] if len(result) > 500 else result
             self._add_separator()
             self._add_message_widget(
                 "tool",
-                f"**{tc.function_name}** result:\n```\n{result_preview}\n```",
+                f"**{tool_call.function_name}** result:\n```\n{result_preview}\n```",
             )
 
             self._current_conversation.messages.append(
-                Message(role="tool", content=result, tool_call_id=tc.id)
+                Message(role="tool", content=result, tool_call_id=tool_call.id)
             )
 
         self._current_assistant_msg = None

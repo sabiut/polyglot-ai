@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
@@ -279,7 +279,7 @@ class ActivityBar(QWidget):
 
     def _on_click(self, view_name: str) -> None:
         # If clicking the already active view, toggle sidebar visibility
-        currently_active = next((k for k, b in self._buttons.items() if b.active), None)
+        _ = next((k for k, b in self._buttons.items() if b.active), None)
 
         if view_name == "settings":
             self.view_changed.emit("settings")

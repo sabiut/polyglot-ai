@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from polyglot_ai.ui import theme_colors as tc
 
 from PyQt6.QtWidgets import (
@@ -212,8 +212,8 @@ class GitPanel(QWidget):
 
             # Schedule UI update on the main thread
             QTimer.singleShot(0, lambda: self._apply_refresh(branch, status))
-        except Exception as e:
-            QTimer.singleShot(0, lambda: self._apply_refresh_error(e))
+        except Exception as exc:  # noqa: F841
+            QTimer.singleShot(0, lambda err=exc: self._apply_refresh_error(err))
 
     def _apply_refresh(self, branch: str, status_output: str) -> None:
         """Apply git refresh results to UI (must run on main thread)."""

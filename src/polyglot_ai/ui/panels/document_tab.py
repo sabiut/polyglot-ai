@@ -235,7 +235,7 @@ class DocumentTab(QWidget):
             printer.setOutputFileName(path)
             self._preview.document().print_(printer)
             logger.info("Exported PDF: %s", path)
-        except Exception as e:
+        except Exception:
             logger.exception("PDF export failed")
 
     def _export_html(self) -> None:
@@ -251,7 +251,7 @@ class DocumentTab(QWidget):
             html = self._preview.toHtml()
             Path(path).write_text(html, encoding="utf-8")
             logger.info("Exported HTML: %s", path)
-        except Exception as e:
+        except Exception:
             logger.exception("HTML export failed")
 
     # File operations (same interface as EditorTab)

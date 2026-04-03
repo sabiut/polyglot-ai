@@ -126,7 +126,8 @@ class OpenAIClient(AIProvider):
             self._event_bus.emit(EVT_AI_STREAM_DONE)
 
         except Exception as e:
-            from polyglot_ai.core.security import sanitize_error; error_msg = sanitize_error(str(e))
+            from polyglot_ai.core.security import sanitize_error
+            error_msg = sanitize_error(str(e))
             logger.exception("OpenAI API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
             yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg}")

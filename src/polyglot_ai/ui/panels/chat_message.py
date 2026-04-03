@@ -8,14 +8,12 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QSizePolicy,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
-from polyglot_ai.ui import theme_colors as tc
 
 
 class AvatarWidget(QWidget):
@@ -56,7 +54,6 @@ class ChatMessage(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setStyleSheet("background: transparent;")
 
-        from PyQt6.QtWidgets import QPushButton
 
         _icon_btn_style = """
             QPushButton {

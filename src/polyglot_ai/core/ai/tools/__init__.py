@@ -13,7 +13,7 @@ import logging
 
 from polyglot_ai.core.ai.tools.definitions import (
     AUTO_APPROVE,
-    REQUIRES_APPROVAL,
+    REQUIRES_APPROVAL as REQUIRES_APPROVAL,
     TOOL_DEFINITIONS,
 )
 from polyglot_ai.core.file_ops import FileOperations
