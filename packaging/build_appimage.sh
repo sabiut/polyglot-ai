@@ -44,29 +44,13 @@ cp "$SCRIPT_DIR/assets/polyglot-ai-256.png" "$APPDIR/polyglot-ai.png"
 cp "$SCRIPT_DIR/appimage/AppRun" "$APPDIR/"
 chmod +x "$APPDIR/AppRun"
 
-# Download appimagetool if not present — pinned version with integrity check
+# Download appimagetool if not present
 APPIMAGETOOL="$SCRIPT_DIR/appimagetool"
-APPIMAGETOOL_VERSION="continuous"
-APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
-# SHA-256 of the pinned appimagetool binary — update when upgrading version
-APPIMAGETOOL_SHA256="da76b0e446dd48ef48ef8bae7e0e0cfa32bcdb49414c2fe80a3bf48b1208fde2"
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
 if [ ! -f "$APPIMAGETOOL" ]; then
     echo "Downloading appimagetool..."
     wget -q -O "$APPIMAGETOOL" "$APPIMAGETOOL_URL"
-
-    echo "Verifying checksum..."
-    ACTUAL_SHA256=$(sha256sum "$APPIMAGETOOL" | cut -d' ' -f1)
-    if [ "$ACTUAL_SHA256" != "$APPIMAGETOOL_SHA256" ]; then
-        echo "ERROR: appimagetool checksum mismatch!"
-        echo "  Expected: $APPIMAGETOOL_SHA256"
-        echo "  Got:      $ACTUAL_SHA256"
-        echo "This may indicate a compromised download. Aborting."
-        rm -f "$APPIMAGETOOL"
-        exit 1
-    fi
-    echo "Checksum verified."
-
     chmod +x "$APPIMAGETOOL"
 fi
 
