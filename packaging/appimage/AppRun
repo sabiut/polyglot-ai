@@ -1,0 +1,14 @@
+#!/bin/bash
+# AppRun — entry point for the Polyglot AI AppImage
+APPDIR="$(dirname "$(readlink -f "$0")")"
+
+# Use bundled Python
+export PATH="$APPDIR/usr/bin:$PATH"
+export PYTHONHOME="$APPDIR/usr"
+export PYTHONPATH="$APPDIR/usr/lib/python3.11/site-packages:$PYTHONPATH"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
+
+# Qt platform plugin path
+export QT_PLUGIN_PATH="$APPDIR/usr/lib/python3.11/site-packages/PyQt6/Qt6/plugins"
+
+exec "$APPDIR/usr/bin/python3" -m polyglot_ai.app "$@"

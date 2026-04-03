@@ -1,0 +1,12 @@
+Package: polyglot-ai
+Version: 0.2.0
+Section: devel
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.11), python3-venv, libgl1, libxcb-xinerama0, libxkbcommon0, libxcb-cursor0
+Maintainer: Polyglot AI Contributors
+Description: AI-powered coding assistant desktop app
+ Polyglot AI is a desktop coding assistant for Linux that supports
+ multiple AI providers including OpenAI, Anthropic Claude, Google Gemini,
+ and xAI Grok, with a full IDE-like interface including a code editor,
+ file explorer, chat panel, review tools, and terminal.

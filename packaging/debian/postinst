@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/opt/polyglot-ai"
+VENV_DIR="$INSTALL_DIR/venv"
+
+# Create virtual environment
+python3 -m venv "$VENV_DIR"
+
+# Install the wheel
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
+
+# Create symlink
+ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
+
+echo "Polyglot AI installed successfully."

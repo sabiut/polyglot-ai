@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Polyglot AI
+Comment=AI-powered multi-provider coding assistant
+Exec=polyglot-ai
+Icon=polyglot-ai
+Type=Application
+Categories=Development;IDE;TextEditor;
+Keywords=code;editor;ai;openai;anthropic;claude;gemini;python;
+Terminal=false
+StartupNotify=true

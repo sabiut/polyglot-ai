@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.sabiut.polyglotai</id>
+  <name>Polyglot AI</name>
+  <summary>AI-powered multi-provider coding assistant</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LGPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Polyglot AI is a desktop coding assistant for Linux that supports
+      multiple AI providers including OpenAI, Anthropic Claude, Google Gemini,
+      and xAI Grok. It provides a full IDE-like interface with a code editor,
+      file explorer, AI chat panel, code review tools, and integrated terminal.
+    </p>
+  </description>
+
+  <url type="homepage">https://github.com/sabiut/polyglot-ai</url>
+  <url type="bugtracker">https://github.com/sabiut/polyglot-ai/issues</url>
+
+  <launchable type="desktop-id">polyglot-ai.desktop</launchable>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.2.0" date="2026-04-01">
+      <description>
+        <p>First release as Polyglot AI (renamed from Codex Desktop).</p>
+      </description>
+    </release>
+  </releases>
+</component>

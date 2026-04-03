@@ -1,0 +1,27 @@
+app-id: io.github.sabiut.polyglotai
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: polyglot-ai
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Least-privilege: only access user-selected project directories
+  # via the file chooser portal, plus app-specific data/config dirs.
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-config/polyglot-ai:create
+  - --filesystem=xdg-data/polyglot-ai:create
+  - --device=dri
+
+modules:
+  - name: python3-polyglot-ai
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-build-isolation --prefix=/app dist/*.whl
+    sources:
+      - type: dir
+        path: ../../

@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+
+  build-deb:
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - name: Build .deb
+        run: bash packaging/build_deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: packaging/*.deb
+
+  build-rpm:
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: dnf install -y rpm-build python3 python3-pip python3-devel
+      - name: Build .rpm
+        run: bash packaging/build_rpm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: packaging/*.rpm
+
+  build-appimage:
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 wget
+      - name: Build AppImage
+        run: bash packaging/build_appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: packaging/*.AppImage
+
+  create-release:
+    needs: [build-deb, build-rpm, build-appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f | head -20
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/wheel/*.whl
+            artifacts/deb/*.deb
+            artifacts/rpm/*.rpm
+            artifacts/appimage/*.AppImage
