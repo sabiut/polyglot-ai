@@ -310,10 +310,21 @@ def main() -> None:
     import shutil
     import subprocess
 
-    _desktop_src = Path(__file__).parent.parent.parent.parent / "packaging" / "debian" / "polyglot-ai.desktop"
+    _desktop_src = (
+        Path(__file__).parent.parent.parent.parent / "packaging" / "debian" / "polyglot-ai.desktop"
+    )
     _desktop_dst = Path.home() / ".local" / "share" / "applications" / "polyglot-ai.desktop"
     _icon_src = Path(__file__).parent / "resources" / "icons" / "polyglot-ai.png"
-    _icon_dst = Path.home() / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "polyglot-ai.png"
+    _icon_dst = (
+        Path.home()
+        / ".local"
+        / "share"
+        / "icons"
+        / "hicolor"
+        / "256x256"
+        / "apps"
+        / "polyglot-ai.png"
+    )
 
     if _icon_src.exists():
         _icon_dst.parent.mkdir(parents=True, exist_ok=True)
@@ -324,14 +335,16 @@ def main() -> None:
         # Patch Exec= to the real executable path so Gio/GNOME accepts it
         _real_exec = shutil.which("polyglot-ai") or sys.executable
         _desktop_content = _desktop_src.read_text()
-        _desktop_content = _desktop_content.replace(
-            "Exec=polyglot-ai", f"Exec={_real_exec}"
-        )
+        _desktop_content = _desktop_content.replace("Exec=polyglot-ai", f"Exec={_real_exec}")
         _desktop_dst.write_text(_desktop_content)
         for cmd in [
             ["update-desktop-database", str(_desktop_dst.parent)],
-            ["gtk-update-icon-cache", "-f", "-t",
-             str(Path.home() / ".local" / "share" / "icons" / "hicolor")],
+            [
+                "gtk-update-icon-cache",
+                "-f",
+                "-t",
+                str(Path.home() / ".local" / "share" / "icons" / "hicolor"),
+            ],
         ]:
             try:
                 subprocess.run(cmd, capture_output=True, timeout=5)

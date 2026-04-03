@@ -727,22 +727,22 @@ class ChatMessage(QWidget):
         def _bullet_item(content: str) -> str:
             return (
                 '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
-                '<tr>'
+                "<tr>"
                 '<td style="width:8px;"></td>'
                 '<td style="vertical-align:top; padding-right:8px; color:#888; width:12px;">•</td>'
                 f'<td style="vertical-align:top;">{content}</td>'
-                '</tr></table>'
+                "</tr></table>"
             )
 
         def _numbered_item(num: str, content: str) -> str:
             return (
                 '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
-                '<tr>'
+                "<tr>"
                 '<td style="width:6px;"></td>'
                 f'<td style="vertical-align:top; padding-right:6px; color:#888; '
                 f'font-weight:600; width:18px; text-align:right;">{num}.</td>'
                 f'<td style="vertical-align:top;">{content}</td>'
-                '</tr></table>'
+                "</tr></table>"
             )
 
         for line in lines:
@@ -777,8 +777,8 @@ class ChatMessage(QWidget):
                 in_list = False
                 html_lines.append(
                     f'<div style="font-size:15px; font-weight:700; '
-                    f'margin:12px 0 4px 0; padding-bottom:3px; '
-                    f'border-bottom:1px solid rgba(255,255,255,0.08); '
+                    f"margin:12px 0 4px 0; padding-bottom:3px; "
+                    f"border-bottom:1px solid rgba(255,255,255,0.08); "
                     f'color:#f0f0f0;">{stripped[3:]}</div>'
                 )
                 continue
@@ -786,8 +786,8 @@ class ChatMessage(QWidget):
                 in_list = False
                 html_lines.append(
                     f'<div style="font-size:16px; font-weight:700; '
-                    f'margin:14px 0 4px 0; padding-bottom:4px; '
-                    f'border-bottom:1px solid rgba(255,255,255,0.1); '
+                    f"margin:14px 0 4px 0; padding-bottom:4px; "
+                    f"border-bottom:1px solid rgba(255,255,255,0.1); "
                     f'color:#ffffff;">{stripped[2:]}</div>'
                 )
                 continue
@@ -820,16 +820,14 @@ class ChatMessage(QWidget):
                 in_list = False
                 html_lines.append(
                     f'<div style="margin:4px 0; padding:3px 12px; '
-                    f'border-left:3px solid rgba(124,172,248,0.4); '
+                    f"border-left:3px solid rgba(124,172,248,0.4); "
                     f'color:#aaa; font-style:italic;">{stripped[5:]}</div>'
                 )
                 continue
 
             # Regular text
             in_list = False
-            html_lines.append(
-                f'<div style="margin:2px 0;">{stripped}</div>'
-            )
+            html_lines.append(f'<div style="margin:2px 0;">{stripped}</div>')
 
         return "\n".join(html_lines)
 

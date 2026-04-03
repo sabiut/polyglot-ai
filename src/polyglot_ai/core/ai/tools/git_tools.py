@@ -89,9 +89,7 @@ async def git_commit(sandbox, args: dict) -> str:
 
     # Step 2: git commit -m <message>
     # Use exec_argv to avoid shell-style quoting issues with the message
-    output, returncode = await sandbox.exec_argv(
-        ["git", "commit", "-m", message]
-    )
+    output, returncode = await sandbox.exec_argv(["git", "commit", "-m", message])
     if returncode != 0:
         return f"Commit failed: {output}"
     return f"Commit successful:\n{output.strip()}" if output else "Commit successful."

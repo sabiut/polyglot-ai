@@ -1654,7 +1654,14 @@ class ChatPanel(QWidget):
             if tool_calls_data:
                 logger.info(
                     "Tool calls accumulated: %s",
-                    {k: {"id": v["id"], "name": v["function"]["name"], "args_len": len(v["function"]["arguments"])} for k, v in tool_calls_data.items()},
+                    {
+                        k: {
+                            "id": v["id"],
+                            "name": v["function"]["name"],
+                            "args_len": len(v["function"]["arguments"]),
+                        }
+                        for k, v in tool_calls_data.items()
+                    },
                 )
                 tool_calls_list = [
                     ToolCall(
@@ -1904,7 +1911,9 @@ class ChatPanel(QWidget):
                 "Executing tool: %s (id=%s, needs_approval=%s)",
                 tool_call.function_name,
                 tool_call.id,
-                self._tool_registry.needs_approval(tool_call.function_name) if self._tool_registry else "no_registry",
+                self._tool_registry.needs_approval(tool_call.function_name)
+                if self._tool_registry
+                else "no_registry",
             )
             status = _tool_status_map.get(
                 tool_call.function_name, f"Running {tool_call.function_name}..."

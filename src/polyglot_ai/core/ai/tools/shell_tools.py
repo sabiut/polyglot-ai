@@ -48,7 +48,12 @@ def _fetch_page_text(url: str, max_chars: int = 6000) -> str:
             html = resp.read().decode("utf-8", errors="replace")
 
         # Remove script, style, nav, header, footer
-        html = re.sub(r"<(script|style|nav|header|footer|aside)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(
+            r"<(script|style|nav|header|footer|aside)[^>]*>.*?</\1>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
         # Remove HTML tags
         text = re.sub(r"<[^>]+>", " ", html)
         # Clean up whitespace

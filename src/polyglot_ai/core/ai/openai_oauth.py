@@ -235,7 +235,11 @@ class OpenAIOAuthClient(AIProvider):
                     call_id = tc.get("id", "")
                     # Responses API: 'id' must start with 'fc_',
                     # 'call_id' is the call_xxx identifier.
-                    fc_id = call_id.replace("call_", "fc_", 1) if call_id.startswith("call_") else call_id
+                    fc_id = (
+                        call_id.replace("call_", "fc_", 1)
+                        if call_id.startswith("call_")
+                        else call_id
+                    )
                     input_messages.append(
                         {
                             "type": "function_call",
@@ -423,7 +427,9 @@ class OpenAIOAuthClient(AIProvider):
                             elif event_type == "response.function_call_arguments.delta":
                                 # Delta events use item_id, not call_id
                                 item_id = data.get("item_id", "")
-                                call_id = data.get("call_id") or item_id_to_call_id.get(item_id, item_id)
+                                call_id = data.get("call_id") or item_id_to_call_id.get(
+                                    item_id, item_id
+                                )
                                 if call_id not in call_id_to_idx:
                                     call_id_to_idx[call_id] = next_tool_idx
                                     next_tool_idx += 1
@@ -448,7 +454,9 @@ class OpenAIOAuthClient(AIProvider):
                                 # already got deltas, skip (they accumulated).
                                 # If no deltas arrived, use this as the source.
                                 item_id = data.get("item_id", "")
-                                call_id = data.get("call_id") or item_id_to_call_id.get(item_id, item_id)
+                                call_id = data.get("call_id") or item_id_to_call_id.get(
+                                    item_id, item_id
+                                )
                                 if call_id not in call_id_has_deltas:
                                     if call_id not in call_id_to_idx:
                                         call_id_to_idx[call_id] = next_tool_idx
@@ -523,7 +531,12 @@ class OpenAIOAuthClient(AIProvider):
                 self._event_bus.emit(EVT_AI_STREAM_DONE)
                 return  # Success — exit retry loop
 
-            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.ReadError) as e:
+            except (
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
+                httpx.ConnectError,
+                httpx.ReadError,
+            ) as e:
                 if attempt < max_retries - 1:
                     wait = 3 * (attempt + 1)
                     logger.warning(
