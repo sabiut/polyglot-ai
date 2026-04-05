@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
 import urllib.parse
@@ -11,6 +12,32 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) PolyglotAI/0.2"}
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check that a URL is safe to fetch (no localhost/private IPs)."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname or ""
+    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return False
+    except ValueError:
+        pass  # hostname, not IP — fine
+    return True
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Redirect handler that validates each redirect target against SSRF checks."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _is_safe_url(newurl):
+            raise urllib.error.URLError(f"Redirect to disallowed URL blocked: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 async def shell_exec(sandbox, args: dict) -> str:
@@ -41,10 +68,17 @@ def _extract_real_url(ddg_url: str) -> str:
 
 
 def _fetch_page_text(url: str, max_chars: int = 6000) -> str:
-    """Fetch a URL and extract readable text content."""
+    """Fetch a URL and extract readable text content.
+
+    Validates the URL against SSRF checks before fetching, and uses a
+    redirect handler that re-validates each redirect target.
+    """
+    if not _is_safe_url(url):
+        return "(Blocked: URL targets a private/local network)"
     try:
+        opener = urllib.request.build_opener(_SafeRedirectHandler)
         req = urllib.request.Request(url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with opener.open(req, timeout=8) as resp:
             html = resp.read().decode("utf-8", errors="replace")
 
         # Remove script, style, nav, header, footer
@@ -103,24 +137,6 @@ async def web_search(args: dict) -> str:
 
             # Fetch content from top 1-2 results for actual data
             # Only fetch http/https URLs — reject private/local networks
-            import ipaddress
-
-            def _is_safe_url(u: str) -> bool:
-                parsed = urllib.parse.urlparse(u)
-                if parsed.scheme not in ("http", "https"):
-                    return False
-                host = parsed.hostname or ""
-                # Reject localhost and private IPs
-                if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-                    return False
-                try:
-                    ip = ipaddress.ip_address(host)
-                    if ip.is_private or ip.is_loopback or ip.is_link_local:
-                        return False
-                except ValueError:
-                    pass  # hostname, not IP — fine
-                return True
-
             fetched_content = []
             for page_url in urls[:2]:
                 if not _is_safe_url(page_url):

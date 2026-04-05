@@ -185,11 +185,21 @@ class Sandbox:
                     f"Git subcommand '{subcmd}' requires approval. "
                     f"Only read-only git commands are auto-allowed."
                 )
-            # Block git config --global/--system writes
-            if subcmd == "config" and any(
-                p in ("--global", "--system", "--unset") for p in parts[2:]
-            ):
-                return False, "Modifying global/system git config is not allowed"
+            # Block git config writes — any set/unset requires approval
+            if subcmd == "config":
+                # Block global/system scope entirely
+                if any(p in ("--global", "--system") for p in parts[2:]):
+                    return False, "Modifying global/system git config is not allowed"
+                # Block unset operations
+                if any(
+                    p in ("--unset", "--unset-all", "--remove-section", "--rename-section")
+                    for p in parts[2:]
+                ):
+                    return False, "Modifying git config requires approval"
+                # Block value-setting: `git config <key> <value>` has 2+ non-flag args after "config"
+                non_flag_args = [p for p in parts[2:] if not p.startswith("-")]
+                if len(non_flag_args) >= 2:
+                    return False, "Writing to git config requires approval"
 
         # find restrictions — block dangerous flags not caught above
         if base_cmd == "find":
@@ -224,11 +234,16 @@ class Sandbox:
         """Execute a pre-split command as argv list.
 
         Bypasses shlex parsing — caller provides the exact argv.
-        Still enforces path confinement for workdir.
+        Still enforces the command allowlist and path confinement for workdir.
         Returns (output, returncode).
         """
         if not argv:
             return "Empty command", 1
+
+        # Enforce allowlist even for pre-split argv
+        base_cmd = Path(argv[0]).name
+        if base_cmd not in ALLOWED_COMMANDS:
+            return f"Command blocked: '{base_cmd}' is not in the allowlist", 1
 
         cwd = self._root
         if workdir:
