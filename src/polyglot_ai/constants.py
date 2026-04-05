@@ -178,6 +178,15 @@ CODE_EXTENSIONS = frozenset(
         "Dockerfile",
         "Makefile",
         "CMakeLists.txt",
+        # DevOps / IaC
+        ".tf",
+        ".tfvars",
+        ".hcl",
+        ".j2",
+        ".jinja2",
+        "Chart.yaml",
+        "values.yaml",
+        "dbt_project.yml",
     }
 )
 

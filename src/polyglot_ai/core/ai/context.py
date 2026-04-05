@@ -207,8 +207,55 @@ class ContextBuilder:
             detections.append("  Build: cargo build")
 
         # Docker
-        if (root / "Dockerfile").exists() or (root / "docker-compose.yml").exists():
+        if (root / "Dockerfile").exists():
             detections.append("Docker: Dockerfile present")
+        if (root / "docker-compose.yml").exists() or (root / "compose.yml").exists():
+            detections.append("Docker Compose: compose file present")
+
+        # Terraform
+        tf_files = list(root.glob("*.tf"))
+        if tf_files or (root / ".terraform.lock.hcl").exists():
+            detections.append("Terraform project")
+            detections.append("  Init: terraform init")
+            detections.append("  Plan: terraform plan")
+            detections.append("  Apply: terraform apply")
+            if (root / "terraform.tfvars").exists():
+                detections.append("  Vars: terraform.tfvars present")
+
+        # Kubernetes
+        k8s_dirs = [root / "k8s", root / "manifests", root / "deploy"]
+        if any(d.is_dir() for d in k8s_dirs):
+            detections.append("Kubernetes: manifest directory detected")
+            detections.append("  Apply: kubectl apply -f <dir>/")
+
+        # Helm
+        if (root / "Chart.yaml").exists():
+            detections.append("Helm chart")
+            detections.append("  Lint: helm lint .")
+            detections.append("  Template: helm template .")
+
+        # Ansible
+        if (root / "ansible.cfg").exists() or (root / "playbooks").is_dir():
+            detections.append("Ansible project")
+            if (root / "inventory").is_dir() or (root / "inventory").exists():
+                detections.append("  Inventory: inventory/ detected")
+
+        # dbt
+        if (root / "dbt_project.yml").exists():
+            detections.append("dbt project")
+            detections.append("  Run: dbt run")
+            detections.append("  Test: dbt test")
+            detections.append("  Docs: dbt docs generate")
+
+        # Airflow
+        if (root / "dags").is_dir() or (root / "airflow.cfg").exists():
+            detections.append("Airflow project")
+            detections.append("  DAGs: dags/ directory detected")
+
+        # GitHub Actions
+        gh_workflows = root / ".github" / "workflows"
+        if gh_workflows.is_dir() and list(gh_workflows.glob("*.yml")):
+            detections.append("GitHub Actions: CI/CD workflows detected")
 
         # Makefile
         if (root / "Makefile").exists():
@@ -235,9 +282,17 @@ class ContextBuilder:
             "go.mod",
             "Makefile",
             "Dockerfile",
+            "docker-compose.yml",
+            "compose.yml",
             "README.md",
             "setup.py",
             "setup.cfg",
+            # DevOps / IaC
+            "Chart.yaml",
+            "values.yaml",
+            "dbt_project.yml",
+            "ansible.cfg",
+            "terraform.tfvars",
         ]
 
         files_to_read: list[Path] = []
