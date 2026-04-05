@@ -30,16 +30,16 @@ logger = logging.getLogger(__name__)
 
 # Status icons and colors
 _STATUS_MAP = {
-    "success": ("✓", "#4ec9b0"),
-    "completed": ("✓", "#4ec9b0"),
-    "failure": ("✗", "#f44747"),
-    "cancelled": ("⊘", "#6a6a6a"),
-    "skipped": ("⊘", "#6a6a6a"),
-    "in_progress": ("⏳", "#cca700"),
-    "queued": ("⏳", "#cca700"),
-    "waiting": ("⏳", "#cca700"),
-    "requested": ("⏳", "#cca700"),
-    "pending": ("⏳", "#cca700"),
+    "success": ("✔", "#4ec9b0"),
+    "completed": ("✔", "#4ec9b0"),
+    "failure": ("✘", "#f44747"),
+    "cancelled": ("—", "#6a6a6a"),
+    "skipped": ("—", "#6a6a6a"),
+    "in_progress": ("●", "#cca700"),
+    "queued": ("○", "#cca700"),
+    "waiting": ("○", "#cca700"),
+    "requested": ("○", "#cca700"),
+    "pending": ("○", "#cca700"),
 }
 
 
@@ -193,7 +193,7 @@ class CICDPanel(QWidget):
         self._jobs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._jobs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._jobs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._jobs_table.setColumnWidth(0, 50)
+        self._jobs_table.setColumnWidth(0, 100)
         self._jobs_table.setColumnWidth(2, 100)
         d_layout.addWidget(self._jobs_table)
 
@@ -351,11 +351,10 @@ class CICDPanel(QWidget):
 
         self._jobs_table.setRowCount(len(jobs))
         for row, job in enumerate(jobs):
-            status = job.get("conclusion") or job.get("status", "unknown")
-            icon, color = _STATUS_MAP.get(status, ("?", tc.get("text_muted")))
+            conclusion = job.get("conclusion") or job.get("status", "unknown")
+            icon, color = _STATUS_MAP.get(conclusion, ("?", tc.get("text_muted")))
 
-            status_item = QTableWidgetItem(icon)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            status_item = QTableWidgetItem(f"{icon} {conclusion}")
             status_item.setForeground(self._make_color(color))
             self._jobs_table.setItem(row, 0, status_item)
 
