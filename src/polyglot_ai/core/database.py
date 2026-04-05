@@ -334,12 +334,14 @@ class Database:
         await self.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
 
     async def search_conversations(self, query: str) -> list[dict]:
+        # Escape LIKE wildcards to prevent unintended pattern matching
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         return await self.fetchall(
             """SELECT DISTINCT c.* FROM conversations c
                LEFT JOIN messages m ON m.conversation_id = c.id
-               WHERE c.title LIKE ? OR m.content LIKE ?
+               WHERE c.title LIKE ? ESCAPE '\\' OR m.content LIKE ? ESCAPE '\\'
                ORDER BY c.updated_at DESC""",
-            (f"%{query}%", f"%{query}%"),
+            (f"%{escaped}%", f"%{escaped}%"),
         )
 
     async def pin_conversation(self, conv_id: int, pinned: bool = True) -> None:
