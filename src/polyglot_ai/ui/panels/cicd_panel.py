@@ -363,10 +363,20 @@ class CICDPanel(QWidget):
 
         self._jobs_table.setRowCount(len(jobs))
         for row, job in enumerate(jobs):
-            conclusion = job.get("conclusion") or job.get("status", "unknown")
-            icon, color = _STATUS_MAP.get(conclusion, ("?", tc.get("text_muted")))
+            # conclusion is set when job finishes (success/failure/cancelled)
+            # status is the current state (queued/in_progress/completed)
+            job_conclusion = job.get("conclusion")
+            job_status = job.get("status", "unknown")
 
-            status_item = QTableWidgetItem(f"{icon} {conclusion}")
+            # Use conclusion if available, otherwise use status
+            if job_conclusion and job_conclusion != "":
+                display_status = job_conclusion
+            else:
+                display_status = job_status
+
+            icon, color = _STATUS_MAP.get(display_status, ("?", tc.get("text_muted")))
+
+            status_item = QTableWidgetItem(f"{icon} {display_status}")
             status_item.setForeground(self._make_color(color))
             self._jobs_table.setItem(row, 0, status_item)
 
@@ -375,21 +385,60 @@ class CICDPanel(QWidget):
             # Duration
             started = job.get("startedAt", "")
             completed = job.get("completedAt", "")
-            duration = self._calc_duration(started, completed)
+            if completed:
+                duration = self._calc_duration(started, completed)
+            elif started:
+                # Still running — show elapsed time
+                duration = self._calc_duration(started, datetime.now(timezone.utc).isoformat())
+                if duration:
+                    duration = f"{duration}..."
+            else:
+                duration = ""
             self._jobs_table.setItem(row, 2, QTableWidgetItem(duration))
 
         # Check if any jobs are still running
-        all_done = all(job.get("conclusion") not in (None, "") for job in jobs)
+        all_done = all(job.get("conclusion") and job.get("conclusion") != "" for job in jobs)
         if all_done:
             self._job_timer.stop()
-            # Also refresh the runs table to update the run's conclusion
-            self._refresh_runs()
+            # Determine overall conclusion from jobs
+            if all(j.get("conclusion") == "success" for j in jobs):
+                overall = "success"
+            elif any(j.get("conclusion") == "failure" for j in jobs):
+                overall = "failure"
+            else:
+                overall = "completed"
+            # Update the selected run's status directly in the table
+            self._update_run_status(overall)
+            # Also refresh the full runs list
+            QTimer.singleShot(2000, self._refresh_runs)
 
-        running = sum(1 for j in jobs if not j.get("conclusion"))
+        running = sum(1 for j in jobs if not j.get("conclusion") or j.get("conclusion") == "")
         if running:
             self._jobs_label.setText(f"{len(jobs)} jobs ({running} running)")
         else:
             self._jobs_label.setText(f"{len(jobs)} jobs")
+
+    def _update_run_status(self, conclusion: str) -> None:
+        """Update the currently selected run's status in the runs table immediately."""
+        row = self._runs_table.currentRow()
+        if row < 0:
+            return
+        icon, color = _STATUS_MAP.get(conclusion, ("?", tc.get("text_muted")))
+        # Update status icon
+        status_item = QTableWidgetItem(icon)
+        status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_item.setForeground(self._make_color(color))
+        self._runs_table.setItem(row, 0, status_item)
+        # Update conclusion column
+        conc_item = QTableWidgetItem(conclusion)
+        conc_item.setForeground(self._make_color(color))
+        self._runs_table.setItem(row, 4, conc_item)
+        # Update local data
+        if row < len(self._runs_data):
+            self._runs_data[row]["conclusion"] = conclusion
+            self._runs_data[row]["status"] = "completed"
+        # Show failed logs button if applicable
+        self._logs_btn.setVisible(conclusion == "failure")
 
     def _refresh_selected_jobs(self) -> None:
         """Re-fetch jobs for the currently selected run (called by timer)."""
