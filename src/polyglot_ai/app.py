@@ -196,7 +196,9 @@ def _wire_project_events(
         chat.set_tools(all_tools, registry=tool_registry)
 
         # Connect MCP servers
-        asyncio.ensure_future(mcp_client.connect_all())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(mcp_client.connect_all(), name="mcp_connect_all")
 
         # Update panels with project root
         review.set_project_root(path)
@@ -219,7 +221,9 @@ def _wire_project_events(
                     logger.warning("Indexing failed: %s", ex)
 
             window.statusBar().showMessage("Indexing project...")
-            asyncio.ensure_future(_build_index())
+            from polyglot_ai.core.async_utils import safe_task as _safe_task
+
+            _safe_task(_build_index(), name="build_index")
 
         # Restart terminal in project dir
         terminal = window.terminal_panel
@@ -243,7 +247,9 @@ def _wire_settings_dialog(
         if dialog.exec():
             _register_ai_providers(provider_manager, keyring_store, event_bus)
             chat.set_provider_manager(provider_manager)
-            asyncio.ensure_future(chat.populate_models())
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(chat.populate_models(), name="populate_models")
             theme_manager.apply_theme(settings.get("theme"))
 
     window._action_settings.triggered.connect(open_settings)
@@ -287,7 +293,9 @@ def _run_onboarding(window, settings, keyring_store, provider_manager, event_bus
             if onboarding.api_key:
                 keyring_store.store_key("openai", onboarding.api_key)
                 _register_ai_providers(provider_manager, keyring_store, event_bus)
-            asyncio.ensure_future(settings.set("app.onboarding_done", True))
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(settings.set("app.onboarding_done", True), name="save_onboarding")
 
 
 # ── Main entry point ─────────────────────────────────────────────
@@ -508,7 +516,9 @@ def main() -> None:
         if provider_manager.has_providers:
             await chat.populate_models()
 
-    asyncio.ensure_future(post_show_init())
+    from polyglot_ai.core.async_utils import safe_task
+
+    safe_task(post_show_init(), name="post_show_init")
 
     # Run event loop
     try:

@@ -767,7 +767,9 @@ class SettingsDialog(QDialog):
 
         if server_id in connected:
             # Disconnect
-            asyncio.ensure_future(self._disconnect_mcp(server_id))
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(self._disconnect_mcp(server_id), name="mcp_disconnect")
         else:
             # Need config?
             from polyglot_ai.core.mcp_client import MCP_CATALOG
@@ -801,7 +803,9 @@ class SettingsDialog(QDialog):
 
             try:
                 self._mcp_client.install_from_catalog(server_id, config_values)
-                asyncio.ensure_future(self._connect_mcp(server_id))
+                from polyglot_ai.core.async_utils import safe_task
+
+                safe_task(self._connect_mcp(server_id), name="mcp_connect")
             except Exception as e:
                 QMessageBox.warning(self, "MCP Error", str(e))
 
@@ -866,7 +870,9 @@ class SettingsDialog(QDialog):
         self._custom_command.clear()
         self._custom_env.clear()
 
-        asyncio.ensure_future(self._mcp_client.connect(name))
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._mcp_client.connect(name), name="mcp_connect_custom")
         QMessageBox.information(self, "MCP", f"Server '{name}' added and connecting.")
 
     # ── OAuth ────────────────────────────────────────────────────
@@ -1016,7 +1022,9 @@ class SettingsDialog(QDialog):
                 label.setText(f"✗ {str(e)[:40]}")
                 label.setStyleSheet("font-size: 11px; color: #f44747;")
 
-        asyncio.ensure_future(test())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(test(), name="provider_test")
 
     # ── Save ─────────────────────────────────────────────────────
 
