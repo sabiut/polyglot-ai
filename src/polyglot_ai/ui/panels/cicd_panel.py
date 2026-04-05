@@ -51,6 +51,8 @@ class CICDPanel(QWidget):
         self._project_root: Path | None = None
         self._runs_data: list[dict] = []
         self._gh_available: bool | None = None
+        self._selected_run_id: int | None = None
+        self._has_in_progress_jobs = False
 
         self._setup_ui()
 
@@ -58,6 +60,11 @@ class CICDPanel(QWidget):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._auto_refresh)
         self._refresh_timer.start(30_000)
+
+        # Job refresh timer — polls every 5s while a run has in-progress jobs
+        self._job_timer = QTimer(self)
+        self._job_timer.timeout.connect(self._refresh_selected_jobs)
+        self._job_timer.setInterval(5000)
 
     def showEvent(self, event) -> None:
         """Refresh when tab becomes visible."""
@@ -326,16 +333,21 @@ class CICDPanel(QWidget):
         if not run_id:
             return
 
-        conclusion = run.get("conclusion") or run.get("status", "")
+        run_status = run.get("status", "")
+        conclusion = run.get("conclusion") or run_status
         self._jobs_label.setText(f"Loading jobs for run #{run_id}...")
         self._logs_btn.setVisible(conclusion == "failure")
         self._log_viewer.setVisible(False)
 
-        # Store selected run ID for log fetching
         self._selected_run_id = run_id
+        self._job_timer.stop()
 
         output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
         self._on_jobs_loaded(output, code)
+
+        # Start polling if the run is still in progress
+        if run_status == "in_progress" or not run.get("conclusion"):
+            self._job_timer.start()
 
     def _on_jobs_loaded(self, output: str, code: int) -> None:
         if code != 0:
@@ -366,7 +378,26 @@ class CICDPanel(QWidget):
             duration = self._calc_duration(started, completed)
             self._jobs_table.setItem(row, 2, QTableWidgetItem(duration))
 
-        self._jobs_label.setText(f"{len(jobs)} jobs")
+        # Check if any jobs are still running
+        all_done = all(job.get("conclusion") not in (None, "") for job in jobs)
+        if all_done:
+            self._job_timer.stop()
+            # Also refresh the runs table to update the run's conclusion
+            self._refresh_runs()
+
+        running = sum(1 for j in jobs if not j.get("conclusion"))
+        if running:
+            self._jobs_label.setText(f"{len(jobs)} jobs ({running} running)")
+        else:
+            self._jobs_label.setText(f"{len(jobs)} jobs")
+
+    def _refresh_selected_jobs(self) -> None:
+        """Re-fetch jobs for the currently selected run (called by timer)."""
+        if not self._selected_run_id:
+            self._job_timer.stop()
+            return
+        output, code = self._run_gh(["run", "view", str(self._selected_run_id), "--json", "jobs"])
+        self._on_jobs_loaded(output, code)
 
     def _fetch_failed_logs(self) -> None:
         if not hasattr(self, "_selected_run_id"):
