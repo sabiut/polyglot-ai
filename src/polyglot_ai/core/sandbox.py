@@ -191,7 +191,10 @@ class Sandbox:
                 if any(p in ("--global", "--system") for p in parts[2:]):
                     return False, "Modifying global/system git config is not allowed"
                 # Block unset operations
-                if any(p in ("--unset", "--unset-all", "--remove-section", "--rename-section") for p in parts[2:]):
+                if any(
+                    p in ("--unset", "--unset-all", "--remove-section", "--rename-section")
+                    for p in parts[2:]
+                ):
                     return False, "Modifying git config requires approval"
                 # Block value-setting: `git config <key> <value>` has 2+ non-flag args after "config"
                 non_flag_args = [p for p in parts[2:] if not p.startswith("-")]

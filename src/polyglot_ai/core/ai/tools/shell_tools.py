@@ -36,9 +36,7 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not _is_safe_url(newurl):
-            raise urllib.error.URLError(
-                f"Redirect to disallowed URL blocked: {newurl}"
-            )
+            raise urllib.error.URLError(f"Redirect to disallowed URL blocked: {newurl}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
