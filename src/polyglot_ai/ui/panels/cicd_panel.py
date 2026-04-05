@@ -324,6 +324,27 @@ class CICDPanel(QWidget):
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._status_label.setText(f"  Last refreshed: {now} | {len(self._runs_data)} runs")
 
+        # Auto-load jobs for the most recent run
+        if self._runs_data:
+            self._runs_table.selectRow(0)
+            first_run = self._runs_data[0]
+            run_id = first_run.get("databaseId")
+            if run_id:
+                self._selected_run_id = run_id
+                run_status = first_run.get("status", "")
+                conclusion = first_run.get("conclusion") or run_status
+                self._logs_btn.setVisible(conclusion == "failure")
+                self._log_viewer.setVisible(False)
+
+                output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
+                self._on_jobs_loaded(output, code)
+
+                # Start job polling if run is in progress
+                if run_status == "in_progress" or not first_run.get("conclusion"):
+                    self._job_timer.start()
+                else:
+                    self._job_timer.stop()
+
     def _on_run_selected(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
         if row < 0 or row >= len(self._runs_data):
             return
