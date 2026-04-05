@@ -421,9 +421,13 @@ class CICDPanel(QWidget):
             start = datetime.fromisoformat(started.replace("Z", "+00:00"))
             end = datetime.fromisoformat(completed.replace("Z", "+00:00"))
             secs = int((end - start).total_seconds())
+            if secs < 0:
+                return ""  # Invalid timestamps
             if secs < 60:
                 return f"{secs}s"
-            return f"{secs // 60}m {secs % 60}s"
+            if secs < 3600:
+                return f"{secs // 60}m {secs % 60}s"
+            return f"{secs // 3600}h {(secs % 3600) // 60}m"
         except (ValueError, TypeError):
             return ""
 

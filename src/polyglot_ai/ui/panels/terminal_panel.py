@@ -270,11 +270,16 @@ class TerminalWidget(QWidget):
         if clipboard:
             text = clipboard.text()
             if text:
+                # Scroll to bottom before pasting
+                if self._emulator and self._emulator.is_scrolled_back:
+                    self._emulator.scroll_to_bottom()
                 # Bracket paste mode: wrap in escape sequences so the shell
                 # knows this is pasted text (prevents execution of newlines)
                 self._pty.write(b"\x1b[200~")
                 self._pty.write(text.encode("utf-8"))
                 self._pty.write(b"\x1b[201~")
+                # Force screen update after paste
+                self.update_screen()
 
 
 class TerminalPanel(QWidget):
