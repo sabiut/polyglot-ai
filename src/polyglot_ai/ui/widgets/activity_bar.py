@@ -97,6 +97,8 @@ class ActivityBarButton(QWidget):
             self._draw_mcp_icon(painter, ox, oy)
         elif self._icon_type == "database":
             self._draw_database_icon(painter, ox, oy)
+        elif self._icon_type == "docker":
+            self._draw_docker_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -189,6 +191,22 @@ class ActivityBarButton(QWidget):
         p.drawPath(cable)
         p.drawLine(QPointF(ox + 12, oy + 15), QPointF(ox + 12, oy + 23))
 
+    def _draw_docker_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Docker — stacked container boxes (simplified whale)."""
+        # Three stacked boxes (container imagery)
+        p.drawRect(QRectF(ox + 3, oy + 14, 6, 4))
+        p.drawRect(QRectF(ox + 9, oy + 14, 6, 4))
+        p.drawRect(QRectF(ox + 15, oy + 14, 6, 4))
+        p.drawRect(QRectF(ox + 3, oy + 10, 6, 4))
+        p.drawRect(QRectF(ox + 9, oy + 10, 6, 4))
+        p.drawRect(QRectF(ox + 9, oy + 6, 6, 4))
+        # Base wave line
+        cable = QPainterPath()
+        cable.moveTo(ox + 0, oy + 20)
+        cable.cubicTo(ox + 4, oy + 18, ox + 8, oy + 22, ox + 12, oy + 20)
+        cable.cubicTo(ox + 16, oy + 18, ox + 20, oy + 22, ox + 24, oy + 20)
+        p.drawPath(cable)
+
     def _draw_database_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Database — cylinder/drum shape."""
         # Top ellipse
@@ -276,6 +294,7 @@ class ActivityBar(QWidget):
             ("git", "Source Control (Ctrl+Shift+G)"),
             ("mcp", "MCP Servers (Ctrl+Shift+M)"),
             ("database", "Database Explorer (Ctrl+Shift+D)"),
+            ("docker", "Docker (Ctrl+Shift+K)"),
         ]
 
         for icon_type, tooltip in top_items:
