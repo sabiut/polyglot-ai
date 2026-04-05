@@ -151,6 +151,7 @@ def main() -> None:
     ]
     chat.set_tools(standalone_tools, registry=None)
     window.mcp_sidebar.set_mcp_client(mcp_client)
+    window.database_panel.set_mcp_client(mcp_client)
     window._file_explorer.set_event_bus(event_bus)
     window.git_panel.set_event_bus(event_bus)
     window.usage_panel.set_database(db)

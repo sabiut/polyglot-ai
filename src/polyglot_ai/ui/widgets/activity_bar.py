@@ -95,6 +95,8 @@ class ActivityBarButton(QWidget):
             self._draw_git_icon(painter, ox, oy)
         elif self._icon_type == "mcp":
             self._draw_mcp_icon(painter, ox, oy)
+        elif self._icon_type == "database":
+            self._draw_database_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -187,6 +189,18 @@ class ActivityBarButton(QWidget):
         p.drawPath(cable)
         p.drawLine(QPointF(ox + 12, oy + 15), QPointF(ox + 12, oy + 23))
 
+    def _draw_database_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Database — cylinder/drum shape."""
+        # Top ellipse
+        p.drawEllipse(QRectF(ox + 4, oy + 2, 16, 6))
+        # Sides
+        p.drawLine(QPointF(ox + 4, oy + 5), QPointF(ox + 4, oy + 19))
+        p.drawLine(QPointF(ox + 20, oy + 5), QPointF(ox + 20, oy + 19))
+        # Bottom ellipse
+        p.drawEllipse(QRectF(ox + 4, oy + 16, 16, 6))
+        # Middle stripe
+        p.drawArc(QRectF(ox + 4, oy + 9, 16, 6), 180 * 16, 180 * 16)
+
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
         cx, cy = ox + 12, oy + 12
@@ -261,6 +275,7 @@ class ActivityBar(QWidget):
             ("search", "Search (Ctrl+Shift+F)"),
             ("git", "Source Control (Ctrl+Shift+G)"),
             ("mcp", "MCP Servers (Ctrl+Shift+M)"),
+            ("database", "Database Explorer (Ctrl+Shift+D)"),
         ]
 
         for icon_type, tooltip in top_items:
