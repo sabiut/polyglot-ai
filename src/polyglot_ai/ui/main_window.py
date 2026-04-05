@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.constants import APP_NAME, APP_VERSION
 from polyglot_ai.core.action_registry import ActionRegistry
 from polyglot_ai.ui.panels.chat_panel import ChatPanel
+from polyglot_ai.ui.panels.cicd_panel import CICDPanel
 from polyglot_ai.ui.panels.database_panel import DatabasePanel
 from polyglot_ai.ui.panels.editor_panel import EditorPanel
 from polyglot_ai.ui.panels.file_explorer import FileExplorer
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self._editor_panel = EditorPanel()
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
+        self._cicd_panel = CICDPanel()
         self._terminal_panel = TerminalPanel()
 
         # ── Activity bar (far left) ──
@@ -103,6 +105,7 @@ class MainWindow(QMainWindow):
         self._right_tabs.addTab(self._changeset_panel, "📝 Changes")
         self._right_tabs.addTab(self._review_panel, "🔍 Review")
         self._right_tabs.addTab(self._usage_panel, "📊 Usage")
+        self._right_tabs.addTab(self._cicd_panel, "🔄 CI/CD")
 
         # ── Main layout: ActivityBar | Sidebar | Center | RightTabs ──
         central = QWidget()
@@ -159,6 +162,12 @@ class MainWindow(QMainWindow):
             self._sidebar_stack.show()
             self._sidebar_visible = True
             self._last_sidebar_view = view_name
+
+    def _show_cicd_tab(self) -> None:
+        """Switch to the CI/CD tab in the right panel."""
+        index = self._right_tabs.indexOf(self._cicd_panel)
+        if index >= 0:
+            self._right_tabs.setCurrentIndex(index)
 
     def _setup_menus(self) -> None:
         menubar = self.menuBar()
@@ -271,6 +280,11 @@ class MainWindow(QMainWindow):
             lambda: self._on_activity_changed("database")
         )
         view_menu.addAction(self._action_toggle_database)
+
+        self._action_toggle_cicd = QAction("CI/CD &Inspector", self)
+        self._action_toggle_cicd.setShortcut(QKeySequence("Ctrl+Shift+I"))
+        self._action_toggle_cicd.triggered.connect(self._show_cicd_tab)
+        view_menu.addAction(self._action_toggle_cicd)
 
         view_menu.addSeparator()
 
@@ -456,6 +470,13 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+D",
         )
         reg.register(
+            "view.cicd",
+            "Show CI/CD Inspector",
+            self._show_cicd_tab,
+            "View",
+            "Ctrl+Shift+I",
+        )
+        reg.register(
             "view.terminal",
             "Toggle Terminal",
             lambda: self._action_toggle_terminal.toggle(),
@@ -594,6 +615,10 @@ class MainWindow(QMainWindow):
     @property
     def usage_panel(self) -> UsagePanel:
         return self._usage_panel
+
+    @property
+    def cicd_panel(self) -> CICDPanel:
+        return self._cicd_panel
 
     @property
     def git_panel(self) -> GitPanel:
