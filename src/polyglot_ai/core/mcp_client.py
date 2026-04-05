@@ -133,6 +133,40 @@ MCP_CATALOG = [
             },
         ],
     },
+    {
+        "id": "mysql",
+        "name": "MySQL",
+        "icon": "🐬",
+        "description": "Query MySQL databases",
+        "command": "npx",
+        "args": ["-y", "@benborla29/mcp-server-mysql@0.1.1"],
+        "config_fields": [
+            {
+                "key": "MYSQL_HOST",
+                "label": "Host",
+                "type": "text",
+                "description": "MySQL server hostname (e.g. localhost)",
+            },
+            {
+                "key": "MYSQL_USER",
+                "label": "User",
+                "type": "text",
+                "description": "MySQL username",
+            },
+            {
+                "key": "MYSQL_PASSWORD",
+                "label": "Password",
+                "type": "password",
+                "description": "MySQL password (stored securely in keyring)",
+            },
+            {
+                "key": "MYSQL_DATABASE",
+                "label": "Database",
+                "type": "text",
+                "description": "Database name to connect to",
+            },
+        ],
+    },
 ]
 
 
