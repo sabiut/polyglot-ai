@@ -60,7 +60,16 @@ LEXER_MAP: dict[str, type] = {
     ".go": QsciLexerCPP,
     ".rs": QsciLexerCPP,
     ".toml": QsciLexerYAML,
+    # DevOps / IaC (use YAML lexer for HCL/Terraform — close enough)
+    ".tf": QsciLexerYAML,
+    ".tfvars": QsciLexerYAML,
+    ".hcl": QsciLexerYAML,
+    ".j2": QsciLexerHTML,
+    ".jinja2": QsciLexerHTML,
 }
+
+# Log files use a custom lexer (added separately in _setup_lexer)
+_LOG_EXTENSIONS = frozenset({".log"})
 
 # Dark theme colors for the editor
 DARK_COLORS = {
@@ -180,6 +189,14 @@ class EditorTab(QWidget):
         editor.setAutoCompletionThreshold(3)
 
     def _setup_lexer(self, suffix: str) -> None:
+        # Log files use a custom lexer with its own styling
+        if suffix in _LOG_EXTENSIONS:
+            from polyglot_ai.ui.lexers.log_lexer import LogLexer
+
+            lexer = LogLexer(self._editor)
+            self._editor.setLexer(lexer)
+            return
+
         lexer_cls = LEXER_MAP.get(suffix)
         if lexer_cls is None:
             return

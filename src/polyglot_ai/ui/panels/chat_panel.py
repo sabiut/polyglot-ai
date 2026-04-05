@@ -2703,6 +2703,48 @@ class ChatPanel(QWidget):
             "Add robust error handling to this code:\n- Catch specific exceptions (not bare except)\n- Add meaningful error messages\n- Log errors appropriately\n- Handle edge cases gracefully\n- Add input validation where missing\n\nKeep the happy path clean and readable.",
             "debugging",
         ),
+        # ── DevOps ──
+        (
+            "Review Dockerfile",
+            "Review this Dockerfile for:\n- Security (running as root, exposed secrets, base image trust)\n- Layer efficiency (ordering, caching, multi-stage)\n- Size optimization (unnecessary packages, cleanup)\n- Best practices (HEALTHCHECK, LABEL, non-root user)\n\nSuggest an improved version.",
+            "devops",
+        ),
+        (
+            "Review Terraform",
+            "Review this Terraform configuration for:\n- Security (overly permissive IAM, public exposure, missing encryption)\n- Best practices (resource naming, tagging, modules)\n- State management concerns\n- Missing variables or outputs\n\nRate each finding and suggest fixes.",
+            "devops",
+        ),
+        (
+            "Review Kubernetes manifest",
+            "Review this Kubernetes manifest for:\n- Security (privilege escalation, runAsRoot, missing network policies)\n- Resource limits and requests\n- Readiness/liveness probes\n- Labels and selectors consistency\n- Best practices for production readiness\n\nSuggest improvements.",
+            "devops",
+        ),
+        (
+            "Review CI/CD pipeline",
+            "Review this CI/CD workflow for:\n- Security (secret handling, artifact trust, permissions)\n- Efficiency (caching, parallelism, conditional steps)\n- Reliability (retry logic, timeout settings, failure notifications)\n- Best practices for the CI system in use\n\nSuggest improvements.",
+            "devops",
+        ),
+        (
+            "Explain infrastructure",
+            "Explain this infrastructure code in plain English:\n1. What resources does it create?\n2. How do they connect to each other?\n3. What are the security boundaries?\n4. What would happen if I apply/deploy this?\n5. Any risks or gotchas?",
+            "devops",
+        ),
+        # ── Data Engineering ──
+        (
+            "Write SQL query",
+            "Help me write a SQL query. I need:\n- [Describe what data you need]\n\nConsider:\n- Performance (proper JOINs, indexes, avoiding SELECT *)\n- Readability (CTEs over subqueries where clearer)\n- Edge cases (NULLs, duplicates, empty results)\n\nExplain the query logic step by step.",
+            "data",
+        ),
+        (
+            "Explain data pipeline",
+            "Explain this data pipeline:\n1. What data does it process and where does it come from?\n2. What transformations are applied?\n3. Where does the output go?\n4. What are the failure modes?\n5. How would you monitor this in production?",
+            "data",
+        ),
+        (
+            "Optimize query",
+            "Analyze this SQL query for performance:\n- Identify slow operations (full scans, cartesian products)\n- Suggest index additions\n- Recommend query rewrites\n- Consider partitioning strategies\n- Show EXPLAIN plan interpretation if applicable\n\nProvide the optimized version.",
+            "data",
+        ),
     ]
 
     async def _init_builtin_templates(self) -> None:
@@ -2784,6 +2826,8 @@ class ChatPanel(QWidget):
             "understanding": "Understanding",
             "documentation": "Documentation",
             "debugging": "Debugging",
+            "devops": "DevOps",
+            "data": "Data Engineering",
         }
 
         shown_sections = set()

@@ -1,8 +1,9 @@
-"""Preview tab — view images, CSV/TSV data, and PDFs inline."""
+"""Preview tab — view images, CSV/TSV data, JSON, and PDFs inline."""
 
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -38,8 +41,9 @@ IMAGE_EXTENSIONS = frozenset(
     }
 )
 TABLE_EXTENSIONS = frozenset({".csv", ".tsv"})
+JSON_EXTENSIONS = frozenset({".json", ".jsonl"})
 PDF_EXTENSIONS = frozenset({".pdf"})
-PREVIEW_EXTENSIONS = IMAGE_EXTENSIONS | TABLE_EXTENSIONS | PDF_EXTENSIONS
+PREVIEW_EXTENSIONS = IMAGE_EXTENSIONS | TABLE_EXTENSIONS | JSON_EXTENSIONS | PDF_EXTENSIONS
 
 
 class PreviewTab(QWidget):
@@ -60,11 +64,13 @@ class PreviewTab(QWidget):
         # Build viewers
         self._image_viewer = self._build_image_viewer()
         self._table_viewer = self._build_table_viewer()
+        self._json_viewer = self._build_json_viewer()
         self._fallback_viewer = self._build_fallback_viewer()
 
         self._stack.addWidget(self._image_viewer)  # 0
         self._stack.addWidget(self._table_viewer)  # 1
-        self._stack.addWidget(self._fallback_viewer)  # 2
+        self._stack.addWidget(self._json_viewer)  # 2
+        self._stack.addWidget(self._fallback_viewer)  # 3
 
         # Load content
         self._load(file_path)
@@ -180,6 +186,41 @@ class PreviewTab(QWidget):
 
         return widget
 
+    def _build_json_viewer(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._json_tree = QTreeWidget()
+        self._json_tree.setHeaderLabels(["Key", "Value", "Type"])
+        self._json_tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background: {tc.get("bg_base")}; color: {tc.get("text_primary")};
+                border: none; font-size: {tc.FONT_MD}px;
+            }}
+            QTreeWidget::item {{ padding: 2px; }}
+            QTreeWidget::item:selected {{ background: {tc.get("bg_active")}; }}
+            QHeaderView::section {{
+                background: {tc.get("bg_surface")}; color: {tc.get("text_heading")};
+                border: 1px solid {tc.get("border_secondary")};
+                padding: 4px; font-size: {tc.FONT_SM}px; font-weight: 600;
+            }}
+        """)
+        self._json_tree.setColumnWidth(0, 250)
+        self._json_tree.setColumnWidth(1, 400)
+        layout.addWidget(self._json_tree)
+
+        self._json_label = QLabel("")
+        self._json_label.setFixedHeight(24)
+        self._json_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; "
+            f"background: {tc.get('bg_surface')}; padding-left: 8px;"
+        )
+        layout.addWidget(self._json_label)
+
+        return widget
+
     def _build_fallback_viewer(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -215,13 +256,15 @@ class PreviewTab(QWidget):
         elif suffix in TABLE_EXTENSIONS:
             self._load_table(path, delimiter="\t" if suffix == ".tsv" else ",")
             self._stack.setCurrentIndex(1)
+        elif suffix in JSON_EXTENSIONS:
+            self._load_json(path)
         else:
-            self._stack.setCurrentIndex(2)
+            self._stack.setCurrentIndex(3)
 
     def _load_image(self, path: Path) -> None:
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
-            self._stack.setCurrentIndex(2)
+            self._stack.setCurrentIndex(3)  # fallback
             return
         self._original_pixmap = pixmap
         self._size_label.setText(f"{pixmap.width()} × {pixmap.height()}")
@@ -271,6 +314,96 @@ class PreviewTab(QWidget):
         except Exception as e:
             logger.exception("Failed to load table: %s", path)
             self._row_label.setText(f"  Error: {str(e)[:80]}")
+
+    def _load_json(self, path: Path) -> None:
+        """Load a JSON or JSONL file into tree or table view."""
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+
+            # JSONL: one JSON object per line
+            if path.suffix.lower() == ".jsonl":
+                objects = []
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line:
+                        objects.append(json.loads(line))
+                        if len(objects) >= 10_000:
+                            break
+                data = objects
+            else:
+                data = json.loads(text)
+
+            # Array of objects → table view
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                keys = list(dict.fromkeys(k for obj in data[:100] for k in obj))
+                self._table.setColumnCount(len(keys))
+                self._table.setHorizontalHeaderLabels(keys)
+                self._table.setRowCount(min(len(data), 10_000))
+                self._table.horizontalHeader().setSectionResizeMode(
+                    QHeaderView.ResizeMode.ResizeToContents
+                )
+                for r, obj in enumerate(data[:10_000]):
+                    for c, key in enumerate(keys):
+                        val = obj.get(key, "")
+                        display = str(val) if not isinstance(val, str) else val
+                        self._table.setItem(r, c, QTableWidgetItem(display[:500]))
+                truncated = " (showing first 10,000)" if len(data) >= 10_000 else ""
+                self._row_label.setText(
+                    f"  {min(len(data), 10_000):,} rows × {len(keys)} columns{truncated}"
+                )
+                self._stack.setCurrentIndex(1)  # table viewer
+            else:
+                # Object or mixed → tree view
+                self._json_tree.clear()
+                self._populate_tree(self._json_tree.invisibleRootItem(), data)
+                self._json_tree.expandToDepth(1)
+                count = self._count_json_nodes(data)
+                self._json_label.setText(f"  {count:,} nodes")
+                self._stack.setCurrentIndex(2)  # JSON tree viewer
+
+        except Exception as e:
+            logger.exception("Failed to load JSON: %s", path)
+            self._json_label.setText(f"  Error: {str(e)[:80]}")
+            self._stack.setCurrentIndex(2)
+
+    def _populate_tree(self, parent: QTreeWidgetItem, data, key_label: str = "") -> None:
+        """Recursively populate tree widget from JSON data."""
+        if isinstance(data, dict):
+            for k, v in data.items():
+                child = QTreeWidgetItem(parent)
+                child.setText(0, str(k))
+                if isinstance(v, (dict, list)):
+                    child.setText(2, type(v).__name__)
+                    self._populate_tree(child, v, str(k))
+                else:
+                    child.setText(1, str(v)[:500] if v is not None else "null")
+                    child.setText(2, type(v).__name__ if v is not None else "null")
+        elif isinstance(data, list):
+            for i, item in enumerate(data[:1000]):
+                child = QTreeWidgetItem(parent)
+                child.setText(0, f"[{i}]")
+                if isinstance(item, (dict, list)):
+                    child.setText(2, type(item).__name__)
+                    self._populate_tree(child, item)
+                else:
+                    child.setText(1, str(item)[:500] if item is not None else "null")
+                    child.setText(2, type(item).__name__ if item is not None else "null")
+            if len(data) > 1000:
+                trunc = QTreeWidgetItem(parent)
+                trunc.setText(0, f"... ({len(data) - 1000} more items)")
+        else:
+            child = QTreeWidgetItem(parent)
+            child.setText(0, key_label or "(root)")
+            child.setText(1, str(data)[:500] if data is not None else "null")
+            child.setText(2, type(data).__name__ if data is not None else "null")
+
+    @staticmethod
+    def _count_json_nodes(data) -> int:
+        if isinstance(data, dict):
+            return 1 + sum(PreviewTab._count_json_nodes(v) for v in data.values())
+        elif isinstance(data, list):
+            return 1 + sum(PreviewTab._count_json_nodes(v) for v in data)
+        return 1
 
     def _zoom(self, factor: float) -> None:
         self._scale *= factor
