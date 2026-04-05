@@ -6,7 +6,6 @@ import json
 import logging
 import shutil
 import subprocess
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,8 +54,24 @@ class CICDPanel(QWidget):
 
         self._setup_ui()
 
+        # Auto-refresh every 30 seconds to catch live status changes
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(self._auto_refresh)
+        self._refresh_timer.start(30_000)
+
+    def showEvent(self, event) -> None:
+        """Refresh when tab becomes visible."""
+        super().showEvent(event)
+        if self._project_root:
+            QTimer.singleShot(100, self._refresh_runs)
+
     def set_project_root(self, path: Path | str) -> None:
         self._project_root = Path(path) if isinstance(path, str) else path
+
+    def _auto_refresh(self) -> None:
+        """Silent auto-refresh — only if we have a project and the tab is visible."""
+        if self._project_root and self.isVisible():
+            self._refresh_runs()
 
     # ── UI Setup ────────────────────────────────────────────────────
 
@@ -67,10 +82,11 @@ class CICDPanel(QWidget):
 
         # Header
         header = QWidget()
-        header.setFixedHeight(44)
+        header.setObjectName("cicdHeader")
+        header.setFixedHeight(36)
         header.setStyleSheet(
-            f"background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+            f"#cicdHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
         )
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(12, 0, 8, 0)
@@ -85,12 +101,13 @@ class CICDPanel(QWidget):
         h_layout.addStretch()
 
         self._refresh_btn = QPushButton("⟳ Refresh")
-        self._refresh_btn.setFixedHeight(26)
+        self._refresh_btn.setObjectName("cicdRefresh")
+        self._refresh_btn.setFixedHeight(24)
         self._refresh_btn.setStyleSheet(
-            f"QPushButton {{ background: {tc.get('accent_primary')}; "
+            f"#cicdRefresh {{ background: {tc.get('accent_primary')}; "
             f"color: {tc.get('text_on_accent')}; border: none; border-radius: 3px; "
             f"padding: 0 12px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+            f"#cicdRefresh:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         self._refresh_btn.clicked.connect(self._refresh_runs)
         h_layout.addWidget(self._refresh_btn)
@@ -137,10 +154,11 @@ class CICDPanel(QWidget):
 
         # Jobs header
         jobs_header = QWidget()
-        jobs_header.setFixedHeight(30)
+        jobs_header.setObjectName("cicdJobsHeader")
+        jobs_header.setFixedHeight(28)
         jobs_header.setStyleSheet(
-            f"background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+            f"#cicdJobsHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
         )
         jh_layout = QHBoxLayout(jobs_header)
         jh_layout.setContentsMargins(8, 0, 8, 0)
@@ -153,13 +171,14 @@ class CICDPanel(QWidget):
         jh_layout.addStretch()
 
         self._logs_btn = QPushButton("View Failed Logs")
-        self._logs_btn.setFixedHeight(22)
+        self._logs_btn.setObjectName("cicdLogsBtn")
+        self._logs_btn.setFixedHeight(20)
         self._logs_btn.setVisible(False)
         self._logs_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: 1px solid {tc.get('border_card')}; "
-            f"border-radius: 3px; color: {tc.get('text_primary')}; padding: 0 8px; "
-            f"font-size: {tc.FONT_XS}px; }}"
-            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
+            f"#cicdLogsBtn {{ background: {tc.get('accent_error')}; "
+            f"color: #ffffff; border: none; border-radius: 3px; padding: 0 8px; "
+            f"font-size: {tc.FONT_XS}px; font-weight: 600; }}"
+            f"#cicdLogsBtn:hover {{ background: #d43f3f; }}"
         )
         self._logs_btn.clicked.connect(self._fetch_failed_logs)
         jh_layout.addWidget(self._logs_btn)
@@ -241,20 +260,17 @@ class CICDPanel(QWidget):
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
 
-        def do_fetch():
-            output, code = self._run_gh(
-                [
-                    "run",
-                    "list",
-                    "--json",
-                    "status,conclusion,name,headBranch,createdAt,databaseId,event",
-                    "--limit",
-                    "25",
-                ]
-            )
-            QTimer.singleShot(0, lambda: self._on_runs_loaded(output, code))
-
-        threading.Thread(target=do_fetch, daemon=True).start()
+        output, code = self._run_gh(
+            [
+                "run",
+                "list",
+                "--json",
+                "status,conclusion,name,headBranch,createdAt,databaseId,event",
+                "--limit",
+                "25",
+            ]
+        )
+        self._on_runs_loaded(output, code)
 
     def _on_runs_loaded(self, output: str, code: int) -> None:
         self._refresh_btn.setEnabled(True)
@@ -318,19 +334,8 @@ class CICDPanel(QWidget):
         # Store selected run ID for log fetching
         self._selected_run_id = run_id
 
-        def do_fetch():
-            output, code = self._run_gh(
-                [
-                    "run",
-                    "view",
-                    str(run_id),
-                    "--json",
-                    "jobs",
-                ]
-            )
-            QTimer.singleShot(0, lambda: self._on_jobs_loaded(output, code))
-
-        threading.Thread(target=do_fetch, daemon=True).start()
+        output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
+        self._on_jobs_loaded(output, code)
 
     def _on_jobs_loaded(self, output: str, code: int) -> None:
         if code != 0:
@@ -372,11 +377,8 @@ class CICDPanel(QWidget):
         self._logs_btn.setEnabled(False)
         self._logs_btn.setText("Loading...")
 
-        def do_fetch():
-            output, code = self._run_gh(["run", "view", str(run_id), "--log-failed"])
-            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, code))
-
-        threading.Thread(target=do_fetch, daemon=True).start()
+        output, code = self._run_gh(["run", "view", str(run_id), "--log-failed"])
+        self._on_logs_loaded(output, code)
 
     def _on_logs_loaded(self, output: str, code: int) -> None:
         self._logs_btn.setEnabled(True)
@@ -419,9 +421,13 @@ class CICDPanel(QWidget):
             start = datetime.fromisoformat(started.replace("Z", "+00:00"))
             end = datetime.fromisoformat(completed.replace("Z", "+00:00"))
             secs = int((end - start).total_seconds())
+            if secs < 0:
+                return ""  # Invalid timestamps
             if secs < 60:
                 return f"{secs}s"
-            return f"{secs // 60}m {secs % 60}s"
+            if secs < 3600:
+                return f"{secs // 60}m {secs % 60}s"
+            return f"{secs // 3600}h {(secs % 3600) // 60}m"
         except (ValueError, TypeError):
             return ""
 
