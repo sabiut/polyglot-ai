@@ -105,6 +105,7 @@ def wire_project_events(
         window.changeset_panel.set_project_root(path)
         window.search_panel.set_project_root(project_path)
         window.git_panel.set_project_root(project_path)
+        window.cicd_panel.set_project_root(project_path)
         window.mcp_sidebar.refresh()
 
         audit.log("project_opened", {"path": path})
