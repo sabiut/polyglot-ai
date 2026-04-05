@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,16 +31,16 @@ logger = logging.getLogger(__name__)
 
 # Status icons and colors
 _STATUS_MAP = {
-    "success": ("✔", "#4ec9b0"),
-    "completed": ("✔", "#4ec9b0"),
-    "failure": ("✘", "#f44747"),
-    "cancelled": ("—", "#6a6a6a"),
-    "skipped": ("—", "#6a6a6a"),
-    "in_progress": ("●", "#cca700"),
-    "queued": ("○", "#cca700"),
-    "waiting": ("○", "#cca700"),
-    "requested": ("○", "#cca700"),
-    "pending": ("○", "#cca700"),
+    "success": ("✓", "#4ec9b0"),
+    "completed": ("✓", "#4ec9b0"),
+    "failure": ("✗", "#f44747"),
+    "cancelled": ("⊘", "#6a6a6a"),
+    "skipped": ("⊘", "#6a6a6a"),
+    "in_progress": ("⏳", "#cca700"),
+    "queued": ("⏳", "#cca700"),
+    "waiting": ("⏳", "#cca700"),
+    "requested": ("⏳", "#cca700"),
+    "pending": ("⏳", "#cca700"),
 }
 
 
@@ -51,34 +52,11 @@ class CICDPanel(QWidget):
         self._project_root: Path | None = None
         self._runs_data: list[dict] = []
         self._gh_available: bool | None = None
-        self._selected_run_id: int | None = None
-        self._has_in_progress_jobs = False
 
         self._setup_ui()
 
-        # Auto-refresh every 30 seconds to catch live status changes
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self._auto_refresh)
-        self._refresh_timer.start(30_000)
-
-        # Job refresh timer — polls every 5s while a run has in-progress jobs
-        self._job_timer = QTimer(self)
-        self._job_timer.timeout.connect(self._refresh_selected_jobs)
-        self._job_timer.setInterval(5000)
-
-    def showEvent(self, event) -> None:
-        """Refresh when tab becomes visible."""
-        super().showEvent(event)
-        if self._project_root:
-            QTimer.singleShot(100, self._refresh_runs)
-
     def set_project_root(self, path: Path | str) -> None:
         self._project_root = Path(path) if isinstance(path, str) else path
-
-    def _auto_refresh(self) -> None:
-        """Silent auto-refresh — only if we have a project and the tab is visible."""
-        if self._project_root and self.isVisible():
-            self._refresh_runs()
 
     # ── UI Setup ────────────────────────────────────────────────────
 
@@ -89,11 +67,10 @@ class CICDPanel(QWidget):
 
         # Header
         header = QWidget()
-        header.setObjectName("cicdHeader")
-        header.setFixedHeight(36)
+        header.setFixedHeight(44)
         header.setStyleSheet(
-            f"#cicdHeader {{ background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
         )
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(12, 0, 8, 0)
@@ -108,13 +85,12 @@ class CICDPanel(QWidget):
         h_layout.addStretch()
 
         self._refresh_btn = QPushButton("⟳ Refresh")
-        self._refresh_btn.setObjectName("cicdRefresh")
-        self._refresh_btn.setFixedHeight(24)
+        self._refresh_btn.setFixedHeight(26)
         self._refresh_btn.setStyleSheet(
-            f"#cicdRefresh {{ background: {tc.get('accent_primary')}; "
+            f"QPushButton {{ background: {tc.get('accent_primary')}; "
             f"color: {tc.get('text_on_accent')}; border: none; border-radius: 3px; "
             f"padding: 0 12px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
-            f"#cicdRefresh:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         self._refresh_btn.clicked.connect(self._refresh_runs)
         h_layout.addWidget(self._refresh_btn)
@@ -161,11 +137,10 @@ class CICDPanel(QWidget):
 
         # Jobs header
         jobs_header = QWidget()
-        jobs_header.setObjectName("cicdJobsHeader")
-        jobs_header.setFixedHeight(28)
+        jobs_header.setFixedHeight(30)
         jobs_header.setStyleSheet(
-            f"#cicdJobsHeader {{ background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
         )
         jh_layout = QHBoxLayout(jobs_header)
         jh_layout.setContentsMargins(8, 0, 8, 0)
@@ -178,14 +153,13 @@ class CICDPanel(QWidget):
         jh_layout.addStretch()
 
         self._logs_btn = QPushButton("View Failed Logs")
-        self._logs_btn.setObjectName("cicdLogsBtn")
-        self._logs_btn.setFixedHeight(20)
+        self._logs_btn.setFixedHeight(22)
         self._logs_btn.setVisible(False)
         self._logs_btn.setStyleSheet(
-            f"#cicdLogsBtn {{ background: {tc.get('accent_error')}; "
-            f"color: #ffffff; border: none; border-radius: 3px; padding: 0 8px; "
-            f"font-size: {tc.FONT_XS}px; font-weight: 600; }}"
-            f"#cicdLogsBtn:hover {{ background: #d43f3f; }}"
+            f"QPushButton {{ background: transparent; border: 1px solid {tc.get('border_card')}; "
+            f"border-radius: 3px; color: {tc.get('text_primary')}; padding: 0 8px; "
+            f"font-size: {tc.FONT_XS}px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
         )
         self._logs_btn.clicked.connect(self._fetch_failed_logs)
         jh_layout.addWidget(self._logs_btn)
@@ -200,7 +174,7 @@ class CICDPanel(QWidget):
         self._jobs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._jobs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._jobs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._jobs_table.setColumnWidth(0, 100)
+        self._jobs_table.setColumnWidth(0, 50)
         self._jobs_table.setColumnWidth(2, 100)
         d_layout.addWidget(self._jobs_table)
 
@@ -267,17 +241,20 @@ class CICDPanel(QWidget):
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
 
-        output, code = self._run_gh(
-            [
-                "run",
-                "list",
-                "--json",
-                "status,conclusion,name,headBranch,createdAt,databaseId,event",
-                "--limit",
-                "25",
-            ]
-        )
-        self._on_runs_loaded(output, code)
+        def do_fetch():
+            output, code = self._run_gh(
+                [
+                    "run",
+                    "list",
+                    "--json",
+                    "status,conclusion,name,headBranch,createdAt,databaseId,event",
+                    "--limit",
+                    "25",
+                ]
+            )
+            QTimer.singleShot(0, lambda: self._on_runs_loaded(output, code))
+
+        threading.Thread(target=do_fetch, daemon=True).start()
 
     def _on_runs_loaded(self, output: str, code: int) -> None:
         self._refresh_btn.setEnabled(True)
@@ -324,27 +301,6 @@ class CICDPanel(QWidget):
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._status_label.setText(f"  Last refreshed: {now} | {len(self._runs_data)} runs")
 
-        # Auto-load jobs for the most recent run
-        if self._runs_data:
-            self._runs_table.selectRow(0)
-            first_run = self._runs_data[0]
-            run_id = first_run.get("databaseId")
-            if run_id:
-                self._selected_run_id = run_id
-                run_status = first_run.get("status", "")
-                conclusion = first_run.get("conclusion") or run_status
-                self._logs_btn.setVisible(conclusion == "failure")
-                self._log_viewer.setVisible(False)
-
-                output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
-                self._on_jobs_loaded(output, code)
-
-                # Start job polling if run is in progress
-                if run_status == "in_progress" or not first_run.get("conclusion"):
-                    self._job_timer.start()
-                else:
-                    self._job_timer.stop()
-
     def _on_run_selected(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
         if row < 0 or row >= len(self._runs_data):
             return
@@ -354,21 +310,27 @@ class CICDPanel(QWidget):
         if not run_id:
             return
 
-        run_status = run.get("status", "")
-        conclusion = run.get("conclusion") or run_status
+        conclusion = run.get("conclusion") or run.get("status", "")
         self._jobs_label.setText(f"Loading jobs for run #{run_id}...")
         self._logs_btn.setVisible(conclusion == "failure")
         self._log_viewer.setVisible(False)
 
+        # Store selected run ID for log fetching
         self._selected_run_id = run_id
-        self._job_timer.stop()
 
-        output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
-        self._on_jobs_loaded(output, code)
+        def do_fetch():
+            output, code = self._run_gh(
+                [
+                    "run",
+                    "view",
+                    str(run_id),
+                    "--json",
+                    "jobs",
+                ]
+            )
+            QTimer.singleShot(0, lambda: self._on_jobs_loaded(output, code))
 
-        # Start polling if the run is still in progress
-        if run_status == "in_progress" or not run.get("conclusion"):
-            self._job_timer.start()
+        threading.Thread(target=do_fetch, daemon=True).start()
 
     def _on_jobs_loaded(self, output: str, code: int) -> None:
         if code != 0:
@@ -384,20 +346,11 @@ class CICDPanel(QWidget):
 
         self._jobs_table.setRowCount(len(jobs))
         for row, job in enumerate(jobs):
-            # conclusion is set when job finishes (success/failure/cancelled)
-            # status is the current state (queued/in_progress/completed)
-            job_conclusion = job.get("conclusion")
-            job_status = job.get("status", "unknown")
+            status = job.get("conclusion") or job.get("status", "unknown")
+            icon, color = _STATUS_MAP.get(status, ("?", tc.get("text_muted")))
 
-            # Use conclusion if available, otherwise use status
-            if job_conclusion and job_conclusion != "":
-                display_status = job_conclusion
-            else:
-                display_status = job_status
-
-            icon, color = _STATUS_MAP.get(display_status, ("?", tc.get("text_muted")))
-
-            status_item = QTableWidgetItem(f"{icon} {display_status}")
+            status_item = QTableWidgetItem(icon)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(self._make_color(color))
             self._jobs_table.setItem(row, 0, status_item)
 
@@ -406,68 +359,10 @@ class CICDPanel(QWidget):
             # Duration
             started = job.get("startedAt", "")
             completed = job.get("completedAt", "")
-            if completed:
-                duration = self._calc_duration(started, completed)
-            elif started:
-                # Still running — show elapsed time
-                duration = self._calc_duration(started, datetime.now(timezone.utc).isoformat())
-                if duration:
-                    duration = f"{duration}..."
-            else:
-                duration = ""
+            duration = self._calc_duration(started, completed)
             self._jobs_table.setItem(row, 2, QTableWidgetItem(duration))
 
-        # Check if any jobs are still running
-        all_done = all(job.get("conclusion") and job.get("conclusion") != "" for job in jobs)
-        if all_done:
-            self._job_timer.stop()
-            # Determine overall conclusion from jobs
-            if all(j.get("conclusion") == "success" for j in jobs):
-                overall = "success"
-            elif any(j.get("conclusion") == "failure" for j in jobs):
-                overall = "failure"
-            else:
-                overall = "completed"
-            # Update the selected run's status directly in the table
-            self._update_run_status(overall)
-            # Also refresh the full runs list
-            QTimer.singleShot(2000, self._refresh_runs)
-
-        running = sum(1 for j in jobs if not j.get("conclusion") or j.get("conclusion") == "")
-        if running:
-            self._jobs_label.setText(f"{len(jobs)} jobs ({running} running)")
-        else:
-            self._jobs_label.setText(f"{len(jobs)} jobs")
-
-    def _update_run_status(self, conclusion: str) -> None:
-        """Update the currently selected run's status in the runs table immediately."""
-        row = self._runs_table.currentRow()
-        if row < 0:
-            return
-        icon, color = _STATUS_MAP.get(conclusion, ("?", tc.get("text_muted")))
-        # Update status icon
-        status_item = QTableWidgetItem(icon)
-        status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_item.setForeground(self._make_color(color))
-        self._runs_table.setItem(row, 0, status_item)
-        # Update conclusion column
-        conc_item = QTableWidgetItem(conclusion)
-        conc_item.setForeground(self._make_color(color))
-        self._runs_table.setItem(row, 4, conc_item)
-        # Update local data
-        if row < len(self._runs_data):
-            self._runs_data[row]["conclusion"] = conclusion
-            self._runs_data[row]["status"] = "completed"
-        # Show failed logs button if applicable
-        self._logs_btn.setVisible(conclusion == "failure")
-
-    def _refresh_selected_jobs(self) -> None:
-        """Re-fetch jobs for the currently selected run (called by timer)."""
-        if not self._selected_run_id:
-            self._job_timer.stop()
-            return
-        output, code = self._run_gh(["run", "view", str(self._selected_run_id), "--json", "jobs"])
-        self._on_jobs_loaded(output, code)
+        self._jobs_label.setText(f"{len(jobs)} jobs")
 
     def _fetch_failed_logs(self) -> None:
         if not hasattr(self, "_selected_run_id"):
@@ -477,8 +372,11 @@ class CICDPanel(QWidget):
         self._logs_btn.setEnabled(False)
         self._logs_btn.setText("Loading...")
 
-        output, code = self._run_gh(["run", "view", str(run_id), "--log-failed"])
-        self._on_logs_loaded(output, code)
+        def do_fetch():
+            output, code = self._run_gh(["run", "view", str(run_id), "--log-failed"])
+            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, code))
+
+        threading.Thread(target=do_fetch, daemon=True).start()
 
     def _on_logs_loaded(self, output: str, code: int) -> None:
         self._logs_btn.setEnabled(True)
@@ -521,13 +419,9 @@ class CICDPanel(QWidget):
             start = datetime.fromisoformat(started.replace("Z", "+00:00"))
             end = datetime.fromisoformat(completed.replace("Z", "+00:00"))
             secs = int((end - start).total_seconds())
-            if secs < 0:
-                return ""  # Invalid timestamps
             if secs < 60:
                 return f"{secs}s"
-            if secs < 3600:
-                return f"{secs // 60}m {secs % 60}s"
-            return f"{secs // 3600}h {(secs % 3600) // 60}m"
+            return f"{secs // 60}m {secs % 60}s"
         except (ValueError, TypeError):
             return ""
 
