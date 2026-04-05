@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from PyQt6.QtCore import Qt
@@ -192,7 +191,9 @@ class ReviewPanel(QWidget):
 
         self._run_btn.setEnabled(False)
         self._run_btn.setText("Reviewing...")
-        asyncio.ensure_future(self._run_review())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_review(), name="run_review")
 
     async def _run_review(self) -> None:
         from polyglot_ai.core.review.review_engine import get_git_diff

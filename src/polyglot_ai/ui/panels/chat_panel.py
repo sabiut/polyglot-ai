@@ -897,7 +897,9 @@ class ChatPanel(QWidget):
         if ok and new_name:
             item.setText(new_name)
             if self._db:
-                asyncio.ensure_future(self._db.rename_conversation(conv_id, new_name))
+                from polyglot_ai.core.async_utils import safe_task
+
+                safe_task(self._db.rename_conversation(conv_id, new_name), name="db_rename")
 
     def _delete_conversation(self, item: QListWidgetItem, conv_id: int) -> None:
         reply = QMessageBox.question(
@@ -912,11 +914,15 @@ class ChatPanel(QWidget):
             if self._current_conversation and self._current_conversation.id == conv_id:
                 self._new_conversation()
             if self._db:
-                asyncio.ensure_future(self._db.delete_conversation(conv_id))
+                from polyglot_ai.core.async_utils import safe_task
+
+                safe_task(self._db.delete_conversation(conv_id), name="db_delete")
 
     def _pin_conversation(self, conv_id: int) -> None:
         if self._db:
-            asyncio.ensure_future(self._db.pin_conversation(conv_id))
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(self._db.pin_conversation(conv_id), name="db_pin")
 
     def _export_conversation(self, conv_id: int) -> None:
         async def do_export():
@@ -929,13 +935,20 @@ class ChatPanel(QWidget):
                 content = msg.get("content", "")
                 lines.append(f"[{role}]\n{content}\n")
             text = "\n".join(lines)
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Export Conversation", "conversation.txt", "Text Files (*.txt)"
-            )
-            if path:
-                Path(path).write_text(text, encoding="utf-8")
+            from polyglot_ai.core.async_utils import run_blocking
 
-        asyncio.ensure_future(do_export())
+            await run_blocking(Path(path).write_text, text, "utf-8")
+
+        # Show file dialog synchronously (before async), then write in thread
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Conversation", "conversation.txt", "Text Files (*.txt)"
+        )
+        if not path:
+            return
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(do_export(), name="export_conversation")
 
     def _on_search(self, query: str) -> None:
         """Filter conversation list by search query."""
@@ -1039,9 +1052,9 @@ class ChatPanel(QWidget):
 
     def _execute_plan(self, plan) -> None:
         """Start executing a plan — called from Plan panel."""
-        import asyncio
+        from polyglot_ai.core.async_utils import safe_task
 
-        asyncio.ensure_future(self._run_plan_execution(plan))
+        safe_task(self._run_plan_execution(plan), name="plan_execution")
 
     async def _run_plan_execution(self, plan) -> None:
         """Execute a plan step by step."""
@@ -1140,9 +1153,9 @@ class ChatPanel(QWidget):
                         window._mcp_client.install_from_catalog(
                             "github", {"GITHUB_PERSONAL_ACCESS_TOKEN": token}
                         )
-                        import asyncio
+                        from polyglot_ai.core.async_utils import safe_task
 
-                        asyncio.ensure_future(window._mcp_client.connect("github"))
+                        safe_task(window._mcp_client.connect("github"), name="mcp_connect_github")
                         self._github_btn.setText("⌥ GitHub ✓")
                         self._github_btn.setStyleSheet(f"""
                             QPushButton {{
@@ -2008,6 +2021,8 @@ class ChatPanel(QWidget):
     async def _request_tool_approval(self, tool_name: str, arguments: str) -> bool:
         import json
 
+        from polyglot_ai.core.async_utils import run_blocking
+
         current_content = None
         if tool_name in ("file_write", "file_patch"):
             try:
@@ -2017,28 +2032,24 @@ class ChatPanel(QWidget):
                 if project_root and path:
                     full = project_root / path
                     if full.is_file():
-                        current_content = full.read_text(encoding="utf-8", errors="replace")
+                        current_content = await run_blocking(full.read_text, "utf-8", "replace")
             except Exception:
                 pass
 
         # qasync cannot suspend an async task while a blocking Qt dialog
         # is open.  Use a non-blocking dialog with a Future so the async
         # coroutine properly yields control back to the event loop.
-        from PyQt6.QtCore import QEventLoop
-
-        approved = False
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
 
         def _on_finished(_result: int) -> None:
-            nonlocal approved
-            approved = dialog.approved
-            inner_loop.quit()
+            if not future.done():
+                future.set_result(dialog.approved)
 
         dialog = ApprovalDialog(tool_name, arguments, current_content=current_content, parent=self)
-        inner_loop = QEventLoop(self)
         dialog.finished.connect(_on_finished)
         dialog.open()
-        inner_loop.exec()
-        return approved
+        return await future
 
     async def _stream_followup(
         self, provider, model_id, display_model, system_prompt, _depth: int = 0
@@ -2176,7 +2187,9 @@ class ChatPanel(QWidget):
         self._active_category = category
         for name, btn in self._cat_buttons.items():
             btn.setChecked(name == category)
-        asyncio.ensure_future(self.populate_conversations())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self.populate_conversations(), name="populate_conversations")
 
     async def populate_conversations(self) -> None:
         if not self._db:
@@ -2223,7 +2236,9 @@ class ChatPanel(QWidget):
         if not item:
             return
         conv_id = item.data(Qt.ItemDataRole.UserRole)
-        asyncio.ensure_future(self._load_conversation(conv_id))
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._load_conversation(conv_id), name="load_conversation")
 
     async def _load_conversation(self, conv_id: int) -> None:
         if not self._db:
@@ -2445,7 +2460,9 @@ class ChatPanel(QWidget):
             status = "✓" if code == 0 else f"✗ Exit {code}"
             self._add_system_message(f"**{status}**\n```\n{output}\n```")
 
-        asyncio.ensure_future(do_run())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(do_run(), name="run_command")
 
     def _reject_changes(self, bar: QWidget) -> None:
         bar.setParent(None)
@@ -2488,7 +2505,9 @@ class ChatPanel(QWidget):
             status = "✓" if code == 0 else f"✗ Exit {code}"
             self._add_system_message(f"**{status}**\n```\n{output}\n```")
 
-        asyncio.ensure_future(do_run())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(do_run(), name="run_install_command")
 
     # ─── UI helpers ─────────────────────────────────────────────────
 
@@ -2588,8 +2607,11 @@ class ChatPanel(QWidget):
             return
         if not msg_widget.message_db_id:
             return
-        asyncio.ensure_future(
-            self._do_fork(self._current_conversation.id, msg_widget.message_db_id)
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(
+            self._do_fork(self._current_conversation.id, msg_widget.message_db_id),
+            name="fork_conversation",
         )
 
     async def _do_fork(self, conv_id: int, fork_message_id: int) -> None:
@@ -2701,7 +2723,9 @@ class ChatPanel(QWidget):
         """
         if not self._db:
             return
-        asyncio.ensure_future(self._fetch_and_show_templates())
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._fetch_and_show_templates(), name="fetch_templates")
 
     async def _fetch_and_show_templates(self) -> None:
         """Fetch templates from DB, then hand off to sync menu display."""
@@ -2790,7 +2814,9 @@ class ChatPanel(QWidget):
         if not ok or not content:
             return
         if self._db:
-            asyncio.ensure_future(self._db.create_prompt_template(name, content))
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(self._db.create_prompt_template(name, content), name="db_create_template")
 
     # ─── Public API ─────────────────────────────────────────────────
 

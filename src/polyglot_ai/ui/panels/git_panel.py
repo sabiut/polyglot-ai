@@ -286,14 +286,20 @@ class GitPanel(QWidget):
             f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
 
+        from polyglot_ai.core.async_utils import safe_task
+
         if staged:
             unstage = menu.addAction("Unstage")
             unstage.triggered.connect(
-                lambda: asyncio.ensure_future(self._run_git("restore", "--staged", filepath))
+                lambda: safe_task(
+                    self._run_git("restore", "--staged", filepath), name="git_unstage"
+                )
             )
         else:
             stage = menu.addAction("Stage")
-            stage.triggered.connect(lambda: asyncio.ensure_future(self._run_git("add", filepath)))
+            stage.triggered.connect(
+                lambda: safe_task(self._run_git("add", filepath), name="git_stage")
+            )
 
         menu.exec(lst.viewport().mapToGlobal(pos))
 
@@ -301,7 +307,9 @@ class GitPanel(QWidget):
         msg = self._commit_input.text().strip()
         if not msg:
             return
-        asyncio.ensure_future(self._run_commit(msg))
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_commit(msg), name="git_commit")
 
     async def _run_commit(self, message: str) -> None:
         try:

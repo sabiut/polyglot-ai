@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -203,7 +202,9 @@ class UsagePanel(QWidget):
     def refresh(self) -> None:
         """Refresh usage data from database."""
         if self._db:
-            asyncio.ensure_future(self._do_refresh())
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(self._do_refresh(), name="usage_refresh")
 
     async def _do_refresh(self) -> None:
         if not self._db:
