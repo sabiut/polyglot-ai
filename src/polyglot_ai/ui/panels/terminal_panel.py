@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPainter
+from PyQt6.QtCore import QEvent, QTimer, Qt
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPainter, QWheelEvent
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from polyglot_ai.constants import EVT_TERMINAL_EXITED, EVT_TERMINAL_OUTPUT
@@ -172,15 +172,51 @@ class TerminalWidget(QWidget):
 
         painter.end()
 
+    def event(self, event) -> bool:
+        """Override event() to intercept Tab before Qt uses it for focus navigation."""
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Tab:
+            self.keyPressEvent(event)
+            return True
+        return super().event(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        """Scroll through terminal history with mouse wheel."""
+        if not self._emulator:
+            return
+        delta = event.angleDelta().y()
+        if delta > 0:
+            # Scroll up (into history)
+            self._emulator.scroll_up(3)
+        elif delta < 0:
+            # Scroll down (toward current)
+            self._emulator.scroll_down(3)
+        self.update_screen()
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if not self._pty or not self._pty.is_running:
             return
 
         key = event.key()
         modifiers = event.modifiers()
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
-        # Ctrl+C
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
+        # Ctrl+Shift+C — copy selected text (terminal convention)
+        if ctrl and shift and key == Qt.Key.Key_C:
+            self._copy_selection()
+            return
+
+        # Ctrl+Shift+V — paste from clipboard (terminal convention)
+        if ctrl and shift and key == Qt.Key.Key_V:
+            self._paste_clipboard()
+            return
+
+        # Any keypress (except copy) snaps back to current output
+        if self._emulator and self._emulator.is_scrolled_back:
+            self._emulator.scroll_to_bottom()
+
+        # Ctrl+C/D/Z/L — terminal control characters
+        if ctrl and not shift:
             if key == Qt.Key.Key_C:
                 self._pty.write(b"\x03")
                 return
@@ -203,6 +239,42 @@ class TerminalWidget(QWidget):
         text = event.text()
         if text:
             self._pty.write(text.encode("utf-8"))
+
+    def _copy_selection(self) -> None:
+        """Copy the entire terminal screen to clipboard."""
+        from PyQt6.QtWidgets import QApplication
+
+        if not self._emulator:
+            return
+        lines = self._emulator.get_lines()
+        text_lines = []
+        for line in lines:
+            row_text = "".join(cell.char for cell in line).rstrip()
+            text_lines.append(row_text)
+        # Strip trailing empty lines
+        while text_lines and not text_lines[-1]:
+            text_lines.pop()
+        text = "\n".join(text_lines)
+        if text:
+            clipboard = QApplication.clipboard()
+            if clipboard:
+                clipboard.setText(text)
+
+    def _paste_clipboard(self) -> None:
+        """Paste clipboard content into the terminal."""
+        from PyQt6.QtWidgets import QApplication
+
+        if not self._pty or not self._pty.is_running:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            text = clipboard.text()
+            if text:
+                # Bracket paste mode: wrap in escape sequences so the shell
+                # knows this is pasted text (prevents execution of newlines)
+                self._pty.write(b"\x1b[200~")
+                self._pty.write(text.encode("utf-8"))
+                self._pty.write(b"\x1b[201~")
 
 
 class TerminalPanel(QWidget):

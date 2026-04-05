@@ -43,9 +43,11 @@ class TerminalEmulator:
     }
 
     def __init__(self, rows: int = 24, cols: int = 80) -> None:
-        self._screen = pyte.Screen(cols, rows)
+        self._screen = pyte.HistoryScreen(cols, rows, history=5000)
+        self._screen.set_mode(pyte.modes.LNM)
         self._stream = pyte.Stream(self._screen)
         self._dirty = True
+        self._scroll_offset = 0  # lines scrolled back into history
 
     def feed(self, data: bytes) -> None:
         """Feed raw bytes from the PTY into the terminal emulator."""
@@ -54,29 +56,95 @@ class TerminalEmulator:
         self._dirty = True
 
     def get_lines(self) -> list[list[Cell]]:
-        """Get the current screen state as a grid of Cells."""
+        """Get the visible screen state as a grid of Cells.
+
+        If scrolled back into history, shows historical lines at the top.
+        """
         lines = []
-        for row in range(self._screen.lines):
-            line = []
-            for col in range(self._screen.columns):
-                char_data = self._screen.buffer[row][col]
-                cell = Cell(
-                    char=char_data.data or " ",
-                    fg=self._resolve_color(char_data.fg, "default"),
-                    bg=self._resolve_color(char_data.bg, "default"),
-                    bold=char_data.bold,
-                    italics=char_data.italics,
-                    underscore=char_data.underscore,
-                    reverse=char_data.reverse,
-                )
-                line.append(cell)
-            lines.append(line)
+
+        if self._scroll_offset > 0:
+            # Show history lines
+            history = list(self._screen.history.top)
+            history_start = max(0, len(history) - self._scroll_offset)
+            visible_history = history[history_start:]
+
+            for hist_line in visible_history[: self._screen.lines]:
+                line = []
+                for col in range(self._screen.columns):
+                    if col in hist_line:
+                        char_data = hist_line[col]
+                        cell = Cell(
+                            char=char_data.data or " ",
+                            fg=self._resolve_color(char_data.fg, "default"),
+                            bg=self._resolve_color(char_data.bg, "default"),
+                            bold=char_data.bold,
+                            italics=char_data.italics,
+                            underscore=char_data.underscore,
+                            reverse=char_data.reverse,
+                        )
+                    else:
+                        cell = Cell(" ", None, None, False, False, False, False)
+                    line.append(cell)
+                lines.append(line)
+
+            # Fill remaining rows from current screen
+            screen_start = 0
+            remaining = self._screen.lines - len(lines)
+            for row in range(screen_start, screen_start + remaining):
+                line = self._get_screen_row(row)
+                lines.append(line)
+        else:
+            # Normal view — show current screen
+            for row in range(self._screen.lines):
+                lines.append(self._get_screen_row(row))
+
         self._dirty = False
         return lines
+
+    def _get_screen_row(self, row: int) -> list[Cell]:
+        """Get a single row from the current screen buffer."""
+        line = []
+        for col in range(self._screen.columns):
+            char_data = self._screen.buffer[row][col]
+            cell = Cell(
+                char=char_data.data or " ",
+                fg=self._resolve_color(char_data.fg, "default"),
+                bg=self._resolve_color(char_data.bg, "default"),
+                bold=char_data.bold,
+                italics=char_data.italics,
+                underscore=char_data.underscore,
+                reverse=char_data.reverse,
+            )
+            line.append(cell)
+        return line
 
     def get_cursor(self) -> tuple[int, int]:
         """Get cursor position (row, col)."""
         return self._screen.cursor.y, self._screen.cursor.x
+
+    def scroll_up(self, lines: int = 3) -> None:
+        """Scroll back into history."""
+        max_scroll = len(self._screen.history.top)
+        self._scroll_offset = min(self._scroll_offset + lines, max_scroll)
+        self._dirty = True
+
+    def scroll_down(self, lines: int = 3) -> None:
+        """Scroll forward (toward current output)."""
+        self._scroll_offset = max(0, self._scroll_offset - lines)
+        self._dirty = True
+
+    def scroll_to_bottom(self) -> None:
+        """Reset scroll to show current output."""
+        self._scroll_offset = 0
+        self._dirty = True
+
+    @property
+    def is_scrolled_back(self) -> bool:
+        return self._scroll_offset > 0
+
+    @property
+    def history_length(self) -> int:
+        return len(self._screen.history.top)
 
     def resize(self, rows: int, cols: int) -> None:
         """Resize the terminal screen."""

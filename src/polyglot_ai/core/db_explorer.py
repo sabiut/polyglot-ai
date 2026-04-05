@@ -55,23 +55,38 @@ class DatabaseConnection:
         self._connection_string = connection_string
         self._mcp_client = mcp_client
         self._sqlite_conn: aiosqlite.Connection | None = None
+        self._pg_pool = None  # asyncpg connection pool
+        self._mysql_pool = None  # aiomysql connection pool
 
     async def connect(self) -> tuple[bool, str]:
         """Test and establish connection. Returns (success, message)."""
         if self.db_type == "sqlite":
             return await self._connect_sqlite()
-        elif self.db_type in ("postgresql", "mysql"):
-            return await self._connect_mcp()
+        elif self.db_type == "postgresql":
+            return await self._connect_postgresql()
+        elif self.db_type == "mysql":
+            return await self._connect_mysql()
         return False, f"Unknown database type: {self.db_type}"
 
     async def disconnect(self) -> None:
         if self._sqlite_conn:
             await self._sqlite_conn.close()
             self._sqlite_conn = None
+        if self._pg_pool:
+            await self._pg_pool.close()
+            self._pg_pool = None
+        if self._mysql_pool:
+            self._mysql_pool.close()
+            await self._mysql_pool.wait_closed()
+            self._mysql_pool = None
 
     async def get_schema(self) -> list[TableInfo]:
         if self.db_type == "sqlite":
             return await self._schema_sqlite()
+        elif self.db_type == "postgresql" and self._pg_pool:
+            return await self._schema_postgresql()
+        elif self.db_type == "mysql" and self._mysql_pool:
+            return await self._schema_mysql()
         elif self.db_type in ("postgresql", "mysql"):
             return await self._schema_mcp()
         return []
@@ -79,6 +94,10 @@ class DatabaseConnection:
     async def execute_query(self, sql: str, max_rows: int = 10_000) -> QueryResult:
         if self.db_type == "sqlite":
             return await self._execute_sqlite(sql, max_rows)
+        elif self.db_type == "postgresql" and self._pg_pool:
+            return await self._execute_postgresql(sql, max_rows)
+        elif self.db_type == "mysql" and self._mysql_pool:
+            return await self._execute_mysql(sql, max_rows)
         elif self.db_type in ("postgresql", "mysql"):
             return await self._execute_mcp(sql)
         return QueryResult.from_error(f"Unknown database type: {self.db_type}")
@@ -145,7 +164,182 @@ class DatabaseConnection:
         except Exception as e:
             return QueryResult.from_error(str(e))
 
-    # ── MCP (PostgreSQL / MySQL) ────────────────────────────────────
+    # ── PostgreSQL (direct via asyncpg) ───────────────────────────────
+
+    async def _connect_postgresql(self) -> tuple[bool, str]:
+        try:
+            import asyncpg
+
+            self._pg_pool = await asyncpg.create_pool(
+                self._connection_string, min_size=1, max_size=3, timeout=10
+            )
+            # Test the connection
+            async with self._pg_pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            return True, "Connected (direct)"
+        except ImportError:
+            # asyncpg not installed — fall back to MCP
+            return await self._connect_mcp()
+        except Exception as e:
+            return False, str(e)
+
+    async def _schema_postgresql(self) -> list[TableInfo]:
+        if not self._pg_pool:
+            return []
+        try:
+            async with self._pg_pool.acquire() as conn:
+                # Get all user tables
+                table_rows = await conn.fetch(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' ORDER BY table_name"
+                )
+                tables = []
+                for trow in table_rows:
+                    table_name = trow["table_name"]
+                    col_rows = await conn.fetch(
+                        "SELECT column_name, data_type, is_nullable, "
+                        "  (SELECT COUNT(*) FROM information_schema.key_column_usage k "
+                        "   JOIN information_schema.table_constraints tc "
+                        "     ON k.constraint_name = tc.constraint_name "
+                        "   WHERE k.table_name = c.table_name "
+                        "     AND k.column_name = c.column_name "
+                        "     AND tc.constraint_type = 'PRIMARY KEY') as is_pk "
+                        "FROM information_schema.columns c "
+                        "WHERE table_schema = 'public' AND table_name = $1 "
+                        "ORDER BY ordinal_position",
+                        table_name,
+                    )
+                    columns = [
+                        ColumnInfo(
+                            name=cr["column_name"],
+                            data_type=cr["data_type"],
+                            nullable=cr["is_nullable"] == "YES",
+                            primary_key=cr["is_pk"] > 0,
+                        )
+                        for cr in col_rows
+                    ]
+                    tables.append(TableInfo(name=table_name, columns=columns))
+                return tables
+        except Exception:
+            logger.exception("Failed to get PostgreSQL schema")
+            return []
+
+    async def _execute_postgresql(self, sql: str, max_rows: int) -> QueryResult:
+        if not self._pg_pool:
+            return QueryResult.from_error("Not connected")
+        try:
+            start = time.monotonic()
+            async with self._pg_pool.acquire() as conn:
+                # Use a prepared statement for safety
+                rows_raw = await conn.fetch(sql)
+                elapsed = time.monotonic() - start
+
+                if not rows_raw:
+                    return QueryResult(columns=[], rows=[], row_count=0, execution_time=elapsed)
+
+                columns = list(rows_raw[0].keys())
+                rows = [list(row.values()) for row in rows_raw[:max_rows]]
+                # Convert non-serializable types to strings
+                for r_idx, row in enumerate(rows):
+                    for c_idx, val in enumerate(row):
+                        if not isinstance(val, (str, int, float, bool, type(None))):
+                            rows[r_idx][c_idx] = str(val)
+
+                return QueryResult(
+                    columns=columns,
+                    rows=rows,
+                    row_count=len(rows),
+                    execution_time=elapsed,
+                )
+        except Exception as e:
+            return QueryResult.from_error(str(e))
+
+    # ── MySQL (direct via aiomysql) ─────────────────────────────────
+
+    async def _connect_mysql(self) -> tuple[bool, str]:
+        try:
+            import aiomysql
+            from urllib.parse import urlparse
+
+            parsed = urlparse(self._connection_string)
+            self._mysql_pool = await aiomysql.create_pool(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 3306,
+                user=parsed.username or "root",
+                password=parsed.password or "",
+                db=parsed.path.lstrip("/") if parsed.path else "",
+                minsize=1,
+                maxsize=3,
+                connect_timeout=10,
+            )
+            # Test the connection
+            async with self._mysql_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT 1")
+            return True, "Connected (direct)"
+        except ImportError:
+            return await self._connect_mcp()
+        except Exception as e:
+            return False, str(e)
+
+    async def _schema_mysql(self) -> list[TableInfo]:
+        if not self._mysql_pool:
+            return []
+        try:
+            async with self._mysql_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SHOW TABLES")
+                    table_rows = await cur.fetchall()
+                    tables = []
+                    for (table_name,) in table_rows:
+                        await cur.execute(f"DESCRIBE `{table_name}`")  # noqa: S608
+                        col_rows = await cur.fetchall()
+                        columns = [
+                            ColumnInfo(
+                                name=cr[0],
+                                data_type=cr[1],
+                                nullable=cr[2] == "YES",
+                                primary_key=cr[3] == "PRI",
+                            )
+                            for cr in col_rows
+                        ]
+                        tables.append(TableInfo(name=table_name, columns=columns))
+                    return tables
+        except Exception:
+            logger.exception("Failed to get MySQL schema")
+            return []
+
+    async def _execute_mysql(self, sql: str, max_rows: int) -> QueryResult:
+        if not self._mysql_pool:
+            return QueryResult.from_error("Not connected")
+        try:
+            import aiomysql
+
+            start = time.monotonic()
+            async with self._mysql_pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(sql)
+                    rows_raw = await cur.fetchmany(max_rows)
+                    elapsed = time.monotonic() - start
+
+                    if not rows_raw:
+                        columns = [d[0] for d in cur.description] if cur.description else []
+                        return QueryResult(
+                            columns=columns, rows=[], row_count=0, execution_time=elapsed
+                        )
+
+                    columns = list(rows_raw[0].keys())
+                    rows = [list(row.values()) for row in rows_raw]
+                    return QueryResult(
+                        columns=columns,
+                        rows=rows,
+                        row_count=len(rows),
+                        execution_time=elapsed,
+                    )
+        except Exception as e:
+            return QueryResult.from_error(str(e))
+
+    # ── MCP (fallback for PostgreSQL / MySQL) ───────────────────────
 
     async def _connect_mcp(self) -> tuple[bool, str]:
         if not self._mcp_client:

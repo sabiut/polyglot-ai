@@ -26,6 +26,8 @@ dependencies = [
     "pyte>=0.8",
     "keyring>=25.0",
     "aiosqlite>=0.19",
+    "asyncpg>=0.30",
+    "aiomysql>=0.2",
     "qasync>=0.27",
 ]
 
