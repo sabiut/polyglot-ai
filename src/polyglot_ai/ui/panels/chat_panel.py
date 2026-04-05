@@ -286,7 +286,7 @@ class ChatPanel(QWidget):
         self._message_layout = QVBoxLayout(self._message_widget)
         self._message_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._message_layout.setSpacing(0)
-        self._message_layout.setContentsMargins(12, 12, 12, 12)
+        self._message_layout.setContentsMargins(12, 12, 12, 48)
 
         self._welcome = QLabel()
         self._welcome.setTextFormat(Qt.TextFormat.RichText)
@@ -1108,12 +1108,21 @@ class ChatPanel(QWidget):
             if hasattr(window, "_plan_panel"):
                 window._plan_panel.update_plan()
 
-        # Tool approval callback
+        # Tool approval callback — use Future instead of blocking dialog.exec()
         async def on_tool_approval(tool_name, args):
             from polyglot_ai.ui.dialogs.approval_dialog import ApprovalDialog
 
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[bool] = loop.create_future()
+
+            def _on_finished(_result: int) -> None:
+                if not future.done():
+                    future.set_result(dialog.approved)
+
             dialog = ApprovalDialog(tool_name, args, parent=self)
-            return dialog.exec() == 1  # QDialog.Accepted
+            dialog.finished.connect(_on_finished)
+            dialog.open()
+            return await future
 
         try:
             plan.approve_all()

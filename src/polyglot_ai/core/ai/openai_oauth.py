@@ -44,7 +44,7 @@ class OpenAIOAuthClient(AIProvider):
     """OpenAI provider using ChatGPT subscription via Codex Responses API."""
 
     def __init__(self, event_bus: EventBus) -> None:
-        self._event_bus = event_bus
+        super().__init__(event_bus)
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._load_tokens()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,7 +27,14 @@ class AuditLogger:
             "detail": detail or {},
         }
         try:
+            is_new = not log_file.exists()
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
+            # Restrict permissions on new audit log files
+            if is_new:
+                try:
+                    os.chmod(log_file, 0o600)
+                except OSError:
+                    pass
         except OSError:
             logger.exception("Failed to write audit log")

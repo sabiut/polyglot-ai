@@ -80,3 +80,78 @@ async def test_exec_command_timeout(sandbox):
     output, code = await sandbox.exec_command("tail -f /dev/null", timeout=1)
     assert code == 1
     assert "timed out" in output.lower()
+
+
+# ── exec_argv allowlist enforcement (PR #1) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_exec_argv_allowed_command(sandbox):
+    output, code = await sandbox.exec_argv(["echo", "hello"])
+    assert code == 0
+    assert "hello" in output
+
+
+@pytest.mark.asyncio
+async def test_exec_argv_blocked_command(sandbox):
+    output, code = await sandbox.exec_argv(["curl", "http://evil.com"])
+    assert code == 1
+    assert "not in the allowlist" in output.lower()
+
+
+# ── git config write blocking (PR #1) ───────────────────────────────
+
+
+def test_git_config_global_blocked(sandbox):
+    ok, reason = sandbox.validate_command("git config --global user.name test")
+    assert not ok
+    assert "global" in reason.lower()
+
+
+def test_git_config_unset_blocked(sandbox):
+    ok, _ = sandbox.validate_command("git config --unset core.autocrlf")
+    assert not ok
+
+
+def test_git_config_value_set_blocked(sandbox):
+    ok, _ = sandbox.validate_command("git config user.name test")
+    assert not ok
+    assert "requires approval" in _.lower()
+
+
+def test_git_config_read_allowed(sandbox):
+    ok, _ = sandbox.validate_command("git config --get user.name")
+    assert ok
+
+
+# ── interpreter exec flag blocking ──────────────────────────────────
+
+
+def test_python_c_blocked(sandbox):
+    ok, reason = sandbox.validate_command("python3 -c 'import os'")
+    assert not ok
+    assert "Inline code" in reason
+
+
+def test_node_e_blocked(sandbox):
+    ok, _ = sandbox.validate_command("node -e 'process.exit(1)'")
+    assert not ok
+
+
+# ── shell operator blocking ─────────────────────────────────────────
+
+
+def test_pipe_blocked(sandbox):
+    ok, _ = sandbox.validate_command("cat file.txt | grep secret")
+    assert not ok
+    assert "Shell operator" in _
+
+
+def test_semicolon_blocked(sandbox):
+    ok, _ = sandbox.validate_command("echo hi; rm -rf /")
+    assert not ok
+
+
+def test_redirect_blocked(sandbox):
+    ok, _ = sandbox.validate_command("echo data > file.txt")
+    assert not ok

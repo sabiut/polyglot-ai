@@ -8,9 +8,7 @@ from typing import AsyncGenerator
 from anthropic import AsyncAnthropic
 
 from polyglot_ai.constants import (
-    EVT_AI_ERROR,
     EVT_AI_STREAM_CHUNK,
-    EVT_AI_STREAM_DONE,
 )
 from polyglot_ai.core.ai.models import StreamChunk
 from polyglot_ai.core.ai.provider import AIProvider
@@ -31,8 +29,8 @@ class AnthropicClient(AIProvider):
     """Anthropic (Claude) provider with async streaming."""
 
     def __init__(self, api_key: str, event_bus: EventBus) -> None:
+        super().__init__(event_bus)
         self._client = AsyncAnthropic(api_key=api_key)
-        self._event_bus = event_bus
 
     @property
     def name(self) -> str:
@@ -259,15 +257,10 @@ class AnthropicClient(AIProvider):
                         }
                     )
 
-            self._event_bus.emit(EVT_AI_STREAM_DONE)
+            self._emit_stream_done()
 
         except Exception as e:
-            from polyglot_ai.core.security import sanitize_error
-
-            error_msg = sanitize_error(str(e))
-            logger.exception("Anthropic API error")
-            self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
-            yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg}")
+            yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:
         try:

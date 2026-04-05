@@ -1004,9 +1004,15 @@ class SettingsDialog(QDialog):
 
                     client = GoogleClient(api_key, bus)
                 elif provider_name == "xai":
-                    from polyglot_ai.core.ai.xai_client import XAIClient
+                    from polyglot_ai.core.ai.client import OpenAIClient as _OAI
 
-                    client = XAIClient(api_key, bus)
+                    client = _OAI(
+                        api_key,
+                        bus,
+                        base_url="https://api.x.ai/v1",
+                        provider_name="xai",
+                        provider_display_name="xAI (Grok)",
+                    )
                 else:
                     label.setText("Unknown")
                     return

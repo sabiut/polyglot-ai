@@ -159,7 +159,6 @@ class ChatMessage(QWidget):
                 )
                 self._action_bar.addStretch()
                 self._action_widget = action_widget
-                action_widget.setVisible(False)
                 content_col.addWidget(action_widget)
 
             outer.addLayout(content_col, stretch=1)
@@ -446,16 +445,6 @@ class ChatMessage(QWidget):
             fork_act = menu.addAction("Fork from here")
             fork_act.triggered.connect(lambda: self.on_fork(self))
         menu.exec(event.globalPos())
-
-    def enterEvent(self, event) -> None:
-        super().enterEvent(event)
-        if hasattr(self, "_action_widget"):
-            self._action_widget.setVisible(True)
-
-    def leaveEvent(self, event) -> None:
-        super().leaveEvent(event)
-        if hasattr(self, "_action_widget"):
-            self._action_widget.setVisible(False)
 
     def resizeEvent(self, event) -> None:
         """Recalculate content height when widget width changes."""
