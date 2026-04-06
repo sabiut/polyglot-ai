@@ -17,8 +17,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.core.async_utils import safe_task
 from polyglot_ai.core.dependency_check import (
     Dependency,
+    InstallResult,
     detect_distro,
     has_pkexec,
     install_system_deps,
@@ -68,12 +70,19 @@ class DependencyDialog(QDialog):
         )
         layout.addWidget(header)
 
-        subtitle = QLabel(
+        subtitle_text = (
             "Polyglot AI uses external tools for MCP servers and DevOps "
             "panels. The ones listed below are not installed — the app "
             "will still run, but these features won't work until you "
             "install them."
         )
+        if self._distro == "unknown":
+            subtitle_text += (
+                " <br><span style='color: #e5a00d;'>Could not auto-detect your Linux distribution "
+                "— automatic install is disabled. See the manual commands below.</span>"
+            )
+        subtitle = QLabel(subtitle_text)
+        subtitle.setTextFormat(Qt.TextFormat.RichText)
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #aaa; font-size: 12px; background: transparent;")
         layout.addWidget(subtitle)
@@ -221,6 +230,7 @@ class DependencyDialog(QDialog):
         return row
 
     def _install_uv(self, button: QPushButton) -> None:
+        """Kick off the uv installer on a worker thread."""
         button.setEnabled(False)
         button.setText("Installing…")
         if self._uv_row_status:
@@ -228,17 +238,27 @@ class DependencyDialog(QDialog):
             self._uv_row_status.setStyleSheet(
                 "color: #e5a00d; font-size: 11px; background: transparent;"
             )
-        # Force a paint so the user sees the spinner-ish state
-        QGuiApplication.processEvents()
+        safe_task(self._run_uv_install(button), name="install_uv")
 
-        ok, msg = install_uv()
+    async def _run_uv_install(self, button: QPushButton) -> None:
+        """Worker coroutine: runs the blocking installer off the UI thread."""
+        import asyncio
+
+        try:
+            result: InstallResult = await asyncio.to_thread(install_uv)
+        except Exception as e:
+            logger.exception("uv installer raised unexpectedly")
+            result = InstallResult(ok=False, message=f"Installer crashed: {e}")
+        self._apply_uv_result(button, result)
+
+    def _apply_uv_result(self, button: QPushButton, result: InstallResult) -> None:
         if self._uv_row_status:
-            colour = "#4ec9b0" if ok else "#f48771"
-            self._uv_row_status.setText(msg)
+            colour = "#4ec9b0" if result.ok else "#f48771"
+            self._uv_row_status.setText(result.message)
             self._uv_row_status.setStyleSheet(
                 f"color: {colour}; font-size: 11px; background: transparent;"
             )
-        if ok:
+        if result.ok:
             button.setText("Installed ✓")
         else:
             button.setText("Install failed — retry")
@@ -255,30 +275,54 @@ class DependencyDialog(QDialog):
         return False
 
     def _install_all(self, button: QPushButton) -> None:
-        """Run system installs via pkexec (GUI sudo) or a terminal fallback."""
+        """Kick off the system installer on a worker thread.
+
+        On pkexec systems this waits for the installer to actually
+        finish and checks the exit code. On the terminal-fallback
+        path it can only verify the terminal spawned.
+        """
         to_install = [d for d in self._missing if d.key != "uv"]
         if not to_install:
             return
 
         button.setEnabled(False)
-        button.setText("Launching installer…")
         via = "pkexec" if has_pkexec() else "a terminal"
-        self._global_status.setText(
-            f"Starting installer via {via}. Enter your password when prompted."
-        )
+        if has_pkexec():
+            button.setText("Installing…")
+            self._global_status.setText(
+                f"Starting installer via {via}. Enter your password when prompted. "
+                "The dialog stays responsive while it runs."
+            )
+        else:
+            button.setText("Launching installer…")
+            self._global_status.setText(
+                "Opening a terminal — enter your sudo password there. Return here "
+                "and restart Polyglot AI once it finishes."
+            )
         self._global_status.setStyleSheet(
             "color: #e5a00d; font-size: 11px; background: transparent; padding: 4px 0;"
         )
-        QGuiApplication.processEvents()
+        safe_task(self._run_install_all(button, to_install), name="install_system_deps")
 
-        ok, msg = install_system_deps(to_install)
-        self._global_status.setText(msg)
-        colour = "#4ec9b0" if ok else "#f48771"
+    async def _run_install_all(self, button: QPushButton, to_install: list[Dependency]) -> None:
+        """Worker coroutine: runs the blocking installer off the UI thread."""
+        import asyncio
+
+        try:
+            result: InstallResult = await asyncio.to_thread(install_system_deps, to_install)
+        except Exception as e:
+            logger.exception("system installer raised unexpectedly")
+            result = InstallResult(ok=False, message=f"Installer crashed: {e}")
+        self._apply_install_all_result(button, result)
+
+    def _apply_install_all_result(self, button: QPushButton, result: InstallResult) -> None:
+        self._global_status.setText(result.message)
+        colour = "#4ec9b0" if result.ok else "#f48771"
         self._global_status.setStyleSheet(
             f"color: {colour}; font-size: 11px; background: transparent; padding: 4px 0;"
         )
-        if ok:
-            button.setText("Installer launched ✓")
+        if result.ok:
+            button.setText("Done ✓")
         else:
             button.setText("Install all")
             button.setEnabled(True)
@@ -294,9 +338,21 @@ class DependencyDialog(QDialog):
                 lines.append(hint)
         text = "\n".join(lines)
         clip = QGuiApplication.clipboard()
-        if clip is not None:
-            clip.setText(text)
-            logger.info("Copied dependency install commands to clipboard")
+        if clip is None:
+            logger.warning("Clipboard unavailable; cannot copy install commands")
+            self._global_status.setText(
+                "Clipboard unavailable — select the text manually from the list above."
+            )
+            self._global_status.setStyleSheet(
+                "color: #e5a00d; font-size: 11px; background: transparent; padding: 4px 0;"
+            )
+            return
+        clip.setText(text)
+        logger.info("Copied dependency install commands to clipboard")
+        self._global_status.setText("Install commands copied to clipboard.")
+        self._global_status.setStyleSheet(
+            "color: #4ec9b0; font-size: 11px; background: transparent; padding: 4px 0;"
+        )
 
     def _on_dismiss(self) -> None:
         self._dont_show_again = self._dont_show_cb.isChecked()

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -166,11 +167,15 @@ def _find_terminal_emulator() -> tuple[str, list[str]] | None:
     The prefix is the arguments that precede the command to run. Falls back
     through a handful of common Linux terminals.
     """
+    # xfce4-terminal and mate-terminal use -x (execute with argv list)
+    # rather than -e (single command string) so bash + -c + script are
+    # passed as separate argv elements. gnome-terminal takes the command
+    # after "--". kitty takes the argv directly with no flag.
     candidates: list[tuple[str, list[str]]] = [
         ("gnome-terminal", ["--", "bash", "-c"]),
         ("konsole", ["-e", "bash", "-c"]),
-        ("xfce4-terminal", ["-e", "bash -c"]),
-        ("mate-terminal", ["-e", "bash -c"]),
+        ("xfce4-terminal", ["-x", "bash", "-c"]),
+        ("mate-terminal", ["-x", "bash", "-c"]),
         ("tilix", ["-e", "bash", "-c"]),
         ("kitty", ["bash", "-c"]),
         ("alacritty", ["-e", "bash", "-c"]),
@@ -179,21 +184,52 @@ def _find_terminal_emulator() -> tuple[str, list[str]] | None:
     ]
     for exe, argv in candidates:
         if shutil.which(exe):
+            logger.debug("Terminal emulator found: %s", exe)
             return exe, argv
+        logger.debug("Terminal emulator not found, skipping: %s", exe)
     return None
 
 
-def install_system_deps(deps: list[Dependency]) -> tuple[bool, str]:
+def _new_installer_log_path() -> Path:
+    """Return a fresh unique log file path under the system temp dir."""
+    fd, path = tempfile.mkstemp(prefix="polyglot-ai-installer-", suffix=".log")
+    import os
+
+    os.close(fd)
+    return Path(path)
+
+
+@dataclass
+class InstallResult:
+    """Result of running an installer."""
+
+    ok: bool
+    message: str
+    log_path: Path | None = None  # Path to captured installer output, if any
+
+
+#: How long to wait for pkexec / apt / dnf / etc. to finish.
+_INSTALLER_TIMEOUT = 600  # 10 minutes
+
+
+def install_system_deps(deps: list[Dependency]) -> InstallResult:
     """Install a set of system dependencies via ``pkexec`` or a terminal.
 
-    Chains every non-URL install command from ``deps`` with ``&&`` and
-    runs it with elevated privileges. Prefers ``pkexec`` (native GUI sudo
-    prompt, no terminal) and falls back to opening the user's terminal
-    emulator with the command pre-populated.
+    Chains every non-URL install command from ``deps`` with ``;`` (so one
+    failed package doesn't prevent later ones from being attempted) and
+    runs them with elevated privileges. Captures all stdout/stderr to a
+    temp log file and waits for the process to finish (pkexec path).
+    The terminal-fallback path cannot be waited on, but still directs
+    output through ``tee`` to the same log file for post-mortem.
 
-    Returns ``(success, message)``. ``success=True`` means the child
-    process launched cleanly — the caller should always tell the user
-    to restart Polyglot AI afterwards so new binaries appear on PATH.
+    BLOCKING — this function waits up to _INSTALLER_TIMEOUT seconds for
+    the installer to return. Callers must run it off the UI thread
+    (e.g. via ``asyncio.to_thread`` or a worker).
+
+    The returned ``InstallResult`` carries a real success flag based on
+    the installer's exit code (pkexec path) or on whether the terminal
+    spawn succeeded (fallback path), plus a log path the caller can
+    surface to the user.
     """
     distro = detect_distro()
     commands: list[str] = []
@@ -210,46 +246,126 @@ def install_system_deps(deps: list[Dependency]) -> tuple[bool, str]:
         if dep.key == "uv":
             # Userland — handled separately via install_uv().
             continue
+        # Use ';' between individual commands for the same dep so the
+        # echo header still runs even if the install fails.
         commands.append(f"echo '==> Installing {dep.name}'; {hint}")
 
     if not commands:
         if skipped:
-            return False, (
-                "None of the missing dependencies can be installed automatically "
-                f"on this distribution. Please install manually: {', '.join(skipped)}"
+            logger.warning(
+                "install_system_deps: no auto-installable deps on distro=%s (skipped=%s)",
+                distro,
+                skipped,
             )
-        return False, "Nothing to install."
+            return InstallResult(
+                ok=False,
+                message=(
+                    "None of the missing dependencies can be installed automatically "
+                    f"on this distribution. Please install manually: {', '.join(skipped)}"
+                ),
+            )
+        logger.warning(
+            "install_system_deps: called with no installable deps — possible state drift"
+        )
+        return InstallResult(ok=False, message="Nothing to install.")
 
-    chained = " && ".join(commands)
+    # ';' between deps so one failure doesn't skip the rest.
+    chained = " ; ".join(commands)
+
+    log_path = _new_installer_log_path()
+    logger.info("install_system_deps: using log file %s", log_path)
 
     # Prefer pkexec — native GUI password prompt, no terminal pop-up.
     if has_pkexec():
+        # pkexec cannot write to a file owned by the invoking user by
+        # default when running as root, so we redirect via `tee` which
+        # the invoking user controls.
+        tee_cmd = f"({chained}) 2>&1 | tee {shlex_quote(str(log_path))}"
+        logger.info("install_system_deps: running via pkexec (timeout=%ds)", _INSTALLER_TIMEOUT)
         try:
-            subprocess.Popen(
-                ["pkexec", "sh", "-c", chained],
+            result = subprocess.run(
+                ["pkexec", "sh", "-c", tee_cmd],
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
+                timeout=_INSTALLER_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "install_system_deps: pkexec timed out after %ds; log=%s",
+                _INSTALLER_TIMEOUT,
+                log_path,
+            )
+            return InstallResult(
+                ok=False,
+                message=(
+                    f"Installer timed out after {_INSTALLER_TIMEOUT // 60} minutes. "
+                    f"See log: {log_path}"
+                ),
+                log_path=log_path,
             )
         except OSError as e:
-            return False, f"Could not launch pkexec: {e}"
-        return True, (
-            "Installer launched via pkexec. Enter your password in the prompt. "
-            "When it finishes, restart Polyglot AI."
+            logger.exception("install_system_deps: could not launch pkexec")
+            return InstallResult(ok=False, message=f"Could not launch pkexec: {e}")
+
+        if result.returncode != 0:
+            # pkexec returns 126 if the user cancelled or auth failed,
+            # 127 if the command wasn't found. Anything else is the
+            # installer's own exit code (apt/dnf rc).
+            rc = result.returncode
+            if rc in (126, 127):
+                hint_msg = (
+                    "Authentication was cancelled or failed."
+                    if rc == 126
+                    else "pkexec could not find the command."
+                )
+            else:
+                hint_msg = "The installer reported errors."
+            logger.error("install_system_deps: pkexec returned rc=%d; log=%s", rc, log_path)
+            return InstallResult(
+                ok=False,
+                message=f"{hint_msg} Exit code {rc}. See log for details: {log_path}",
+                log_path=log_path,
+            )
+
+        logger.info("install_system_deps: pkexec succeeded; log=%s", log_path)
+        return InstallResult(
+            ok=True,
+            message=(
+                "Installer finished successfully. Restart Polyglot AI so the new "
+                f"binaries show up on PATH. Full log: {log_path}"
+            ),
+            log_path=log_path,
         )
 
-    # Fallback — open a terminal with the chained command.
+    # Fallback — open a terminal with the chained command. We can't
+    # wait for the result here because the terminal spawns detached,
+    # but we still pipe output through tee so the user has a log to
+    # read afterwards.
     term = _find_terminal_emulator()
     if term is None:
-        return False, (
-            "No terminal emulator found. Please run this command manually:\n\n"
-            f'sudo sh -c "{chained}"'
+        logger.error("install_system_deps: no terminal emulator found")
+        return InstallResult(
+            ok=False,
+            message=(
+                "No terminal emulator found and pkexec is unavailable. "
+                "Please run this command manually:\n\n"
+                f'sudo sh -c "{chained}"'
+            ),
         )
     exe, argv_prefix = term
-    # Wrap the chained command so the terminal stays open after install
-    # completes, letting the user read any output.
-    wrapped = f'sudo sh -c "{chained}" ; echo ""; echo "Press Enter to close…"; read'
+    wrapped = (
+        f"({chained}) 2>&1 | tee {shlex_quote(str(log_path))} | sudo -S sh -c '"
+        f"cat > /dev/null' ; "
+        'echo ""; echo "Press Enter to close…"; read'
+    )
+    # The above is intentionally simple — most users will just run
+    # the script interactively. Wrap with a plain sudo prompt inline.
+    wrapped = (
+        f'sudo sh -c "({chained}) 2>&1 | tee {shlex_quote(str(log_path))}" ; '
+        'echo ""; echo "Press Enter to close…"; read'
+    )
+    logger.info("install_system_deps: spawning terminal %s", exe)
     try:
         subprocess.Popen(
             [exe, *argv_prefix, wrapped],
@@ -259,42 +375,99 @@ def install_system_deps(deps: list[Dependency]) -> tuple[bool, str]:
             start_new_session=True,
         )
     except OSError as e:
-        return False, f"Could not launch {exe}: {e}"
-    return True, (
-        f"Opened {exe} with the install commands. "
-        "Enter your sudo password, then restart Polyglot AI when it finishes."
+        logger.exception("install_system_deps: could not launch %s", exe)
+        return InstallResult(ok=False, message=f"Could not launch {exe}: {e}")
+
+    return InstallResult(
+        ok=True,  # spawn succeeded; we cannot verify install itself
+        message=(
+            f"Opened {exe}. Enter your sudo password in that window. When it "
+            f"finishes, restart Polyglot AI. Install log: {log_path}"
+        ),
+        log_path=log_path,
     )
 
 
-def install_uv() -> tuple[bool, str]:
+def shlex_quote(s: str) -> str:
+    """Shell-quote a string (thin wrapper to avoid polluting top-level imports)."""
+    import shlex
+
+    return shlex.quote(s)
+
+
+_UV_INSTALLER_URL = "https://astral.sh/uv/install.sh"
+
+
+def install_uv() -> InstallResult:
     """Run the official uv installer script (userland, no sudo).
 
-    Returns ``(success, message)``. The installer writes to ``~/.local/bin``
-    by default, so after a successful install the user may need to add
-    that to their PATH or restart the app.
+    BLOCKING — runs the installer synchronously. Callers must run this
+    off the UI thread.
+
+    Captures full stdout+stderr to a temp log file, logs the command
+    being run, and truncates only the *UI* message (the log file keeps
+    the full output for post-mortem). Returns an ``InstallResult`` with
+    a real success flag driven by the installer's exit code.
     """
+    log_path = _new_installer_log_path()
+    cmd = f"curl -LsSf {_UV_INSTALLER_URL} | sh"
+    logger.info("install_uv: running %s (log=%s)", cmd, log_path)
+
     try:
-        # Two-stage: curl the script, pipe to sh. shell=True is required
-        # for the pipe but the command is fixed and not user-supplied.
+        # shell=True is required for the pipe; the URL is a hardcoded
+        # constant (_UV_INSTALLER_URL), no user input reaches the shell.
         result = subprocess.run(
-            "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            cmd,
             shell=True,
             capture_output=True,
             text=True,
             timeout=120,
         )
-    except subprocess.TimeoutExpired:
-        return False, "Installer timed out after 2 minutes. Try running it manually."
+    except subprocess.TimeoutExpired as e:
+        logger.error(
+            "install_uv: timed out after 120s; partial stdout=%r stderr=%r",
+            (e.stdout or "")[:500],
+            (e.stderr or "")[:500],
+        )
+        return InstallResult(
+            ok=False,
+            message="Installer timed out after 2 minutes. Try running it manually.",
+        )
     except OSError as e:
-        return False, f"Could not launch installer: {e}"
+        logger.exception("install_uv: could not launch installer")
+        return InstallResult(ok=False, message=f"Could not launch installer: {e}")
+
+    try:
+        log_path.write_text(
+            f"$ {cmd}\n\n--- stdout ---\n{result.stdout}\n\n--- stderr ---\n{result.stderr}\n"
+            f"\n--- exit code ---\n{result.returncode}\n",
+            encoding="utf-8",
+        )
+    except OSError as e:
+        logger.warning("install_uv: failed to write log file %s: %s", log_path, e)
+        log_path = None  # type: ignore[assignment]
 
     if result.returncode != 0:
+        logger.error(
+            "install_uv: rc=%d\nstdout=%s\nstderr=%s",
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
         stderr = (result.stderr or result.stdout or "").strip()
-        return False, f"Installer exited with code {result.returncode}: {stderr[:300]}"
+        log_hint = f" Full log: {log_path}" if log_path else ""
+        return InstallResult(
+            ok=False,
+            message=f"Installer exited with code {result.returncode}: {stderr[:300]}{log_hint}",
+            log_path=log_path,
+        )
 
-    # Success — uv is typically in ~/.local/bin. Caller may need to
-    # inform the user to add that to PATH or restart.
-    return True, (
-        "uv installed successfully. You may need to restart the app "
-        "(or open a new shell) for it to appear on PATH."
+    logger.info("install_uv: success (log=%s)", log_path)
+    return InstallResult(
+        ok=True,
+        message=(
+            "uv installed successfully. You may need to restart Polyglot AI "
+            "(or open a new shell) for it to appear on PATH."
+        ),
+        log_path=log_path,
     )

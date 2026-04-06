@@ -226,7 +226,8 @@ def main() -> None:
     # Missing-dependency check — warn the user once about runtimes
     # (Node.js, uv, docker, kubectl, gh) that are needed for optional
     # features. Respects a "dependency_check.dismissed" setting so
-    # experienced users aren't pestered on every launch.
+    # experienced users aren't pestered on every launch. A failure
+    # here must never prevent the app from starting.
     try:
         from polyglot_ai.core.async_utils import safe_task as _safe_task
         from polyglot_ai.core.dependency_check import missing_dependencies
@@ -242,8 +243,16 @@ def main() -> None:
                         settings.set("dependency_check.dismissed", True),
                         name="save_dep_dismissed",
                     )
+    except ImportError:
+        logger.exception("Dependency check module not available — skipping")
     except Exception:
-        logger.exception("Dependency check failed")
+        logger.exception("Dependency check failed — continuing without it")
+        # Best-effort status bar hint so the user knows something went
+        # wrong without blocking startup.
+        try:
+            window.statusBar().showMessage("Dependency check failed — see logs for details", 8000)
+        except Exception:
+            pass
 
     # Onboarding
     run_onboarding(window, settings, keyring_store, provider_manager, event_bus)
