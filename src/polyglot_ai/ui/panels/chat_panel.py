@@ -1075,9 +1075,15 @@ class ChatPanel(QWidget):
 
         provider, model_id = result
 
-        # Build system prompt
+        # Build system prompt (inform the builder which tools are registered
+        # right now so tool-dependent directives like sequential-thinking are
+        # only emitted when the corresponding tool actually exists).
         system_prompt = None
         if self._context_builder:
+            if self._tools:
+                self._context_builder.set_available_tools(
+                    [t.get("name", "") for t in self._tools if isinstance(t, dict)]
+                )
             system_prompt = self._context_builder.build_system_prompt()
 
         # Create executor

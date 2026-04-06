@@ -30,7 +30,9 @@ MCP_CATALOG = [
         "icon": "📁",
         "description": "Secure file access with configurable permissions",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+        # Pinned: auto-updating on every launch is a supply-chain risk.
+        # Bump this version intentionally after testing a newer release.
+        "args": ["-y", "@modelcontextprotocol/server-filesystem@2026.1.14"],
         "config_fields": [
             {
                 "key": "path",
@@ -46,7 +48,7 @@ MCP_CATALOG = [
         "icon": "🔀",
         "description": "Read, search, and manipulate Git repositories",
         "command": "uvx",
-        "args": ["mcp-server-git"],
+        "args": ["mcp-server-git==2026.1.14"],
         "config_fields": [],
     },
     {
@@ -55,7 +57,7 @@ MCP_CATALOG = [
         "icon": "🧠",
         "description": "Persistent knowledge graph for long-term memory",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-memory"],
+        "args": ["-y", "@modelcontextprotocol/server-memory@2026.1.26"],
         "config_fields": [],
     },
     {
@@ -64,7 +66,7 @@ MCP_CATALOG = [
         "icon": "🐙",
         "description": "Manage GitHub repositories, issues, and PRs",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "args": ["-y", "@modelcontextprotocol/server-github@2025.4.8"],
         "config_fields": [
             {
                 "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
@@ -80,7 +82,7 @@ MCP_CATALOG = [
         "icon": "🌐",
         "description": "Fetch and convert web content for AI usage (requires uvx)",
         "command": "uvx",
-        "args": ["mcp-server-fetch"],
+        "args": ["mcp-server-fetch==2025.4.7"],
         "config_fields": [],
     },
     {
@@ -89,7 +91,7 @@ MCP_CATALOG = [
         "icon": "🗄️",
         "description": "Query PostgreSQL databases (read-only)",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "args": ["-y", "@modelcontextprotocol/server-postgres@2025.1.14"],
         "config_fields": [
             {
                 "key": "connection_string",
@@ -105,7 +107,7 @@ MCP_CATALOG = [
         "icon": "💭",
         "description": "Dynamic problem-solving through thought sequences",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"],
         "config_fields": [],
     },
     {
@@ -114,7 +116,7 @@ MCP_CATALOG = [
         "icon": "🎭",
         "description": "Browser automation and web interaction",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp"],
+        "args": ["-y", "@playwright/mcp@0.0.70"],
         "config_fields": [],
     },
     {
@@ -123,7 +125,7 @@ MCP_CATALOG = [
         "icon": "🦊",
         "description": "Manage GitLab repositories and workflows",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-gitlab"],
+        "args": ["-y", "@modelcontextprotocol/server-gitlab@2025.4.25"],
         "config_fields": [
             {
                 "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
@@ -139,7 +141,7 @@ MCP_CATALOG = [
         "icon": "🐬",
         "description": "Query MySQL databases",
         "command": "npx",
-        "args": ["-y", "@benborla29/mcp-server-mysql"],
+        "args": ["-y", "@benborla29/mcp-server-mysql@0.1.1"],
         "config_fields": [
             {
                 "key": "MYSQL_HOST",
@@ -311,32 +313,24 @@ class MCPClient:
             except Exception:
                 try:
                     await transport_ctx.__aexit__(None, None, None)
-                except Exception:
-                    pass
+                except _asyncio.CancelledError:
+                    raise
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "MCP '%s': transport cleanup failed after session enter error: %s",
+                        server_name,
+                        cleanup_err,
+                    )
                 raise
 
             try:
                 await _asyncio.wait_for(session.initialize(), timeout=60)
             except _asyncio.TimeoutError:
                 logger.error("MCP server '%s' initialize timed out", server_name)
-                try:
-                    await session_ctx.__aexit__(None, None, None)
-                except Exception:
-                    pass
-                try:
-                    await transport_ctx.__aexit__(None, None, None)
-                except Exception:
-                    pass
+                await self._cleanup_ctxs(server_name, session_ctx, transport_ctx)
                 return False
             except Exception:
-                try:
-                    await session_ctx.__aexit__(None, None, None)
-                except Exception:
-                    pass
-                try:
-                    await transport_ctx.__aexit__(None, None, None)
-                except Exception:
-                    pass
+                await self._cleanup_ctxs(server_name, session_ctx, transport_ctx)
                 raise
 
             self._sessions[server_name] = session
@@ -372,8 +366,37 @@ class MCPClient:
             )
             return False
 
+    async def _cleanup_ctxs(
+        self,
+        server_name: str,
+        session_ctx,
+        transport_ctx,
+    ) -> None:
+        """Best-effort cleanup of an MCP session+transport pair.
+
+        Logs (not swallows) each cleanup failure so orphaned subprocesses,
+        leaked fds, and anyio cancel-scope errors leave a diagnostic trail.
+        Always attempts both closes even if the first raises.
+        """
+        import asyncio as _asyncio
+
+        try:
+            await session_ctx.__aexit__(None, None, None)
+        except _asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("MCP '%s': session cleanup failed: %s", server_name, e)
+        try:
+            await transport_ctx.__aexit__(None, None, None)
+        except _asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("MCP '%s': transport cleanup failed: %s", server_name, e)
+
     async def disconnect(self, server_name: str) -> None:
         """Disconnect from an MCP server."""
+        import asyncio as _asyncio
+
         if server_name in self._sessions:
             try:
                 self._sessions.pop(server_name)
@@ -382,14 +405,21 @@ class MCPClient:
                     # Now a tuple of (transport_ctx, session_ctx) — exit both
                     if isinstance(contexts, tuple):
                         transport_ctx, session_ctx = contexts
-                        try:
-                            await session_ctx.__aexit__(None, None, None)
-                        except Exception:
-                            pass
-                        await transport_ctx.__aexit__(None, None, None)
+                        await self._cleanup_ctxs(server_name, session_ctx, transport_ctx)
                     else:
                         # Legacy single-context path
-                        await contexts.__aexit__(None, None, None)
+                        try:
+                            await contexts.__aexit__(None, None, None)
+                        except _asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            logger.warning(
+                                "MCP '%s': legacy context cleanup failed: %s",
+                                server_name,
+                                e,
+                            )
+            except _asyncio.CancelledError:
+                raise
             except Exception as e:
                 from polyglot_ai.core.security import sanitize_error
 
@@ -625,8 +655,10 @@ class MCPClient:
         logger.info("Saved MCP config to %s", config_path)
 
 
-#: Safe default servers seeded on first run. All no-auth, all free, all
-#: useful for a new user. Requires node.js (npx) and uv (uvx) to be installed.
+#: Seeded on first run: catalog servers with no required config_fields
+#: (no API keys, no OAuth). sequential-thinking and memory need `npx` (Node);
+#: fetch needs `uvx` (uv). If either runtime is missing the corresponding
+#: server simply fails to connect and the rest still work.
 _DEFAULT_SEED_SERVER_IDS = ("sequential-thinking", "memory", "fetch")
 
 
@@ -672,10 +704,18 @@ def _seed_default_config(config_path: Path) -> list[MCPServerConfig]:
             config_path,
             ", ".join(seed_dict.keys()),
         )
-    except Exception as e:
-        logger.warning("Could not seed default MCP config: %s", e)
-
-    return servers
+        return servers
+    except OSError as e:
+        # Write failed — return [] so the caller sees no seeded servers.
+        # Retrying on every launch would be confusing; the user can
+        # manually add servers from the marketplace.
+        logger.error(
+            "Could not persist default MCP config to %s (%s). "
+            "New users will need to add servers from Settings → MCP Marketplace.",
+            config_path,
+            e,
+        )
+        return []
 
 
 def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:

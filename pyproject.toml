@@ -29,6 +29,7 @@ dependencies = [
     "asyncpg>=0.30",
     "aiomysql>=0.2",
     "qasync>=0.27",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

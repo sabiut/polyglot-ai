@@ -22,6 +22,41 @@ from polyglot_ai.core.sandbox import Sandbox
 logger = logging.getLogger(__name__)
 
 
+#: Tools that can run in "standalone" mode without a Sandbox/FileOperations.
+#: When the registry is constructed without those (e.g. before a project is
+#: opened), only these names can be dispatched.
+_STANDALONE_TOOL_NAMES = frozenset(
+    {
+        "web_search",
+        "create_plan",
+        # Docker
+        "docker_list_containers",
+        "docker_container_logs",
+        "docker_inspect",
+        "docker_restart",
+        "docker_stop",
+        "docker_start",
+        "docker_remove",
+        "docker_list_images",
+        # Kubernetes
+        "k8s_list_pods",
+        "k8s_list_deployments",
+        "k8s_list_services",
+        "k8s_pod_logs",
+        "k8s_describe",
+        "k8s_delete_pod",
+        "k8s_restart_deployment",
+        "k8s_scale_deployment",
+        "k8s_apply",
+        # Database
+        "db_list_connections",
+        "db_get_schema",
+        "db_query",
+        "db_execute",
+    }
+)
+
+
 class ToolRegistry:
     """Manages tool execution with sandboxing.
 
@@ -84,6 +119,17 @@ class ToolRegistry:
 
     async def _execute_single(self, tool_name: str, args: dict) -> str:
         """Execute a single tool invocation with parsed arguments."""
+        # Guard: when running in standalone mode (no sandbox/file_ops),
+        # reject file/shell/git tool calls instead of hitting an
+        # AttributeError inside the per-tool branches below.
+        if self._sandbox is None and self._file_ops is None:
+            is_mcp = tool_name.startswith("mcp_") and self._mcp_client is not None
+            if not is_mcp and tool_name not in _STANDALONE_TOOL_NAMES:
+                return (
+                    f"Error: tool '{tool_name}' requires an open project. "
+                    "Open a folder from the File menu first."
+                )
+
         try:
             # File tools
             if tool_name == "file_read":

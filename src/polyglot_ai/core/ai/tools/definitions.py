@@ -666,10 +666,11 @@ AUTO_APPROVE = {
     "k8s_list_services",
     "k8s_pod_logs",
     "k8s_describe",
-    # Database read-only tools
+    # Database read-only tools (metadata only — db_query requires approval
+    # because it touches arbitrary user data and SQL read-only heuristics
+    # can be bypassed by creatively-crafted queries).
     "db_list_connections",
     "db_get_schema",
-    "db_query",  # Auto-approved; write queries are rejected at execution time
 }
 REQUIRES_APPROVAL = {
     "file_write",
@@ -686,6 +687,8 @@ REQUIRES_APPROVAL = {
     "k8s_restart_deployment",
     "k8s_scale_deployment",
     "k8s_apply",
-    # Mutating database tool
+    # Database mutating AND read tools — both require approval so the user
+    # sees the exact SQL before it runs.
+    "db_query",
     "db_execute",
 }

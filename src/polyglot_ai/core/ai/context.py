@@ -19,12 +19,28 @@ class ContextBuilder:
     def __init__(self, project_root: Path | None = None) -> None:
         self._project_root = project_root
         self._indexer = None
+        self._sequential_thinking_tool: str | None = None
 
     def set_project_root(self, root: Path | str) -> None:
         self._project_root = Path(root) if isinstance(root, str) else root
 
     def set_indexer(self, indexer) -> None:
         self._indexer = indexer
+
+    def set_available_tools(self, tool_names: list[str]) -> None:
+        """Inform the builder which tool names are currently registered.
+
+        Used to conditionally inject instructions that depend on a specific
+        tool being available — e.g. the sequential-thinking directive is
+        only emitted when an actual sequentialthinking/sequential_thinking
+        tool exists in the registry.
+        """
+        self._sequential_thinking_tool = None
+        for name in tool_names:
+            lname = name.lower()
+            if "sequentialthinking" in lname or "sequential_thinking" in lname:
+                self._sequential_thinking_tool = name
+                break
 
     def build_augmented_prompt(self, user_message: str, custom_prompt: str = "") -> str:
         """Build system prompt with RAG-retrieved relevant files prioritized."""
@@ -97,17 +113,29 @@ class ContextBuilder:
             "- Keep explanations clear and concise.",
             "- After the user approves and you output a file change, summarize: 'Updated src/file.py: added X, fixed Y'",
             "",
-            "DEEP REASONING (mandatory when available):",
-            "- If a `sequentialthinking` tool is available, you MUST call it as your FIRST action for any",
-            "  non-trivial request — before proposing changes, before reading files, before answering.",
-            "- Use it to break the problem into explicit numbered thoughts, revise as you learn more,",
-            "  and only then produce your final answer to the user.",
-            "- Only skip it for pure chit-chat, one-line factual lookups, or simple yes/no clarifications.",
-            "- Do NOT mention the tool to the user — just use it and deliver the polished result.",
-            "",
             f"System: {platform.system()}",
             f"Python: {platform.python_version()}",
         ]
+
+        # Only emit the sequential-thinking directive when that tool is
+        # actually registered — otherwise we'd be instructing the model to
+        # call a tool that does not exist, which causes hallucinated tool
+        # calls or refusal loops on several providers.
+        if self._sequential_thinking_tool:
+            parts.extend(
+                [
+                    "",
+                    "DEEP REASONING:",
+                    f"- A `{self._sequential_thinking_tool}` tool is available. Use it for",
+                    "  complex multi-step problems: debugging non-obvious bugs, architecture",
+                    "  decisions, security reviews, refactors that touch many files, or any",
+                    "  task where breaking the problem into explicit numbered thoughts would",
+                    "  meaningfully improve the answer. Revise your thoughts as you learn more,",
+                    "  then produce the final answer to the user.",
+                    "- Skip it for chit-chat, one-line factual lookups, and yes/no clarifications.",
+                    "- Do NOT mention the tool to the user — just use it and deliver the result.",
+                ]
+            )
 
         if self._project_root:
             # Use project directory name only — avoid leaking absolute

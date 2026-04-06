@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -30,7 +31,9 @@ Your task:
 3. Do NOT nitpick style unless it harms readability.
 4. Be specific — cite the exact file and line number.
 
-Reason step by step internally before writing the JSON:
+Reason step by step **silently** before writing the JSON. Your visible
+output must start with `{` — do not emit any chain-of-thought, preamble,
+markdown fences, or explanation outside the JSON object.
 - Walk the diff hunk by hunk.
 - For each change, ask: could this break something, leak something, or regress behaviour?
 - Consider edge cases, concurrency, error paths, and the blast radius of the change.
@@ -84,7 +87,9 @@ Severity guide:
 - low: Nice to fix, minor hardening opportunities
 - info: Observations and recommendations
 
-Reason step by step internally before writing the JSON:
+Reason step by step **silently** before writing the JSON. Your visible
+output must start with `{` — do not emit any chain-of-thought, preamble,
+markdown fences, or explanation outside the JSON object.
 - Scan each file resource by resource.
 - For each resource, ask: what's the blast radius if this is misconfigured?
 - Check against the issue list above systematically — do not skip categories.
@@ -285,30 +290,10 @@ class ReviewEngine:
                 user_prompt += f"\n### {path}\n```\n" + "\n".join(lines) + "\n```\n"
 
         # Get provider
-        result = self._provider_manager.get_provider_for_model(model_id)
-        if not result:
-            # Try first available provider
-            providers = self._provider_manager.get_all_providers()
-            if not providers:
-                return ReviewResult(summary="No AI provider available for review.")
-            provider = providers[0]
-            model = ""
-            # Get first model from provider — fail clearly if none available
-            try:
-                models = await provider.list_models()
-                if models:
-                    model = models[0]
-                else:
-                    return ReviewResult(
-                        summary=f"No models available from {provider.display_name}. "
-                        "Check your API key or provider configuration.",
-                    )
-            except Exception as e:
-                return ReviewResult(
-                    summary=f"Failed to list models from {provider.display_name}: {e}",
-                )
-        else:
-            provider, model = result
+        resolved = await self._resolve_provider(model_id)
+        if isinstance(resolved, ReviewResult):
+            return resolved
+        provider, model = resolved
 
         # Stream response and collect full text
         messages = [
@@ -326,9 +311,17 @@ class ReviewEngine:
             ):
                 if chunk.delta_content:
                     full_response += chunk.delta_content
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error("Review streaming failed: %s", e)
-            return ReviewResult(summary=f"Review failed: {e}")
+            logger.exception("Review streaming failed")
+            return ReviewResult(
+                summary="Review failed while streaming AI response.",
+                status="failed",
+                error=str(e),
+                model=model,
+                provider=provider.name,
+            )
 
         # Parse the JSON response
         return self._parse_review_response(full_response, diff_files, model, provider.name)
@@ -347,50 +340,44 @@ class ReviewEngine:
             model_id: Provider-qualified model ID
         """
         if not files:
-            return ReviewResult(summary=f"No {mode} files found to review.")
+            return ReviewResult(
+                summary=f"No {mode} files found to review.",
+                status="empty",
+            )
 
         system_prompt = _MODE_PROMPTS.get(mode, REVIEW_SYSTEM_PROMPT)
 
-        # Build the user message with all files
+        # Build the user message with all files, tracking truncation so we
+        # can surface it to the user instead of hiding it inside the prompt.
         parts = [f"Review these {len(files)} {mode} file(s) for security issues:\n"]
+        truncated_files: list[str] = []
+        skipped_files: list[str] = []
         total_bytes = 0
-        for path, content in files.items():
-            # Truncate individual files
+        file_items = list(files.items())
+        for idx, (path, content) in enumerate(file_items):
             if len(content) > _MAX_FILE_BYTES:
                 content = content[:_MAX_FILE_BYTES] + "\n... [truncated]"
-            parts.append(f"\n### {path}\n```\n{content}\n```\n")
-            total_bytes += len(content)
-            if total_bytes > _MAX_TOTAL_BYTES:
+                truncated_files.append(path)
+            if total_bytes + len(content) > _MAX_TOTAL_BYTES:
+                remaining = [p for p, _ in file_items[idx:]]
+                skipped_files.extend(remaining)
                 parts.append(
                     f"\n... [review truncated at {_MAX_TOTAL_BYTES} bytes, "
-                    f"{len(files) - len(parts) + 1} files not included]"
+                    f"{len(remaining)} file(s) not included: "
+                    f"{', '.join(remaining[:5])}"
+                    f"{' and more' if len(remaining) > 5 else ''}]"
                 )
                 break
+            parts.append(f"\n### {path}\n```\n{content}\n```\n")
+            total_bytes += len(content)
 
         user_prompt = "\n".join(parts)
 
         # Get provider
-        result = self._provider_manager.get_provider_for_model(model_id)
-        if not result:
-            providers = self._provider_manager.get_all_providers()
-            if not providers:
-                return ReviewResult(summary="No AI provider available for review.")
-            provider = providers[0]
-            model = ""
-            try:
-                models = await provider.list_models()
-                if models:
-                    model = models[0]
-                else:
-                    return ReviewResult(
-                        summary=f"No models available from {provider.display_name}."
-                    )
-            except Exception as e:
-                return ReviewResult(
-                    summary=f"Failed to list models from {provider.display_name}: {e}"
-                )
-        else:
-            provider, model = result
+        resolved = await self._resolve_provider(model_id)
+        if isinstance(resolved, ReviewResult):
+            return resolved
+        provider, model = resolved
 
         # Stream response
         messages = [
@@ -408,15 +395,86 @@ class ReviewEngine:
             ):
                 if chunk.delta_content:
                     full_response += chunk.delta_content
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error("IaC review streaming failed: %s", e)
-            return ReviewResult(summary=f"Review failed: {e}")
+            logger.exception("IaC review streaming failed (mode=%s)", mode)
+            return ReviewResult(
+                summary=f"Review failed while streaming {mode} security scan.",
+                status="failed",
+                error=str(e),
+                files_reviewed=len(files),
+                model=model,
+                provider=provider.name,
+                truncated_files=truncated_files + skipped_files,
+            )
 
         # Parse the JSON response (reuse parser with empty diff_files list)
         result_obj = self._parse_review_response(full_response, [], model, provider.name)
         # Override files_reviewed to reflect actual file count
         result_obj.files_reviewed = len(files)
+        result_obj.truncated_files = truncated_files + skipped_files
+        if truncated_files or skipped_files:
+            suffix = []
+            if truncated_files:
+                suffix.append(f"{len(truncated_files)} file(s) truncated")
+            if skipped_files:
+                suffix.append(f"{len(skipped_files)} file(s) skipped (size cap)")
+            result_obj.summary = f"{result_obj.summary} [{'; '.join(suffix)}]"
         return result_obj
+
+    async def _resolve_provider(self, model_id: str):
+        """Resolve a provider and model for a review.
+
+        Returns a ``(provider, model)`` tuple on success, or a ``ReviewResult``
+        with ``status='failed'`` that the caller should return directly.
+        Emits a warning when it falls back because the requested model_id
+        did not match any configured provider.
+        """
+        result = self._provider_manager.get_provider_for_model(model_id)
+        if result:
+            return result
+
+        if model_id:
+            logger.warning(
+                "Review: requested model_id '%s' not found — falling back to first "
+                "available provider. Review quality may differ from user expectation.",
+                model_id,
+            )
+
+        providers = self._provider_manager.get_all_providers()
+        if not providers:
+            return ReviewResult(
+                summary="No AI provider configured for review.",
+                status="failed",
+                error="No providers available. Add an API key in Settings.",
+            )
+        provider = providers[0]
+        try:
+            models = await provider.list_models()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("Review: failed to list models from %s", provider.display_name)
+            return ReviewResult(
+                summary=f"Could not list models from {provider.display_name}.",
+                status="failed",
+                error=str(e),
+                provider=provider.name,
+            )
+        if not models:
+            return ReviewResult(
+                summary=f"No models available from {provider.display_name}.",
+                status="failed",
+                error="Provider returned an empty model list. Check API key / configuration.",
+                provider=provider.name,
+            )
+        logger.info(
+            "Review: falling back to provider=%s model=%s",
+            provider.display_name,
+            models[0],
+        )
+        return provider, models[0]
 
     def _parse_review_response(
         self,
@@ -540,23 +598,60 @@ _SKIP_IAC_DIRS = {".terraform", ".git", "node_modules", ".venv", "venv", "__pyca
 
 
 def _read_file_safe(path: Path, project_root: Path) -> tuple[str, str] | None:
-    """Read a file, returning (relative_path, content) or None on error."""
+    """Read a file, returning (relative_path, content) or None on error.
+
+    Errors are logged as warnings so skipped files are visible in diagnostics
+    instead of being silently dropped from a security scan.
+    """
     try:
-        if path.stat().st_size > _MAX_FILE_BYTES * 2:
-            return None
-        content = path.read_text(encoding="utf-8", errors="replace")
-        rel = str(path.relative_to(project_root))
-        return rel, content
-    except Exception:
+        size = path.stat().st_size
+    except OSError as e:
+        logger.warning("IaC scan: cannot stat %s: %s", path, e)
         return None
+    if size > _MAX_FILE_BYTES * 2:
+        logger.info(
+            "IaC scan: skipping %s (size %d > %d bytes)",
+            path,
+            size,
+            _MAX_FILE_BYTES * 2,
+        )
+        return None
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        logger.warning("IaC scan: cannot read %s: %s", path, e)
+        return None
+    try:
+        rel = str(path.relative_to(project_root))
+    except ValueError:
+        # Symlink escaped the project root — refuse to include.
+        logger.warning(
+            "IaC scan: refusing to include %s (outside project root %s)",
+            path,
+            project_root,
+        )
+        return None
+    return rel, content
 
 
 def _walk_iac(project_root: Path, patterns: list[str]) -> list[Path]:
-    """Glob multiple patterns while skipping vendored directories."""
+    """Glob multiple patterns while skipping vendored directories.
+
+    Each ``glob()`` is wrapped in a try/except so one unreadable directory
+    (e.g. permission denied) can't crash the entire collection.
+    """
     results: list[Path] = []
     for pattern in patterns:
-        for p in project_root.glob(pattern):
-            if not p.is_file():
+        try:
+            matches = list(project_root.glob(pattern))
+        except OSError as e:
+            logger.warning("IaC scan: glob '%s' failed under %s: %s", pattern, project_root, e)
+            continue
+        for p in matches:
+            try:
+                if not p.is_file():
+                    continue
+            except OSError:
                 continue
             if any(part in _SKIP_IAC_DIRS for part in p.parts):
                 continue
@@ -578,8 +673,66 @@ def collect_terraform_files(project_root: str | Path) -> dict[str, str]:
     return result
 
 
+#: Substrings in apiVersion values that identify a YAML document as a
+#: real Kubernetes manifest (rather than a GitHub Actions workflow, an
+#: OpenAPI spec, a docker-compose file, etc. that merely contains the
+#: word ``kind`` somewhere).
+_K8S_API_GROUPS = (
+    "",  # bare "v1"
+    "apps/",
+    "batch/",
+    "networking.k8s.io/",
+    "rbac.authorization.k8s.io/",
+    "storage.k8s.io/",
+    "policy/",
+    "autoscaling/",
+    "admissionregistration.k8s.io/",
+    "apiextensions.k8s.io/",
+    "certificates.k8s.io/",
+    "coordination.k8s.io/",
+    "discovery.k8s.io/",
+    "events.k8s.io/",
+    "node.k8s.io/",
+    "scheduling.k8s.io/",
+    "flowcontrol.apiserver.k8s.io/",
+    "helm.sh/",
+    "argoproj.io/",
+    "cert-manager.io/",
+    "monitoring.coreos.com/",
+    "networking.istio.io/",
+    "security.istio.io/",
+    "gateway.networking.k8s.io/",
+)
+
+
+def _looks_like_k8s_doc(doc: object) -> bool:
+    """True if a parsed YAML document looks like a Kubernetes resource."""
+    if not isinstance(doc, dict):
+        return False
+    api_version = doc.get("apiVersion")
+    kind = doc.get("kind")
+    if not isinstance(api_version, str) or not isinstance(kind, str):
+        return False
+    if not kind.strip():
+        return False
+    # apiVersion is either "v1" (bare) or "<group>/<version>". Bare "v1"
+    # is core K8s; "<group>/..." must start with a known K8s API group.
+    if "/" not in api_version:
+        return api_version == "v1"
+    group_prefix = api_version.split("/", 1)[0] + "/"
+    return any(api_version == g.rstrip("/") or group_prefix == g for g in _K8S_API_GROUPS)
+
+
 def collect_k8s_manifests(project_root: str | Path) -> dict[str, str]:
-    """Collect Kubernetes YAML manifests from k8s/, manifests/, deploy/ directories."""
+    """Collect Kubernetes manifests from common manifest directories.
+
+    Scans ``k8s/``, ``kubernetes/``, ``manifests/``, ``deploy/`` subdirectories
+    and any root-level ``*.yaml``/``*.yml`` file. A file is included only if
+    at least one YAML document inside parses as a mapping with an ``apiVersion``
+    matching a known Kubernetes API group and a non-empty ``kind`` — this keeps
+    GitHub Actions workflows, OpenAPI specs, pre-commit configs, etc. from
+    being misclassified as K8s manifests.
+    """
     root = Path(project_root)
     if not root.is_dir():
         return {}
@@ -591,22 +744,46 @@ def collect_k8s_manifests(project_root: str | Path) -> dict[str, str]:
         if subdir.is_dir():
             files.extend(_walk_iac(subdir, ["**/*.yaml", "**/*.yml"]))
 
-    # Also include YAML files at the project root
-    for yml in root.glob("*.yaml"):
-        if yml.is_file():
-            files.append(yml)
-    for yml in root.glob("*.yml"):
-        if yml.is_file():
-            files.append(yml)
+    # Also include YAML files at the project root (but still require the
+    # manifest-shape check below, so CI files don't sneak in).
+    for glob_pat in ("*.yaml", "*.yml"):
+        try:
+            for yml in root.glob(glob_pat):
+                try:
+                    if yml.is_file():
+                        files.append(yml)
+                except OSError:
+                    continue
+        except OSError as e:
+            logger.warning("IaC scan: root glob '%s' failed: %s", glob_pat, e)
+
+    try:
+        import yaml  # PyYAML
+    except ImportError:
+        logger.warning(
+            "IaC scan: PyYAML not installed — falling back to substring heuristic. "
+            "Install pyyaml for more accurate Kubernetes manifest detection."
+        )
+        yaml = None  # type: ignore[assignment]
 
     result: dict[str, str] = {}
     for f in sorted(set(files)):
         entry = _read_file_safe(f, root)
         if not entry:
             continue
-        # Only include files that look like K8s manifests
-        if "apiVersion" in entry[1] and "kind" in entry[1]:
-            result[entry[0]] = entry[1]
+        rel, content = entry
+        if yaml is not None:
+            try:
+                docs = list(yaml.safe_load_all(content))
+            except yaml.YAMLError as e:
+                logger.debug("IaC scan: YAML parse failed for %s: %s", rel, e)
+                continue
+            if any(_looks_like_k8s_doc(d) for d in docs):
+                result[rel] = content
+        else:
+            # Fallback: loose substring check. Better than nothing.
+            if "apiVersion:" in content and "kind:" in content:
+                result[rel] = content
     return result
 
 

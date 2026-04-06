@@ -214,14 +214,20 @@ class ReviewPanel(QWidget):
         diff_modes = {0: "working", 1: "staged", 2: "branch"}
         iac_modes = {3: "terraform", 4: "kubernetes", 5: "dockerfile", 6: "helm"}
 
-        # Get current model from parent chat panel if possible
+        # Get current model from parent chat panel if possible. If this
+        # fails we fall back to the provider manager's default — log so
+        # the user isn't silently switched to a different model.
         model_id = ""
         window = self.window()
         if hasattr(window, "chat_panel"):
             try:
                 model_id, _ = window.chat_panel._get_selected_model()
             except Exception:
-                pass
+                logger.warning(
+                    "Review: failed to read selected model from chat panel; "
+                    "falling back to provider default",
+                    exc_info=True,
+                )
 
         if idx in diff_modes:
             # Existing diff review path
@@ -281,14 +287,22 @@ class ReviewPanel(QWidget):
 
     def _display_results(self, result: ReviewResult) -> None:
         """Render the review results as cards."""
+        # If the review failed, render a red error card instead of the
+        # normal summary — failure must never look like a clean scan.
+        if result.status == "failed":
+            self._display_error(result)
+            return
+
         # ── Summary card ──
         summary_card = QWidget()
-        summary_card.setStyleSheet("""
-            QWidget {
-                background-color: #252526; border: 1px solid #333;
-                border-radius: 8px;
-            }
-        """)
+        border = "#f44747" if result.status == "failed" else "#333"
+        summary_card.setStyleSheet(
+            "QWidget {"
+            " background-color: #252526;"
+            f" border: 1px solid {border};"
+            " border-radius: 8px;"
+            "}"
+        )
         sc_layout = QVBoxLayout(summary_card)
         sc_layout.setContentsMargins(14, 12, 14, 12)
 
@@ -319,6 +333,20 @@ class ReviewPanel(QWidget):
 
         self._content_layout.addWidget(summary_card)
 
+        # Truncation warning
+        if getattr(result, "truncated_files", None):
+            warn = QLabel(
+                f"⚠ {len(result.truncated_files)} file(s) were truncated or "
+                "skipped because the review hit size limits. Consider splitting "
+                "or narrowing the scan."
+            )
+            warn.setWordWrap(True)
+            warn.setStyleSheet(
+                "color: #e5a00d; font-size: 12px; padding: 8px 12px; "
+                "background: #2a2416; border: 1px solid #4a3a1a; border-radius: 4px;"
+            )
+            self._content_layout.addWidget(warn)
+
         if not result.findings:
             ok_label = QLabel("✅ No issues found — the changes look good!")
             ok_label.setStyleSheet("color: #4ec9b0; font-size: 14px; padding: 16px;")
@@ -328,6 +356,38 @@ class ReviewPanel(QWidget):
         # ── Finding cards ──
         for finding in result.findings:
             self._content_layout.addWidget(self._create_finding_card(finding))
+
+    def _display_error(self, result: ReviewResult) -> None:
+        """Render a review failure as a distinct red error card."""
+        card = QWidget()
+        card.setStyleSheet(
+            "QWidget { background-color: #2a1717; border: 1px solid #f44747; border-radius: 8px;}"
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+
+        title = QLabel("🔴 Review failed")
+        title.setStyleSheet(
+            "color: #f44747; font-size: 14px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
+        layout.addWidget(title)
+
+        msg = QLabel(result.summary or "The review did not complete.")
+        msg.setWordWrap(True)
+        msg.setStyleSheet("color: #e0d0d0; font-size: 12px; background: transparent; border: none;")
+        layout.addWidget(msg)
+
+        if result.error:
+            detail = QLabel(result.error)
+            detail.setWordWrap(True)
+            detail.setStyleSheet(
+                "color: #b08080; font-size: 11px; font-family: monospace; "
+                "background: transparent; border: none; margin-top: 4px;"
+            )
+            layout.addWidget(detail)
+
+        self._content_layout.addWidget(card)
 
         self._content_layout.addStretch()
 

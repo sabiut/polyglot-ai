@@ -240,7 +240,16 @@ async def k8s_scale_deployment(args: dict) -> str:
 
 
 async def k8s_apply(args: dict) -> str:
-    """Apply a Kubernetes manifest from YAML content or a file path."""
+    """Apply a Kubernetes manifest from YAML content or a file path.
+
+    File paths are sandboxed: URLs are rejected, the path must resolve
+    under the current working directory (i.e. the open project), and the
+    file must actually exist. This prevents the AI (or a compromised
+    prompt) from asking kubectl to apply an arbitrary remote manifest
+    (kubectl supports URLs via `-f`) or a sensitive system path.
+    """
+    from pathlib import Path
+
     yaml_content = args.get("yaml", "") or args.get("manifest", "")
     file_path = args.get("file", "")
     context = args.get("context", "")
@@ -249,10 +258,35 @@ async def k8s_apply(args: dict) -> str:
         return "Error: either 'yaml' content or 'file' path is required."
 
     if file_path:
-        output, code = _run_kubectl(["apply", "-f", file_path], context=context, timeout=30)
+        # Reject URL schemes — kubectl supports them and they would bypass
+        # any filesystem sandboxing.
+        lowered = file_path.strip().lower()
+        if "://" in lowered or lowered.startswith(("http:", "https:", "ftp:", "file:")):
+            return (
+                "Error: remote URLs are not allowed for k8s_apply. "
+                "Download the manifest into the project first, then reference the local path."
+            )
+        try:
+            project_root = Path.cwd().resolve()
+            resolved = Path(file_path).expanduser().resolve()
+        except (OSError, RuntimeError) as e:
+            return f"Error resolving manifest path: {e}"
+
+        try:
+            resolved.relative_to(project_root)
+        except ValueError:
+            return (
+                f"Error: manifest path '{resolved}' is outside the current project "
+                f"('{project_root}'). Only files inside the open project may be applied."
+            )
+
+        if not resolved.is_file():
+            return f"Error: manifest file not found: {resolved}"
+
+        output, code = _run_kubectl(["apply", "-f", str(resolved)], context=context, timeout=30)
         if code != 0:
             return f"Failed to apply manifest: {output}"
-        return f"Applied manifest from {file_path}:\n{output}"
+        return f"Applied manifest from {resolved}:\n{output}"
 
     # Apply from stdin using yaml content
     try:

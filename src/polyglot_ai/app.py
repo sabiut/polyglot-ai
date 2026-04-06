@@ -268,8 +268,11 @@ def main() -> None:
             try:
                 loop.run_until_complete(mcp_client.disconnect_all())
                 loop.run_until_complete(db.close())
-                # Let anyio CancelScope._deliver_cancellation callbacks drain
-                # before the loop closes — avoids 'no running event loop' noise.
+                # Yield once so anyio task-group cancel scopes can finish
+                # unwinding before loop close; otherwise stdio_client cleanup
+                # raises 'no running event loop' on the final tick. 0.15s
+                # chosen empirically — long enough to drain, short enough to
+                # not delay shutdown noticeably.
                 import asyncio as _asyncio
 
                 loop.run_until_complete(_asyncio.sleep(0.15))
