@@ -106,7 +106,13 @@ class ReviewFinding:
 
 @dataclass
 class ReviewResult:
-    """Complete review result."""
+    """Complete review result.
+
+    ``status`` distinguishes a successful empty review ("ok" with no findings)
+    from a failure ("failed") so UI code can render error states distinctly
+    instead of confusing an error with a clean scan. ``error`` holds the
+    user-facing failure message when ``status != "ok"``.
+    """
 
     summary: str
     findings: list[ReviewFinding] = field(default_factory=list)
@@ -115,6 +121,9 @@ class ReviewResult:
     total_deletions: int = 0
     model: str = ""
     provider: str = ""
+    status: str = "ok"  # "ok" | "failed" | "empty"
+    error: str | None = None
+    truncated_files: list[str] = field(default_factory=list)
 
     @property
     def critical_count(self) -> int:

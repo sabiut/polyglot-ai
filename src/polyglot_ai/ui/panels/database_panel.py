@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.async_utils import safe_task
-from polyglot_ai.core.db_explorer import DatabaseManager, QueryResult
+from polyglot_ai.core.db_explorer import QueryResult, get_global_db_manager
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class DatabasePanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._db_manager = DatabaseManager()
+        self._db_manager = get_global_db_manager()
         self._mcp_client = None
         self._active_connection: str | None = None
         self._full_window: _DatabaseWindow | None = None
@@ -159,6 +159,30 @@ class DatabasePanel(QWidget):
         connect_btn.clicked.connect(self._connect_selected)
         conn_layout.addWidget(connect_btn)
 
+        # Disconnect icon button
+        disconnect_btn = QPushButton()
+        disconnect_btn.setObjectName("dbDisconnectBtn")
+        disconnect_btn.setFixedSize(26, 26)
+        disconnect_btn.setToolTip("Disconnect from database")
+        disconnect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dc_pixmap = QPixmap(16, 16)
+        dc_pixmap.fill(QColor(0, 0, 0, 0))
+        dp = QPainter(dc_pixmap)
+        dp_pen = QPen(QColor("#f44747"))
+        dp_pen.setWidthF(2.0)
+        dp.setPen(dp_pen)
+        # Draw an X
+        dp.drawLine(4, 4, 12, 12)
+        dp.drawLine(12, 4, 4, 12)
+        dp.end()
+        disconnect_btn.setIcon(QIcon(dc_pixmap))
+        disconnect_btn.setStyleSheet(
+            "#dbDisconnectBtn { background: transparent; border: none; }"
+            "#dbDisconnectBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        disconnect_btn.clicked.connect(self._disconnect_selected)
+        conn_layout.addWidget(disconnect_btn)
+
         layout.addWidget(conn_bar)
 
         # Schema tree (compact, in sidebar)
@@ -226,7 +250,7 @@ class DatabasePanel(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             name, db_type, conn_str = dialog.get_values()
             if name and conn_str:
-                self._db_manager.add_connection(
+                self._db_manager.add_connection_sync(
                     name, db_type, conn_str, mcp_client=self._mcp_client
                 )
                 self._conn_combo.addItem(f"{name} ({db_type})")
@@ -264,7 +288,7 @@ class DatabasePanel(QWidget):
                 db_type = entry.get("db_type", "sqlite")
                 conn_str = keyring.get_password("polyglot-ai-db", name) or ""
                 if name and conn_str:
-                    self._db_manager.add_connection(
+                    self._db_manager.add_connection_sync(
                         name, db_type, conn_str, mcp_client=self._mcp_client
                     )
                     self._conn_combo.addItem(f"{name} ({db_type})")
@@ -297,6 +321,24 @@ class DatabasePanel(QWidget):
                 self._status_label.setText(f"Error: {msg[:60]}")
 
         safe_task(do_connect(), name="db_connect")
+
+    def _disconnect_selected(self) -> None:
+        if not self._active_connection:
+            self._status_label.setText("No active connection")
+            return
+        conn = self._db_manager.get_connection(self._active_connection)
+        if not conn:
+            return
+
+        async def do_disconnect():
+            try:
+                await conn.disconnect()
+                self._status_label.setText(f"Disconnected: {conn.name}")
+                QTimer.singleShot(0, self._schema_tree.clear)
+            except Exception as e:
+                self._status_label.setText(f"Error: {str(e)[:60]}")
+
+        safe_task(do_disconnect(), name="db_disconnect")
 
     def _populate_schema(self, tables) -> None:
         self._schema_tree.clear()

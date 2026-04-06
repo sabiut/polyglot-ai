@@ -82,7 +82,19 @@ class ReviewPanel(QWidget):
         self._mode_combo.addItemWithDesc("Working Changes", "Review unstaged modifications")
         self._mode_combo.addItemWithDesc("Staged Changes", "Review what will be committed")
         self._mode_combo.addItemWithDesc("Branch vs Main", "Review all commits on this branch")
-        self._mode_combo.setFixedWidth(185)
+        self._mode_combo.addItemWithDesc(
+            "🔍 Terraform Security", "Scan .tf files for cloud security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Kubernetes Security", "Scan K8s manifests for pod security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Dockerfile Security", "Scan Dockerfiles for container security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Helm Chart Security", "Scan Helm templates and values for security issues"
+        )
+        self._mode_combo.setFixedWidth(220)
         self._mode_combo.setFixedHeight(30)
         header_layout.addWidget(self._mode_combo)
 
@@ -196,36 +208,62 @@ class ReviewPanel(QWidget):
         safe_task(self._run_review(), name="run_review")
 
     async def _run_review(self) -> None:
-        from polyglot_ai.core.review.review_engine import get_git_diff
+        from polyglot_ai.core.review.review_engine import collect_iac_files, get_git_diff
 
-        mode_map = {0: "working", 1: "staged", 2: "branch"}
-        mode = mode_map.get(self._mode_combo.currentIndex(), "working")
+        idx = self._mode_combo.currentIndex()
+        diff_modes = {0: "working", 1: "staged", 2: "branch"}
+        iac_modes = {3: "terraform", 4: "kubernetes", 5: "dockerfile", 6: "helm"}
 
-        # Clear previous results
-        self._clear_results()
-        self._show_message("Getting git diff...", "#888")
-
-        diff_text = await get_git_diff(self._project_root, mode)
-        if not diff_text.strip():
-            self._clear_results()
-            self._show_message("No changes found. Your working tree is clean.", "#4ec9b0")
-            self._run_btn.setEnabled(True)
-            self._run_btn.setText("▶ Run Review")
-            return
-
-        self._clear_results()
-        self._show_message("Analyzing changes with AI...", "#569cd6")
-
-        # Get current model from parent chat panel if possible
+        # Get current model from parent chat panel if possible. If this
+        # fails we fall back to the provider manager's default — log so
+        # the user isn't silently switched to a different model.
         model_id = ""
         window = self.window()
         if hasattr(window, "chat_panel"):
             try:
                 model_id, _ = window.chat_panel._get_selected_model()
             except Exception:
-                pass
+                logger.warning(
+                    "Review: failed to read selected model from chat panel; "
+                    "falling back to provider default",
+                    exc_info=True,
+                )
 
-        result = await self._review_engine.review_diff(diff_text, model_id=model_id)
+        if idx in diff_modes:
+            # Existing diff review path
+            mode = diff_modes[idx]
+            self._clear_results()
+            self._show_message("Getting git diff...", "#888")
+
+            diff_text = await get_git_diff(self._project_root, mode)
+            if not diff_text.strip():
+                self._clear_results()
+                self._show_message("No changes found. Your working tree is clean.", "#4ec9b0")
+                self._run_btn.setEnabled(True)
+                self._run_btn.setText("▶ Run Review")
+                return
+
+            self._clear_results()
+            self._show_message("Analyzing changes with AI...", "#569cd6")
+            result = await self._review_engine.review_diff(diff_text, model_id=model_id)
+        else:
+            # IaC review path
+            iac_mode = iac_modes.get(idx, "terraform")
+            self._clear_results()
+            self._show_message(f"Scanning for {iac_mode} files...", "#888")
+
+            files = collect_iac_files(self._project_root, iac_mode)
+            if not files:
+                self._clear_results()
+                self._show_message(f"No {iac_mode} files found in this project.", "#cca700")
+                self._run_btn.setEnabled(True)
+                self._run_btn.setText("▶ Run Review")
+                return
+
+            self._clear_results()
+            self._show_message(f"Analyzing {len(files)} {iac_mode} file(s) with AI...", "#569cd6")
+            result = await self._review_engine.review_content(files, iac_mode, model_id=model_id)
+
         self._current_result = result
 
         self._clear_results()
@@ -249,14 +287,22 @@ class ReviewPanel(QWidget):
 
     def _display_results(self, result: ReviewResult) -> None:
         """Render the review results as cards."""
+        # If the review failed, render a red error card instead of the
+        # normal summary — failure must never look like a clean scan.
+        if result.status == "failed":
+            self._display_error(result)
+            return
+
         # ── Summary card ──
         summary_card = QWidget()
-        summary_card.setStyleSheet("""
-            QWidget {
-                background-color: #252526; border: 1px solid #333;
-                border-radius: 8px;
-            }
-        """)
+        border = "#f44747" if result.status == "failed" else "#333"
+        summary_card.setStyleSheet(
+            "QWidget {"
+            " background-color: #252526;"
+            f" border: 1px solid {border};"
+            " border-radius: 8px;"
+            "}"
+        )
         sc_layout = QVBoxLayout(summary_card)
         sc_layout.setContentsMargins(14, 12, 14, 12)
 
@@ -287,6 +333,20 @@ class ReviewPanel(QWidget):
 
         self._content_layout.addWidget(summary_card)
 
+        # Truncation warning
+        if getattr(result, "truncated_files", None):
+            warn = QLabel(
+                f"⚠ {len(result.truncated_files)} file(s) were truncated or "
+                "skipped because the review hit size limits. Consider splitting "
+                "or narrowing the scan."
+            )
+            warn.setWordWrap(True)
+            warn.setStyleSheet(
+                "color: #e5a00d; font-size: 12px; padding: 8px 12px; "
+                "background: #2a2416; border: 1px solid #4a3a1a; border-radius: 4px;"
+            )
+            self._content_layout.addWidget(warn)
+
         if not result.findings:
             ok_label = QLabel("✅ No issues found — the changes look good!")
             ok_label.setStyleSheet("color: #4ec9b0; font-size: 14px; padding: 16px;")
@@ -296,6 +356,38 @@ class ReviewPanel(QWidget):
         # ── Finding cards ──
         for finding in result.findings:
             self._content_layout.addWidget(self._create_finding_card(finding))
+
+    def _display_error(self, result: ReviewResult) -> None:
+        """Render a review failure as a distinct red error card."""
+        card = QWidget()
+        card.setStyleSheet(
+            "QWidget { background-color: #2a1717; border: 1px solid #f44747; border-radius: 8px;}"
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+
+        title = QLabel("🔴 Review failed")
+        title.setStyleSheet(
+            "color: #f44747; font-size: 14px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
+        layout.addWidget(title)
+
+        msg = QLabel(result.summary or "The review did not complete.")
+        msg.setWordWrap(True)
+        msg.setStyleSheet("color: #e0d0d0; font-size: 12px; background: transparent; border: none;")
+        layout.addWidget(msg)
+
+        if result.error:
+            detail = QLabel(result.error)
+            detail.setWordWrap(True)
+            detail.setStyleSheet(
+                "color: #b08080; font-size: 11px; font-family: monospace; "
+                "background: transparent; border: none; margin-top: 4px;"
+            )
+            layout.addWidget(detail)
+
+        self._content_layout.addWidget(card)
 
         self._content_layout.addStretch()
 

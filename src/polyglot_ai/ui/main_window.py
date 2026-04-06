@@ -21,6 +21,7 @@ from polyglot_ai.ui.panels.chat_panel import ChatPanel
 from polyglot_ai.ui.panels.cicd_panel import CICDPanel
 from polyglot_ai.ui.panels.database_panel import DatabasePanel
 from polyglot_ai.ui.panels.docker_panel import DockerPanel
+from polyglot_ai.ui.panels.k8s_panel import K8sPanel
 from polyglot_ai.ui.panels.editor_panel import EditorPanel
 from polyglot_ai.ui.panels.file_explorer import FileExplorer
 from polyglot_ai.ui.panels.mcp_sidebar import MCPSidebar
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self._git_panel = GitPanel()
         self._database_panel = DatabasePanel()
         self._docker_panel = DockerPanel()
+        self._k8s_panel = K8sPanel()
         self._editor_panel = EditorPanel()
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
         self._sidebar_stack.addWidget(self._mcp_sidebar)  # 3: mcp
         self._sidebar_stack.addWidget(self._database_panel)  # 4: database
         self._sidebar_stack.addWidget(self._docker_panel)  # 5: docker
+        self._sidebar_stack.addWidget(self._k8s_panel)  # 6: kubernetes
         self._sidebar_stack.setMinimumWidth(200)
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
@@ -153,7 +156,15 @@ class MainWindow(QMainWindow):
                 self._action_settings.trigger()
             return
 
-        view_map = {"files": 0, "search": 1, "git": 2, "mcp": 3, "database": 4, "docker": 5}
+        view_map = {
+            "files": 0,
+            "search": 1,
+            "git": 2,
+            "mcp": 3,
+            "database": 4,
+            "docker": 5,
+            "kubernetes": 6,
+        }
         index = view_map.get(view_name, 0)
 
         if view_name == self._last_sidebar_view and self._sidebar_visible:
@@ -293,6 +304,11 @@ class MainWindow(QMainWindow):
         self._action_toggle_docker.setShortcut(QKeySequence("Ctrl+Shift+K"))
         self._action_toggle_docker.triggered.connect(lambda: self._on_activity_changed("docker"))
         view_menu.addAction(self._action_toggle_docker)
+
+        self._action_toggle_k8s = QAction("&Kubernetes", self)
+        self._action_toggle_k8s.setShortcut(QKeySequence("Ctrl+Shift+8"))
+        self._action_toggle_k8s.triggered.connect(lambda: self._on_activity_changed("kubernetes"))
+        view_menu.addAction(self._action_toggle_k8s)
 
         view_menu.addSeparator()
 
@@ -492,6 +508,13 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+K",
         )
         reg.register(
+            "view.kubernetes",
+            "Show Kubernetes",
+            lambda: self._on_activity_changed("kubernetes"),
+            "View",
+            "Ctrl+Shift+8",
+        )
+        reg.register(
             "view.terminal",
             "Toggle Terminal",
             lambda: self._action_toggle_terminal.toggle(),
@@ -610,6 +633,10 @@ class MainWindow(QMainWindow):
     @property
     def docker_panel(self) -> DockerPanel:
         return self._docker_panel
+
+    @property
+    def k8s_panel(self) -> K8sPanel:
+        return self._k8s_panel
 
     @property
     def editor_panel(self) -> EditorPanel:

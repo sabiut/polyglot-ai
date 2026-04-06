@@ -22,10 +22,51 @@ from polyglot_ai.core.sandbox import Sandbox
 logger = logging.getLogger(__name__)
 
 
-class ToolRegistry:
-    """Manages tool execution with sandboxing."""
+#: Tools that can run in "standalone" mode without a Sandbox/FileOperations.
+#: When the registry is constructed without those (e.g. before a project is
+#: opened), only these names can be dispatched.
+_STANDALONE_TOOL_NAMES = frozenset(
+    {
+        "web_search",
+        "create_plan",
+        # Docker
+        "docker_list_containers",
+        "docker_container_logs",
+        "docker_inspect",
+        "docker_restart",
+        "docker_stop",
+        "docker_start",
+        "docker_remove",
+        "docker_list_images",
+        # Kubernetes
+        "k8s_list_pods",
+        "k8s_list_deployments",
+        "k8s_list_services",
+        "k8s_pod_logs",
+        "k8s_describe",
+        "k8s_delete_pod",
+        "k8s_restart_deployment",
+        "k8s_scale_deployment",
+        "k8s_apply",
+        # Database
+        "db_list_connections",
+        "db_get_schema",
+        "db_query",
+        "db_execute",
+    }
+)
 
-    def __init__(self, sandbox: Sandbox, file_ops: FileOperations) -> None:
+
+class ToolRegistry:
+    """Manages tool execution with sandboxing.
+
+    sandbox and file_ops are optional — when not provided, only standalone
+    tools (docker, k8s, database, web_search, create_plan) can execute.
+    """
+
+    def __init__(
+        self, sandbox: Sandbox | None = None, file_ops: FileOperations | None = None
+    ) -> None:
         self._sandbox = sandbox
         self._file_ops = file_ops
         self._mcp_client = None
@@ -78,6 +119,17 @@ class ToolRegistry:
 
     async def _execute_single(self, tool_name: str, args: dict) -> str:
         """Execute a single tool invocation with parsed arguments."""
+        # Guard: when running in standalone mode (no sandbox/file_ops),
+        # reject file/shell/git tool calls instead of hitting an
+        # AttributeError inside the per-tool branches below.
+        if self._sandbox is None and self._file_ops is None:
+            is_mcp = tool_name.startswith("mcp_") and self._mcp_client is not None
+            if not is_mcp and tool_name not in _STANDALONE_TOOL_NAMES:
+                return (
+                    f"Error: tool '{tool_name}' requires an open project. "
+                    "Open a folder from the File menu first."
+                )
+
         try:
             # File tools
             if tool_name == "file_read":
@@ -136,6 +188,107 @@ class ToolRegistry:
             # Plan tool
             elif tool_name == "create_plan":
                 return json.dumps(args)
+
+            # Docker tools
+            elif tool_name == "docker_list_containers":
+                from .docker_tools import docker_list_containers
+
+                return await docker_list_containers(args)
+            elif tool_name == "docker_list_images":
+                from .docker_tools import docker_list_images
+
+                return await docker_list_images(args)
+            elif tool_name == "docker_container_logs":
+                from .docker_tools import docker_container_logs
+
+                return await docker_container_logs(args)
+            elif tool_name == "docker_inspect":
+                from .docker_tools import docker_inspect
+
+                return await docker_inspect(args)
+            elif tool_name == "docker_restart":
+                from .docker_tools import docker_restart
+
+                return await docker_restart(args)
+            elif tool_name == "docker_stop":
+                from .docker_tools import docker_stop
+
+                return await docker_stop(args)
+            elif tool_name == "docker_start":
+                from .docker_tools import docker_start
+
+                return await docker_start(args)
+            elif tool_name == "docker_remove":
+                from .docker_tools import docker_remove
+
+                return await docker_remove(args)
+
+            # Kubernetes tools
+            elif tool_name == "k8s_current_context":
+                from .k8s_tools import k8s_current_context
+
+                return await k8s_current_context(args)
+            elif tool_name == "k8s_list_pods":
+                from .k8s_tools import k8s_list_pods
+
+                return await k8s_list_pods(args)
+            elif tool_name == "k8s_list_deployments":
+                from .k8s_tools import k8s_list_deployments
+
+                return await k8s_list_deployments(args)
+            elif tool_name == "k8s_list_services":
+                from .k8s_tools import k8s_list_services
+
+                return await k8s_list_services(args)
+            elif tool_name == "k8s_pod_logs":
+                from .k8s_tools import k8s_pod_logs
+
+                return await k8s_pod_logs(args)
+            elif tool_name == "k8s_describe":
+                from .k8s_tools import k8s_describe
+
+                return await k8s_describe(args)
+            elif tool_name == "k8s_delete_pod":
+                from .k8s_tools import k8s_delete_pod
+
+                return await k8s_delete_pod(args)
+            elif tool_name == "k8s_restart_deployment":
+                from .k8s_tools import k8s_restart_deployment
+
+                return await k8s_restart_deployment(args)
+            elif tool_name == "k8s_scale_deployment":
+                from .k8s_tools import k8s_scale_deployment
+
+                return await k8s_scale_deployment(args)
+            elif tool_name == "k8s_apply":
+                from .k8s_tools import k8s_apply
+
+                return await k8s_apply(args)
+
+            # Database tools
+            elif tool_name == "db_list_connections":
+                from .db_tools import db_list_connections
+
+                return await db_list_connections(args)
+            elif tool_name == "db_get_schema":
+                from .db_tools import db_get_schema
+
+                return await db_get_schema(args)
+            elif tool_name == "db_query":
+                from .db_tools import db_query, is_readonly_query
+
+                # Reject non-read-only SQL at execution time
+                sql = args.get("sql", "") or args.get("query", "")
+                if sql and not is_readonly_query(sql):
+                    return (
+                        "Error: Only read-only queries are allowed via db_query. "
+                        "Use db_execute for write statements (INSERT/UPDATE/DELETE/DDL)."
+                    )
+                return await db_query(args)
+            elif tool_name == "db_execute":
+                from .db_tools import db_execute
+
+                return await db_execute(args)
 
             # MCP tools
             elif self._mcp_client and tool_name.startswith("mcp_"):

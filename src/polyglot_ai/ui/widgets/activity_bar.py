@@ -99,6 +99,8 @@ class ActivityBarButton(QWidget):
             self._draw_database_icon(painter, ox, oy)
         elif self._icon_type == "docker":
             self._draw_docker_icon(painter, ox, oy)
+        elif self._icon_type == "kubernetes":
+            self._draw_kubernetes_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -207,6 +209,29 @@ class ActivityBarButton(QWidget):
         cable.cubicTo(ox + 16, oy + 18, ox + 20, oy + 22, ox + 24, oy + 20)
         p.drawPath(cable)
 
+    def _draw_kubernetes_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Kubernetes — helm wheel shape."""
+        cx, cy = ox + 12, oy + 12
+        # Hexagon outline
+        import math
+
+        points = []
+        for i in range(6):
+            angle = math.radians(60 * i - 30)
+            px = cx + 9 * math.cos(angle)
+            py = cy + 9 * math.sin(angle)
+            points.append(QPointF(px, py))
+        for i in range(6):
+            p.drawLine(points[i], points[(i + 1) % 6])
+        # Center dot
+        p.drawEllipse(QRectF(cx - 2, cy - 2, 4, 4))
+        # Spokes from center
+        for i in range(6):
+            angle = math.radians(60 * i - 30)
+            sx = cx + 5 * math.cos(angle)
+            sy = cy + 5 * math.sin(angle)
+            p.drawLine(QPointF(cx, cy), QPointF(sx, sy))
+
     def _draw_database_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Database — cylinder/drum shape."""
         # Top ellipse
@@ -295,6 +320,7 @@ class ActivityBar(QWidget):
             ("mcp", "MCP Servers (Ctrl+Shift+M)"),
             ("database", "Database Explorer (Ctrl+Shift+D)"),
             ("docker", "Docker (Ctrl+Shift+K)"),
+            ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
         ]
 
         for icon_type, tooltip in top_items:
