@@ -310,9 +310,7 @@ class MCPSidebar(QWidget):
         # Server name (clickable to expand)
         name_label = QLabel(name)
         name_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        name_label.setToolTip(
-            f"{name}\nClick to {'collapse' if expanded else 'expand'} tool list"
-        )
+        name_label.setToolTip(f"{name}\nClick to {'collapse' if expanded else 'expand'} tool list")
         name_label.setStyleSheet(
             f"font-size: 12px; color: {'#ddd' if connected else '#888'}; "
             f"background: transparent; font-weight: {'600' if connected else 'normal'};"
