@@ -144,12 +144,44 @@ def main() -> None:
     review = wire_review_panel(window, provider_manager)
 
     # Minimal tools for standalone chat (no project needed)
+    from polyglot_ai.core.ai.tools import ToolRegistry
     from polyglot_ai.core.ai.tools.definitions import TOOL_DEFINITIONS
 
-    standalone_tools = [
-        t for t in TOOL_DEFINITIONS if t["function"]["name"] in ("web_search", "create_plan")
-    ]
-    chat.set_tools(standalone_tools, registry=None)
+    # Tools available without a project open: web/plan + docker/k8s/db
+    _STANDALONE_NAMES = {
+        "web_search",
+        "create_plan",
+        # Docker read-only
+        "docker_list_containers",
+        "docker_list_images",
+        "docker_container_logs",
+        "docker_inspect",
+        # Docker mutating (require approval)
+        "docker_restart",
+        "docker_stop",
+        "docker_start",
+        "docker_remove",
+        # Kubernetes read-only
+        "k8s_current_context",
+        "k8s_list_pods",
+        "k8s_list_deployments",
+        "k8s_list_services",
+        "k8s_pod_logs",
+        "k8s_describe",
+        # Kubernetes mutating (require approval)
+        "k8s_delete_pod",
+        "k8s_restart_deployment",
+        "k8s_scale_deployment",
+        "k8s_apply",
+        # Database
+        "db_list_connections",
+        "db_get_schema",
+        "db_query",
+        "db_execute",
+    }
+    standalone_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] in _STANDALONE_NAMES]
+    standalone_registry = ToolRegistry()
+    chat.set_tools(standalone_tools, registry=standalone_registry)
     window.mcp_sidebar.set_mcp_client(mcp_client)
     window.database_panel.set_mcp_client(mcp_client)
     window._file_explorer.set_event_bus(event_bus)
@@ -236,6 +268,11 @@ def main() -> None:
             try:
                 loop.run_until_complete(mcp_client.disconnect_all())
                 loop.run_until_complete(db.close())
+                # Let anyio CancelScope._deliver_cancellation callbacks drain
+                # before the loop closes — avoids 'no running event loop' noise.
+                import asyncio as _asyncio
+
+                loop.run_until_complete(_asyncio.sleep(0.15))
             except Exception:
                 logger.exception("Error during async cleanup")
     finally:

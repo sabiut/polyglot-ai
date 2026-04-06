@@ -30,7 +30,7 @@ MCP_CATALOG = [
         "icon": "📁",
         "description": "Secure file access with configurable permissions",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
         "config_fields": [
             {
                 "key": "path",
@@ -46,7 +46,7 @@ MCP_CATALOG = [
         "icon": "🔀",
         "description": "Read, search, and manipulate Git repositories",
         "command": "uvx",
-        "args": ["mcp-server-git==2025.3.20"],
+        "args": ["mcp-server-git"],
         "config_fields": [],
     },
     {
@@ -55,7 +55,7 @@ MCP_CATALOG = [
         "icon": "🧠",
         "description": "Persistent knowledge graph for long-term memory",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-memory@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-memory"],
         "config_fields": [],
     },
     {
@@ -64,7 +64,7 @@ MCP_CATALOG = [
         "icon": "🐙",
         "description": "Manage GitHub repositories, issues, and PRs",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-github"],
         "config_fields": [
             {
                 "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
@@ -78,9 +78,9 @@ MCP_CATALOG = [
         "id": "fetch",
         "name": "Fetch",
         "icon": "🌐",
-        "description": "Fetch and convert web content for AI usage",
+        "description": "Fetch and convert web content for AI usage (requires uvx)",
         "command": "uvx",
-        "args": ["mcp-server-fetch==2025.3.28"],
+        "args": ["mcp-server-fetch"],
         "config_fields": [],
     },
     {
@@ -89,7 +89,7 @@ MCP_CATALOG = [
         "icon": "🗄️",
         "description": "Query PostgreSQL databases (read-only)",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-postgres@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
         "config_fields": [
             {
                 "key": "connection_string",
@@ -105,7 +105,7 @@ MCP_CATALOG = [
         "icon": "💭",
         "description": "Dynamic problem-solving through thought sequences",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
         "config_fields": [],
     },
     {
@@ -114,7 +114,7 @@ MCP_CATALOG = [
         "icon": "🎭",
         "description": "Browser automation and web interaction",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@0.0.28"],
+        "args": ["-y", "@playwright/mcp"],
         "config_fields": [],
     },
     {
@@ -123,7 +123,7 @@ MCP_CATALOG = [
         "icon": "🦊",
         "description": "Manage GitLab repositories and workflows",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-gitlab@2025.1.14"],
+        "args": ["-y", "@modelcontextprotocol/server-gitlab"],
         "config_fields": [
             {
                 "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
@@ -139,7 +139,7 @@ MCP_CATALOG = [
         "icon": "🐬",
         "description": "Query MySQL databases",
         "command": "npx",
-        "args": ["-y", "@benborla29/mcp-server-mysql@0.1.1"],
+        "args": ["-y", "@benborla29/mcp-server-mysql"],
         "config_fields": [
             {
                 "key": "MYSQL_HOST",
@@ -287,17 +287,52 @@ class MCPClient:
                 env=safe_env,
             )
 
-            # Create the stdio transport
-            transport_ctx = stdio_client(params)
-            transport = await transport_ctx.__aenter__()
+            # Create the stdio transport with a 3-minute timeout
+            # (npx/uvx can be slow on first run — downloads packages)
+            import asyncio as _asyncio
+
+            try:
+                transport_ctx = stdio_client(params)
+                transport = await _asyncio.wait_for(transport_ctx.__aenter__(), timeout=180)
+            except _asyncio.TimeoutError:
+                logger.error(
+                    "MCP server '%s' startup timed out after 180s. "
+                    "First-run package install may take longer — try again.",
+                    server_name,
+                )
+                return False
             read_stream, write_stream = transport
 
-            # Create and initialize session
-            session = ClientSession(read_stream, write_stream)
+            # Create session — newer MCP SDK versions require async context
+            # manager entry for the session as well.
+            session_ctx = ClientSession(read_stream, write_stream)
             try:
-                await session.initialize()
+                session = await session_ctx.__aenter__()
             except Exception:
-                # Clean up transport if session init fails
+                try:
+                    await transport_ctx.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                raise
+
+            try:
+                await _asyncio.wait_for(session.initialize(), timeout=60)
+            except _asyncio.TimeoutError:
+                logger.error("MCP server '%s' initialize timed out", server_name)
+                try:
+                    await session_ctx.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                try:
+                    await transport_ctx.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                return False
+            except Exception:
+                try:
+                    await session_ctx.__aexit__(None, None, None)
+                except Exception:
+                    pass
                 try:
                     await transport_ctx.__aexit__(None, None, None)
                 except Exception:
@@ -305,7 +340,7 @@ class MCPClient:
                 raise
 
             self._sessions[server_name] = session
-            self._transports[server_name] = transport_ctx
+            self._transports[server_name] = (transport_ctx, session_ctx)
             self._connected.add(server_name)
 
             # Discover tools
@@ -342,9 +377,19 @@ class MCPClient:
         if server_name in self._sessions:
             try:
                 self._sessions.pop(server_name)
-                transport_ctx = self._transports.pop(server_name, None)
-                if transport_ctx:
-                    await transport_ctx.__aexit__(None, None, None)
+                contexts = self._transports.pop(server_name, None)
+                if contexts:
+                    # Now a tuple of (transport_ctx, session_ctx) — exit both
+                    if isinstance(contexts, tuple):
+                        transport_ctx, session_ctx = contexts
+                        try:
+                            await session_ctx.__aexit__(None, None, None)
+                        except Exception:
+                            pass
+                        await transport_ctx.__aexit__(None, None, None)
+                    else:
+                        # Legacy single-context path
+                        await contexts.__aexit__(None, None, None)
             except Exception as e:
                 from polyglot_ai.core.security import sanitize_error
 
@@ -580,6 +625,59 @@ class MCPClient:
         logger.info("Saved MCP config to %s", config_path)
 
 
+#: Safe default servers seeded on first run. All no-auth, all free, all
+#: useful for a new user. Requires node.js (npx) and uv (uvx) to be installed.
+_DEFAULT_SEED_SERVER_IDS = ("sequential-thinking", "memory", "fetch")
+
+
+def _seed_default_config(config_path: Path) -> list[MCPServerConfig]:
+    """Create a default MCP config on first run and return the seeded servers."""
+    from polyglot_ai.core.security import secure_write
+
+    servers: list[MCPServerConfig] = []
+    seed_dict: dict[str, dict] = {}
+
+    for server_id in _DEFAULT_SEED_SERVER_IDS:
+        entry = next((e for e in MCP_CATALOG if e["id"] == server_id), None)
+        if entry is None:
+            continue
+        # Skip any server that requires config fields (e.g. API keys) —
+        # seeding should never require interaction.
+        if entry.get("config_fields"):
+            continue
+        servers.append(
+            MCPServerConfig(
+                name=server_id,
+                command=entry["command"],
+                args=list(entry["args"]),
+                env={},
+                enabled=True,
+            )
+        )
+        seed_dict[server_id] = {
+            "command": entry["command"],
+            "args": list(entry["args"]),
+            "env": {},
+            "enabled": True,
+        }
+
+    if not seed_dict:
+        return []
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        secure_write(config_path, json.dumps({"servers": seed_dict}, indent=2))
+        logger.info(
+            "Seeded default MCP config at %s with: %s",
+            config_path,
+            ", ".join(seed_dict.keys()),
+        )
+    except Exception as e:
+        logger.warning("Could not seed default MCP config: %s", e)
+
+    return servers
+
+
 def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
     """Load MCP server configurations from a JSON file.
 
@@ -601,7 +699,9 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
         config_path = Path.home() / ".config" / "polyglot-ai" / "mcp_servers.json"
 
     if not config_path.exists():
-        return []
+        # First run: seed a default config with safe, no-auth servers so new
+        # users get a useful experience out of the box.
+        return _seed_default_config(config_path)
 
     # Validate config file security before reading (may contain keyring refs)
     from polyglot_ai.core.security import check_secure_file

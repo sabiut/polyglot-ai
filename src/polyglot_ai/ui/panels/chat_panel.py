@@ -711,6 +711,7 @@ class ChatPanel(QWidget):
         menu.addSeparator()
 
         open_terminal = QAction(terminal_icon, "  Run in terminal", menu)
+        open_terminal.triggered.connect(self._open_terminal_from_menu)
         menu.addAction(open_terminal)
 
         mcp_icon = self._create_menu_icon("plug")
@@ -3143,6 +3144,16 @@ class ChatPanel(QWidget):
         window = self.window()
         if hasattr(window, "_action_settings"):
             window._action_settings.trigger()
+
+    def _open_terminal_from_menu(self) -> None:
+        """Show and focus the integrated terminal panel."""
+        window = self.window()
+        if hasattr(window, "_action_toggle_terminal"):
+            # Ensure terminal is visible
+            if not window._action_toggle_terminal.isChecked():
+                window._action_toggle_terminal.toggle()
+        if hasattr(window, "terminal_panel"):
+            window.terminal_panel.setFocus()
 
 
 class GitHubConnectDialog(QDialog):

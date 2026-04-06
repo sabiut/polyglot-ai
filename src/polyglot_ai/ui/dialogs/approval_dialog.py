@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -30,6 +31,9 @@ class ApprovalDialog(QDialog):
         self.setWindowTitle(f"Approve: {tool_name}")
         self.setMinimumSize(700, 500)
         self.resize(900, 600)
+        # Make the dialog modal and always on top so clicks always register
+        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
         self._approved = False
 

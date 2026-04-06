@@ -82,7 +82,19 @@ class ReviewPanel(QWidget):
         self._mode_combo.addItemWithDesc("Working Changes", "Review unstaged modifications")
         self._mode_combo.addItemWithDesc("Staged Changes", "Review what will be committed")
         self._mode_combo.addItemWithDesc("Branch vs Main", "Review all commits on this branch")
-        self._mode_combo.setFixedWidth(185)
+        self._mode_combo.addItemWithDesc(
+            "🔍 Terraform Security", "Scan .tf files for cloud security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Kubernetes Security", "Scan K8s manifests for pod security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Dockerfile Security", "Scan Dockerfiles for container security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🔍 Helm Chart Security", "Scan Helm templates and values for security issues"
+        )
+        self._mode_combo.setFixedWidth(220)
         self._mode_combo.setFixedHeight(30)
         header_layout.addWidget(self._mode_combo)
 
@@ -196,25 +208,11 @@ class ReviewPanel(QWidget):
         safe_task(self._run_review(), name="run_review")
 
     async def _run_review(self) -> None:
-        from polyglot_ai.core.review.review_engine import get_git_diff
+        from polyglot_ai.core.review.review_engine import collect_iac_files, get_git_diff
 
-        mode_map = {0: "working", 1: "staged", 2: "branch"}
-        mode = mode_map.get(self._mode_combo.currentIndex(), "working")
-
-        # Clear previous results
-        self._clear_results()
-        self._show_message("Getting git diff...", "#888")
-
-        diff_text = await get_git_diff(self._project_root, mode)
-        if not diff_text.strip():
-            self._clear_results()
-            self._show_message("No changes found. Your working tree is clean.", "#4ec9b0")
-            self._run_btn.setEnabled(True)
-            self._run_btn.setText("▶ Run Review")
-            return
-
-        self._clear_results()
-        self._show_message("Analyzing changes with AI...", "#569cd6")
+        idx = self._mode_combo.currentIndex()
+        diff_modes = {0: "working", 1: "staged", 2: "branch"}
+        iac_modes = {3: "terraform", 4: "kubernetes", 5: "dockerfile", 6: "helm"}
 
         # Get current model from parent chat panel if possible
         model_id = ""
@@ -225,7 +223,41 @@ class ReviewPanel(QWidget):
             except Exception:
                 pass
 
-        result = await self._review_engine.review_diff(diff_text, model_id=model_id)
+        if idx in diff_modes:
+            # Existing diff review path
+            mode = diff_modes[idx]
+            self._clear_results()
+            self._show_message("Getting git diff...", "#888")
+
+            diff_text = await get_git_diff(self._project_root, mode)
+            if not diff_text.strip():
+                self._clear_results()
+                self._show_message("No changes found. Your working tree is clean.", "#4ec9b0")
+                self._run_btn.setEnabled(True)
+                self._run_btn.setText("▶ Run Review")
+                return
+
+            self._clear_results()
+            self._show_message("Analyzing changes with AI...", "#569cd6")
+            result = await self._review_engine.review_diff(diff_text, model_id=model_id)
+        else:
+            # IaC review path
+            iac_mode = iac_modes.get(idx, "terraform")
+            self._clear_results()
+            self._show_message(f"Scanning for {iac_mode} files...", "#888")
+
+            files = collect_iac_files(self._project_root, iac_mode)
+            if not files:
+                self._clear_results()
+                self._show_message(f"No {iac_mode} files found in this project.", "#cca700")
+                self._run_btn.setEnabled(True)
+                self._run_btn.setText("▶ Run Review")
+                return
+
+            self._clear_results()
+            self._show_message(f"Analyzing {len(files)} {iac_mode} file(s) with AI...", "#569cd6")
+            result = await self._review_engine.review_content(files, iac_mode, model_id=model_id)
+
         self._current_result = result
 
         self._clear_results()

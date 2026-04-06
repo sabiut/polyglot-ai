@@ -170,7 +170,7 @@ class CICDPanel(QWidget):
         jh_layout.addWidget(self._jobs_label)
         jh_layout.addStretch()
 
-        self._logs_btn = QPushButton("View Failed Logs")
+        self._logs_btn = QPushButton("View Logs")
         self._logs_btn.setObjectName("cicdLogsBtn")
         self._logs_btn.setFixedHeight(20)
         self._logs_btn.setVisible(False)
@@ -233,7 +233,7 @@ class CICDPanel(QWidget):
             self._gh_available = shutil.which("gh") is not None
         return self._gh_available
 
-    def _run_gh(self, args: list[str]) -> tuple[str, int]:
+    def _run_gh(self, args: list[str], timeout: int = 30) -> tuple[str, int]:
         """Run a gh CLI command and return (output, returncode)."""
         if not self._check_gh():
             return "Error: GitHub CLI (gh) not found. Install from https://cli.github.com", 1
@@ -242,7 +242,7 @@ class CICDPanel(QWidget):
                 ["gh", *args],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 cwd=self._project_root or None,
             )
             output = result.stdout if result.returncode == 0 else result.stderr
@@ -328,7 +328,8 @@ class CICDPanel(QWidget):
 
         conclusion = run.get("conclusion") or run.get("status", "")
         self._jobs_label.setText(f"Loading jobs for run #{run_id}...")
-        self._logs_btn.setVisible(conclusion == "failure")
+        # Show button for any completed run so users can inspect logs
+        self._logs_btn.setVisible(conclusion in ("failure", "cancelled", "success", "completed"))
         self._log_viewer.setVisible(False)
 
         # Store selected run ID for log fetching
@@ -377,21 +378,79 @@ class CICDPanel(QWidget):
         self._logs_btn.setEnabled(False)
         self._logs_btn.setText("Loading...")
 
-        output, code = self._run_gh(["run", "view", str(run_id), "--log-failed"])
-        self._on_logs_loaded(output, code)
+        # Determine if we should fetch failed logs or all logs
+        row = self._runs_table.currentRow()
+        use_failed_only = False
+        title = f"Logs — Run #{run_id}"
+        if 0 <= row < len(self._runs_data):
+            conclusion = self._runs_data[row].get("conclusion", "")
+            if conclusion == "failure":
+                use_failed_only = True
+                title = f"Failed logs — Run #{run_id}"
+
+        # Open dialog immediately with loading state, then populate in background
+        self._log_dialog = _CICDLogDialog(title, self)
+        self._log_dialog.show()
+
+        log_flag = "--log-failed" if use_failed_only else "--log"
+
+        # Use Popen so we can kill the process if the user cancels
+        if not self._check_gh():
+            self._log_dialog.set_content("Error: GitHub CLI (gh) not found.")
+            self._logs_btn.setEnabled(True)
+            self._logs_btn.setText("View Logs")
+            return
+
+        import threading
+
+        proc = subprocess.Popen(
+            ["gh", "run", "view", str(run_id), log_flag],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self._project_root or None,
+        )
+        self._log_dialog.set_subprocess(proc)
+
+        def do_fetch():
+            try:
+                # 2-minute hard cap — after that, kill the process
+                stdout, stderr = proc.communicate(timeout=120)
+                code = proc.returncode
+                output = stdout if code == 0 else (stderr or stdout)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                    proc.communicate()
+                except Exception:
+                    pass
+                output = (
+                    "Timed out after 2 minutes. GitHub Actions logs for this run "
+                    "are too large to download. Try clicking on individual jobs in "
+                    "the table instead, or view the run directly in GitHub."
+                )
+                code = 1
+            except Exception as exc:
+                output = f"Error: {exc}"
+                code = 1
+            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, code))
+
+        threading.Thread(target=do_fetch, daemon=True).start()
 
     def _on_logs_loaded(self, output: str, code: int) -> None:
         self._logs_btn.setEnabled(True)
-        self._logs_btn.setText("View Failed Logs")
-        self._log_viewer.setVisible(True)
+        self._logs_btn.setText("View Logs")
+
+        if not hasattr(self, "_log_dialog") or self._log_dialog is None:
+            return
 
         if code != 0:
-            self._log_viewer.setPlainText(f"Error fetching logs: {output[:500]}")
+            self._log_dialog.set_content(f"Error fetching logs: {output[:500]}")
         else:
             # Truncate very long logs
-            if len(output) > 50_000:
-                output = output[:50_000] + "\n\n... (log truncated)"
-            self._log_viewer.setPlainText(output)
+            if len(output) > 200_000:
+                output = output[:200_000] + "\n\n... (log truncated at 200KB)"
+            self._log_dialog.set_content(output or "(no failed logs)")
 
     # ── Helpers ─────────────────────────────────────────────────────
 
@@ -436,3 +495,127 @@ class CICDPanel(QWidget):
         from PyQt6.QtGui import QColor
 
         return QColor(hex_color)
+
+
+class _CICDLogDialog(QWidget):
+    """Standalone resizable window for viewing CI/CD run logs."""
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle(title)
+        self.resize(1000, 700)
+        self.setMinimumSize(500, 400)
+        self.setStyleSheet(f"background: {tc.get('bg_base')};")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header
+        header = QWidget()
+        header.setObjectName("cicdLogHeader")
+        header.setFixedHeight(40)
+        header.setStyleSheet(
+            f"#cicdLogHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(12, 0, 12, 0)
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"color: {tc.get('text_heading')}; background: transparent;"
+        )
+        h_layout.addWidget(title_label)
+        h_layout.addStretch()
+
+        self._count_label = QLabel("")
+        self._count_label.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; background: transparent;"
+        )
+        h_layout.addWidget(self._count_label)
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedHeight(24)
+        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cancel_btn.setStyleSheet(
+            f"QPushButton {{ background: {tc.get('accent_error')}; color: #fff; "
+            f"border: none; border-radius: 3px; padding: 0 10px; "
+            f"font-size: {tc.FONT_XS}px; font-weight: 600; margin-left: 8px; }}"
+            "QPushButton:hover { background: #d43f3f; }"
+        )
+        self._cancel_btn.clicked.connect(self._cancel_loading)
+        h_layout.addWidget(self._cancel_btn)
+
+        layout.addWidget(header)
+
+        # Process handle — set by the panel so cancel can kill it
+        self._subprocess = None
+
+        # Log viewer
+        self._viewer = QPlainTextEdit()
+        self._viewer.setReadOnly(True)
+        mono = QFont("Monospace", 11)
+        mono.setStyleHint(QFont.StyleHint.Monospace)
+        self._viewer.setFont(mono)
+        self._viewer.setStyleSheet(
+            f"QPlainTextEdit {{ background: {tc.get('bg_base')}; "
+            f"color: {tc.get('text_primary')}; border: none; padding: 8px; }}"
+        )
+        self._viewer.setPlainText("Loading logs...")
+        layout.addWidget(self._viewer)
+
+        # Progress counter — updates every second while loading
+        import time
+
+        self._start_time = time.monotonic()
+        self._loading = True
+        self._progress_timer = QTimer(self)
+        self._progress_timer.timeout.connect(self._tick_progress)
+        self._progress_timer.start(1000)
+
+    def _tick_progress(self) -> None:
+        if not self._loading:
+            self._progress_timer.stop()
+            return
+        import time
+
+        elapsed = int(time.monotonic() - self._start_time)
+        if elapsed < 10:
+            msg = f"Loading logs... ({elapsed}s)"
+        elif elapsed < 30:
+            msg = f"Downloading logs from GitHub... ({elapsed}s)"
+        elif elapsed < 60:
+            msg = f"Still downloading... this can take a while ({elapsed}s)"
+        else:
+            msg = f"Taking longer than usual... ({elapsed}s)"
+        self._viewer.setPlainText(msg)
+        self._count_label.setText(f"{elapsed}s")
+
+    def set_subprocess(self, proc) -> None:
+        """Register the running subprocess so Cancel can kill it."""
+        self._subprocess = proc
+
+    def _cancel_loading(self) -> None:
+        """User clicked Cancel — kill the subprocess if running."""
+        self._loading = False
+        self._progress_timer.stop()
+        if self._subprocess is not None:
+            try:
+                self._subprocess.kill()
+            except Exception:
+                pass
+            self._subprocess = None
+        self._cancel_btn.setVisible(False)
+        self._viewer.setPlainText("Cancelled.")
+        self._count_label.setText("")
+
+    def set_content(self, content: str) -> None:
+        self._loading = False
+        self._progress_timer.stop()
+        self._cancel_btn.setVisible(False)
+        self._viewer.setPlainText(content)
+        line_count = content.count("\n") + 1
+        self._count_label.setText(f"{line_count:,} lines")
+        # Scroll to bottom so errors are visible first
+        self._viewer.moveCursor(self._viewer.textCursor().MoveOperation.End)
