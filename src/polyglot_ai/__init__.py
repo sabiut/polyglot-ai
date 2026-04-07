@@ -3,4 +3,4 @@ try:
 
     __version__ = version("polyglot-ai")
 except PackageNotFoundError:
-    __version__ = "0.6.0"
+    __version__ = "0.7.0"
