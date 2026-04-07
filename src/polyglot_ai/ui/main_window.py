@@ -31,6 +31,7 @@ from polyglot_ai.ui.panels.usage_panel import UsagePanel
 from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
 from polyglot_ai.ui.panels.terminal_panel import TerminalPanel
+from polyglot_ai.ui.panels.test_panel import TestPanel
 from polyglot_ai.ui.widgets.activity_bar import ActivityBar
 from polyglot_ai.ui.widgets.command_palette import CommandPalette
 
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         self._database_panel = DatabasePanel()
         self._docker_panel = DockerPanel()
         self._k8s_panel = K8sPanel()
+        self._test_panel = TestPanel()
         self._editor_panel = EditorPanel()
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
@@ -76,6 +78,7 @@ class MainWindow(QMainWindow):
         self._sidebar_stack.addWidget(self._database_panel)  # 4: database
         self._sidebar_stack.addWidget(self._docker_panel)  # 5: docker
         self._sidebar_stack.addWidget(self._k8s_panel)  # 6: kubernetes
+        self._sidebar_stack.addWidget(self._test_panel)  # 7: tests
         self._sidebar_stack.setMinimumWidth(200)
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
@@ -164,6 +167,7 @@ class MainWindow(QMainWindow):
             "database": 4,
             "docker": 5,
             "kubernetes": 6,
+            "tests": 7,
         }
         index = view_map.get(view_name, 0)
 
@@ -424,12 +428,22 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(
             self, "Open Project", "", QFileDialog.Option.ShowDirsOnly
         )
-        if directory:
-            path = Path(directory)
-            self._file_explorer.set_root(path)
-            self._search_panel.set_project_root(path)
-            self.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
-            self.statusBar().showMessage(f"Project: {path}")
+        if not directory:
+            return
+        path = Path(directory)
+        # Prefer the project-manager activator wired by ui_wiring — it
+        # fires project:opened so the git, CI, Docker, database, and
+        # MCP panels all hear about the new project. Falls back to the
+        # legacy file-explorer-only path if the activator isn't wired
+        # yet (shouldn't happen in normal startup).
+        activator = getattr(self, "_activate_project", None)
+        if activator is not None:
+            activator(path)
+            return
+        self._file_explorer.set_root(path)
+        self._search_panel.set_project_root(path)
+        self.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
+        self.statusBar().showMessage(f"Project: {path}")
 
     def _on_editor_tab_changed(self, index: int) -> None:
         tab = self._editor_panel.get_current_tab()
@@ -637,6 +651,10 @@ class MainWindow(QMainWindow):
     @property
     def k8s_panel(self) -> K8sPanel:
         return self._k8s_panel
+
+    @property
+    def test_panel(self) -> TestPanel:
+        return self._test_panel
 
     @property
     def editor_panel(self) -> EditorPanel:

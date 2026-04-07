@@ -23,13 +23,21 @@ def wire_chat_panel(window, db, context_builder, provider_manager, mcp_client):
 
 
 def wire_review_panel(window, provider_manager):
-    """Set up the review engine and connect it to the review panel."""
+    """Set up the review engine and connect it to the review panel.
+
+    The same engine is also wired into the git panel so the
+    "Generate PR description" button can reuse it without standing
+    up a second provider manager.
+    """
     from polyglot_ai.core.review.review_engine import ReviewEngine
 
     review_engine = ReviewEngine(provider_manager)
     review = window.review_panel
     review.set_review_engine(review_engine)
     review.set_provider_manager(provider_manager)
+    # Give the git panel access to the same engine for PR summary generation.
+    if hasattr(window, "git_panel") and hasattr(window.git_panel, "set_review_engine"):
+        window.git_panel.set_review_engine(review_engine)
     return review
 
 
@@ -83,6 +91,7 @@ def wire_project_events(
     from polyglot_ai.core.sandbox import Sandbox
 
     tool_registry_holder = [None]  # mutable container for nonlocal
+    mcp_listener_registered = [False]  # register the listener exactly once
 
     def _on_project_opened(path: str = "", **kwargs):
         project_path = Path(path)
@@ -93,9 +102,37 @@ def wire_project_events(
         tool_registry.set_mcp_client(mcp_client)
         tool_registry_holder[0] = tool_registry
 
-        # Combine built-in tools + MCP tools
+        # Combine built-in tools + MCP tools. At this point MCP is not
+        # yet connected, so the returned mcp tool list is empty — the
+        # connection-change listener below refreshes chat.refresh_mcp_tools
+        # once connect_all() finishes, so sequentialthinking and other
+        # MCP tools actually become available from the very next message.
         all_tools = tool_registry.get_tool_definitions() + mcp_client.get_tool_definitions()
         chat.set_tools(all_tools, registry=tool_registry)
+
+        # Wire MCP → chat tool-list refresh and sidebar refresh. Register
+        # the listener exactly once per app lifetime so reopening projects
+        # doesn't stack duplicate callbacks.
+        if not mcp_listener_registered[0]:
+            from PyQt6.QtCore import QTimer
+
+            def _do_mcp_refresh():
+                chat.refresh_mcp_tools(mcp_client)
+                try:
+                    window.mcp_sidebar.refresh()
+                except Exception:
+                    logger.exception("Failed to refresh MCP sidebar on connection change")
+
+            def _on_mcp_change():
+                # The listener may fire on a non-Qt thread (e.g. a future
+                # background reconnect task). QTimer.singleShot(0, ...) is
+                # thread-safe and queues the call onto the GUI thread, so
+                # the actual widget updates always happen on the right
+                # thread regardless of where connect/disconnect ran.
+                QTimer.singleShot(0, _do_mcp_refresh)
+
+            mcp_client.add_connection_change_listener(_on_mcp_change)
+            mcp_listener_registered[0] = True
 
         # Connect MCP servers
         safe_task(mcp_client.connect_all(), name="mcp_connect_all")
@@ -106,6 +143,7 @@ def wire_project_events(
         window.search_panel.set_project_root(project_path)
         window.git_panel.set_project_root(project_path)
         window.cicd_panel.set_project_root(project_path)
+        window.test_panel.set_project_root(project_path)
         window.mcp_sidebar.refresh()
 
         audit.log("project_opened", {"path": path})
@@ -154,11 +192,27 @@ def wire_settings_dialog(
     window._action_toggle_theme.triggered.connect(lambda: theme_manager.toggle_theme())
 
 
-def wire_open_project(window, event_bus):
-    """Override default open-project action to use ProjectManager."""
+def wire_open_project(window, event_bus, settings=None):
+    """Override default open-project action to use ProjectManager.
+
+    When ``settings`` is provided, the last opened project path is
+    persisted to ``session.last_project`` so it can be restored on
+    the next launch via :func:`restore_last_project`.
+    """
     from polyglot_ai.core.project import ProjectManager
 
     project_manager = ProjectManager(event_bus)
+
+    def _activate_project(path: Path) -> None:
+        project_manager.open_project(path)
+        window._file_explorer.set_root(path)
+        window.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
+        window.statusBar().showMessage(f"Project: {path}")
+        if settings is not None:
+            safe_task(
+                settings.set("session.last_project", str(path)),
+                name="save_last_project",
+            )
 
     def _open_project_with_manager():
         from PyQt6.QtWidgets import QFileDialog
@@ -167,17 +221,32 @@ def wire_open_project(window, event_bus):
             window, "Open Project", "", QFileDialog.Option.ShowDirsOnly
         )
         if directory:
-            path = Path(directory)
-            project_manager.open_project(path)
-            window._file_explorer.set_root(path)
-            window.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
-            window.statusBar().showMessage(f"Project: {path}")
+            _activate_project(Path(directory))
 
     try:
         window._action_open_project.triggered.disconnect()
     except TypeError:
         pass
     window._action_open_project.triggered.connect(_open_project_with_manager)
+    # Expose the activator so restore_last_project can reuse it.
+    window._activate_project = _activate_project
+
+
+def restore_last_project(window, settings) -> None:
+    """If ``session.last_project`` is set and still exists, open it."""
+    last = settings.get("session.last_project")
+    if not last:
+        return
+    path = Path(last)
+    if not path.is_dir():
+        logger.info("Last project %s no longer exists, skipping restore", path)
+        return
+    activator = getattr(window, "_activate_project", None)
+    if activator is None:
+        logger.warning("restore_last_project: no activator wired")
+        return
+    logger.info("Restoring last project: %s", path)
+    activator(path)
 
 
 def run_onboarding(window, settings, keyring_store, provider_manager, event_bus):

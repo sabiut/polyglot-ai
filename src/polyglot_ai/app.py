@@ -78,6 +78,30 @@ def main() -> None:
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
+    # Silence a known-harmless shutdown race between anyio and qasync.
+    # When MCP stdio servers disconnect, anyio schedules CancelScope
+    # ._deliver_cancellation callbacks on the next loop tick. If the
+    # loop closes before they run we get:
+    #   RuntimeError: no running event loop
+    # …from inside _deliver_cancellation. The process is already
+    # exiting, nothing leaks — the traceback is just noise on stderr.
+    # We install a targeted exception handler that swallows *only*
+    # that specific combination; any other loop exception still goes
+    # to the default handler.
+    def _quiet_anyio_shutdown_noise(loop_obj, context):
+        exc = context.get("exception")
+        msg = context.get("message", "")
+        if (
+            isinstance(exc, RuntimeError)
+            and "no running event loop" in str(exc)
+            and "_deliver_cancellation" in msg
+        ):
+            logger.debug("Suppressed harmless anyio shutdown race: %s", msg)
+            return
+        loop_obj.default_exception_handler(context)
+
+    loop.set_exception_handler(_quiet_anyio_shutdown_noise)
+
     async def init_services() -> None:
         await db.init()
         await settings.load()
@@ -130,6 +154,7 @@ def main() -> None:
 
     # Wire panels and events
     from polyglot_ai.startup.ui_wiring import (
+        restore_last_project,
         run_onboarding,
         wire_changeset_events,
         wire_chat_panel,
@@ -186,6 +211,7 @@ def main() -> None:
     window.database_panel.set_mcp_client(mcp_client)
     window._file_explorer.set_event_bus(event_bus)
     window.git_panel.set_event_bus(event_bus)
+    window.test_panel.set_event_bus(event_bus)
     window.usage_panel.set_database(db)
     window.editor_panel.set_ai_services(provider_manager, settings)
 
@@ -203,7 +229,7 @@ def main() -> None:
         settings,
         indexer=indexer,
     )
-    wire_open_project(window, event_bus)
+    wire_open_project(window, event_bus, settings=settings)
     wire_settings_dialog(
         window,
         settings,
@@ -265,6 +291,14 @@ def main() -> None:
         "session.window_geometry": settings.get("session.window_geometry"),
     }
     window.restore_session(session_data)
+
+    # Re-open the project that was active at last shutdown so the
+    # git/CI/Docker/Database panels and the file explorer come back
+    # populated. No-op if the path was never saved or no longer exists.
+    try:
+        restore_last_project(window, settings)
+    except Exception:
+        logger.exception("restore_last_project failed")
 
     # Post-show initialization
     from polyglot_ai.core.async_utils import safe_task

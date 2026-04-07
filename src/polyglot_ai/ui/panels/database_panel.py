@@ -25,9 +25,13 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QStackedWidget,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTreeWidget,
@@ -38,7 +42,10 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.core.async_utils import safe_task
 from polyglot_ai.core.db_explorer import QueryResult, get_global_db_manager
+from polyglot_ai.core.db_notebook import get_notebook_store
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.widgets.result_chart import ResultChartWidget
+from polyglot_ai.ui.widgets.result_profile import ResultProfileWidget
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +407,9 @@ class _DatabaseWindow(QWidget):
         self._setup_ui()
         self.setWindowTitle(f"Database — {self._extract_db_name()}")
         self._load_schema()
+        # Populate history + snippets sidebars from the persistent store.
+        self._refresh_history()
+        self._refresh_snippets()
 
     def _extract_db_name(self) -> str:
         """Extract the database name from the connection string."""
@@ -503,6 +513,46 @@ class _DatabaseWindow(QWidget):
 
         main_splitter.addWidget(schema_widget)
 
+        # History + Snippets sidebar — tabbed widget so the user can
+        # browse recent queries and reuse saved snippets without leaving
+        # the SQL editor. Click any entry → loads it into the editor.
+        side_widget = QWidget()
+        side_layout = QVBoxLayout(side_widget)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(0)
+
+        side_tabs = QTabWidget()
+        side_tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; background: #1e1e1e; }"
+            "QTabBar::tab { background: #252526; color: #888; padding: 5px 12px; "
+            "font-size: 11px; border-top: 2px solid transparent; }"
+            "QTabBar::tab:selected { background: #1e1e1e; color: #ddd; "
+            "border-top-color: #0e639c; }"
+        )
+
+        # History tab
+        self._history_list = QListWidget()
+        self._history_list.setStyleSheet(
+            "QListWidget { background: #1e1e1e; color: #ddd; border: none; "
+            "font-size: 11px; }"
+            "QListWidget::item { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; }"
+            "QListWidget::item:hover { background: #2a2d2e; }"
+            "QListWidget::item:selected { background: #094771; color: #fff; }"
+        )
+        self._history_list.itemDoubleClicked.connect(self._on_history_picked)
+        side_tabs.addTab(self._history_list, "History")
+
+        # Snippets tab
+        self._snippets_list = QListWidget()
+        self._snippets_list.setStyleSheet(self._history_list.styleSheet())
+        self._snippets_list.itemDoubleClicked.connect(self._on_snippet_picked)
+        self._snippets_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._snippets_list.customContextMenuRequested.connect(self._show_snippets_menu)
+        side_tabs.addTab(self._snippets_list, "Snippets")
+
+        side_layout.addWidget(side_tabs)
+        main_splitter.addWidget(side_widget)
+
         # Right: SQL editor + results (vertical splitter)
         right_splitter = QSplitter(Qt.Orientation.Vertical)
         right_splitter.setStyleSheet(
@@ -596,7 +646,8 @@ class _DatabaseWindow(QWidget):
             f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
         )
         rh_layout = QHBoxLayout(results_header)
-        rh_layout.setContentsMargins(8, 0, 8, 0)
+        rh_layout.setContentsMargins(8, 0, 6, 0)
+        rh_layout.setSpacing(6)
 
         self._results_label = QLabel("RESULTS")
         self._results_label.setStyleSheet(
@@ -604,6 +655,14 @@ class _DatabaseWindow(QWidget):
             "font-weight: 600; letter-spacing: 0.5px; background: transparent;"
         )
         rh_layout.addWidget(self._results_label)
+
+        # View toggle: Table / Chart / Profile
+        self._view_toggle = QComboBox()
+        self._view_toggle.addItems(["📊 Table", "📈 Chart", "🔍 Profile"])
+        self._view_toggle.setStyleSheet(_combo_dropdown_style())
+        self._view_toggle.currentIndexChanged.connect(self._on_view_changed)
+        rh_layout.addWidget(self._view_toggle)
+
         rh_layout.addStretch()
 
         self._results_status = QLabel("")
@@ -612,10 +671,22 @@ class _DatabaseWindow(QWidget):
         )
         rh_layout.addWidget(self._results_status)
 
+        # Header action buttons: save snippet, export CSV
+        self._snippet_btn = self._mk_header_btn("💾", "Save current SQL as a snippet")
+        self._snippet_btn.clicked.connect(self._on_save_snippet)
+        rh_layout.addWidget(self._snippet_btn)
+
+        self._export_btn = self._mk_header_btn("⬇", "Export results to CSV")
+        self._export_btn.clicked.connect(self._on_export_csv)
+        rh_layout.addWidget(self._export_btn)
+
         r_layout.addWidget(results_header)
 
-        # Results table
+        # Results: Table / Chart / Profile views in a stacked widget so the
+        # header dropdown can switch between them without re-running the query.
         self._current_table_name: str | None = None  # Track which table is shown
+        self._results_stack = QStackedWidget()
+
         self._results_table = QTableWidget()
         self._results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._results_table.customContextMenuRequested.connect(self._show_results_menu)
@@ -631,13 +702,24 @@ class _DatabaseWindow(QWidget):
         )
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        r_layout.addWidget(self._results_table)
+        self._results_stack.addWidget(self._results_table)  # 0: table
+
+        self._chart_widget = ResultChartWidget()
+        self._results_stack.addWidget(self._chart_widget)  # 1: chart
+
+        self._profile_widget = ResultProfileWidget()
+        self._results_stack.addWidget(self._profile_widget)  # 2: profile
+
+        r_layout.addWidget(self._results_stack)
+
+        # Cached last result for view switching + export.
+        self._last_result: QueryResult | None = None
 
         right_splitter.addWidget(results_widget)
         right_splitter.setSizes([200, 400])
 
         main_splitter.addWidget(right_splitter)
-        main_splitter.setSizes([250, 750])
+        main_splitter.setSizes([220, 200, 700])
 
         layout.addWidget(main_splitter)
 
@@ -691,28 +773,48 @@ class _DatabaseWindow(QWidget):
         self._run_btn.setEnabled(False)
         self._results_status.setText("Executing...")
 
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            result = loop.run_until_complete(self._conn.execute_query(sql))
-            self._show_results(result)
-        except RuntimeError:
-            # If loop is already running (qasync), use safe_task
-            async def do_query():
+        # Always run via safe_task — qasync is the active event loop and
+        # run_until_complete on a running loop raises a RuntimeError that
+        # leaves a dangling never-awaited coroutine (the
+        # `coroutine 'execute_query' was never awaited` warning).
+        async def do_query():
+            try:
                 result = await self._conn.execute_query(sql)
-                QTimer.singleShot(0, lambda: self._show_results(result))
+                self._show_results(result)
+            except Exception as e:
+                # Without this catch the panel would be stuck on
+                # "Executing..." with the Run button disabled forever.
+                logger.exception("db_window: query execution crashed")
+                self._results_status.setText(f"Error: {str(e)[:200]}")
+                self._run_btn.setEnabled(True)
 
-            safe_task(do_query(), name="db_window_query")
+        safe_task(do_query(), name="db_window_query")
 
     def _show_results(self, result: QueryResult) -> None:
         self._run_btn.setEnabled(True)
+        self._last_result = result
+
+        # Record in history (best-effort, never blocks results display).
+        try:
+            store = get_notebook_store()
+            store.add_history(
+                connection=self._conn.name,
+                sql=self._sql_editor.toPlainText().strip(),
+                duration_ms=int((result.execution_time or 0) * 1000),
+                row_count=result.row_count if not result.error else -1,
+                error=result.error,
+            )
+            self._refresh_history()
+        except Exception:
+            logger.exception("db_window: could not record history")
 
         if result.error:
             self._results_status.setText(f"Error: {result.error[:80]}")
             self._results_table.clear()
             self._results_table.setRowCount(0)
             self._results_table.setColumnCount(0)
+            self._chart_widget.set_results([], [])
+            self._profile_widget.set_results([], [])
             return
 
         self._results_table.setColumnCount(len(result.columns))
@@ -730,11 +832,151 @@ class _DatabaseWindow(QWidget):
                     item.setForeground(QColor(tc.get("text_muted")))
                 self._results_table.setItem(r, c, item)
 
+        # Populate the chart and profile views with the same data so the
+        # user can switch instantly without re-running.
+        self._chart_widget.set_results(result.columns, result.rows)
+        self._profile_widget.set_results(result.columns, result.rows)
+
         elapsed = f"{result.execution_time:.3f}s" if result.execution_time else ""
         self._results_label.setText(
             f"RESULTS — {result.row_count:,} rows × {len(result.columns)} cols"
         )
         self._results_status.setText(elapsed)
+
+    # ── Header actions: view toggle, snippet, export ────────────────
+
+    def _mk_header_btn(self, glyph: str, tooltip: str) -> QPushButton:
+        """Small flat header icon button (text glyph variant)."""
+        btn = QPushButton(glyph)
+        btn.setObjectName("dbWinHdrBtn")
+        btn.setFixedSize(24, 24)
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(
+            "#dbWinHdrBtn { background: transparent; color: #cccccc; "
+            "border: none; font-size: 14px; }"
+            "#dbWinHdrBtn:hover { background: rgba(255,255,255,0.1); "
+            "color: #ffffff; border-radius: 3px; }"
+        )
+        return btn
+
+    def _on_view_changed(self, index: int) -> None:
+        """Switch the results stack to Table (0) / Chart (1) / Profile (2)."""
+        self._results_stack.setCurrentIndex(index)
+
+    def _on_export_csv(self) -> None:
+        """Export the current result set to a CSV file picked by the user."""
+        if self._last_result is None or self._last_result.error or not self._last_result.rows:
+            self._results_status.setText("Nothing to export — run a query first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export results to CSV",
+            "results.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            import csv
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(self._last_result.columns)
+                for row in self._last_result.rows:
+                    writer.writerow(["" if v is None else v for v in row])
+            self._results_status.setText(f"Exported {len(self._last_result.rows):,} rows → {path}")
+        except OSError as e:
+            logger.exception("db_window: CSV export failed")
+            self._results_status.setText(f"Export failed: {e}")
+
+    def _on_save_snippet(self) -> None:
+        """Save the current SQL editor content as a named snippet."""
+        sql = self._sql_editor.toPlainText().strip()
+        if not sql:
+            self._results_status.setText("Nothing to save — write a query first.")
+            return
+        name = _prompt_text(
+            self,
+            title="Save snippet",
+            label="Snippet name:",
+            placeholder="my-favourite-query",
+        )
+        if not name:
+            return
+        store = get_notebook_store()
+        ok, msg = store.save_snippet(self._conn.name, name, sql)
+        self._results_status.setText(msg)
+        if ok:
+            self._refresh_snippets()
+
+    # ── Sidebar refresh helpers (defined in __init__'s setup_sidebar) ──
+
+    def _refresh_history(self) -> None:
+        if not hasattr(self, "_history_list"):
+            return
+        self._history_list.clear()
+        store = get_notebook_store()
+        for entry in store.list_history(self._conn.name, limit=50):
+            preview = entry.sql.replace("\n", " ").strip()
+            if len(preview) > 64:
+                preview = preview[:61] + "…"
+            label = preview
+            if entry.error:
+                label = f"⚠ {label}"
+            elif entry.row_count >= 0:
+                label = f"{label}  · {entry.row_count} rows"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, entry.sql)
+            item.setToolTip(entry.sql)
+            self._history_list.addItem(item)
+
+    def _refresh_snippets(self) -> None:
+        if not hasattr(self, "_snippets_list"):
+            return
+        self._snippets_list.clear()
+        store = get_notebook_store()
+        for snip in store.list_snippets(self._conn.name):
+            item = QListWidgetItem(f"⭐ {snip.name}")
+            item.setData(Qt.ItemDataRole.UserRole, snip.sql)
+            item.setToolTip(snip.sql)
+            item.setData(Qt.ItemDataRole.UserRole + 1, snip.id)
+            self._snippets_list.addItem(item)
+
+    def _on_history_picked(self, item: QListWidgetItem) -> None:
+        sql = item.data(Qt.ItemDataRole.UserRole)
+        if sql:
+            self._sql_editor.setPlainText(sql)
+            self._sql_editor.setFocus()
+
+    def _on_snippet_picked(self, item: QListWidgetItem) -> None:
+        sql = item.data(Qt.ItemDataRole.UserRole)
+        if sql:
+            self._sql_editor.setPlainText(sql)
+            self._sql_editor.setFocus()
+
+    def _show_snippets_menu(self, pos) -> None:
+        from PyQt6.QtWidgets import QMenu
+
+        item = self._snippets_list.itemAt(pos)
+        if not item:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
+            "QMenu::item { padding: 4px 20px; }"
+            "QMenu::item:selected { background: #094771; }"
+        )
+        load_action = menu.addAction("Load into editor")
+        delete_action = menu.addAction("Delete snippet")
+        chosen = menu.exec(self._snippets_list.viewport().mapToGlobal(pos))
+        if chosen == load_action:
+            self._on_snippet_picked(item)
+        elif chosen == delete_action:
+            snip_id = item.data(Qt.ItemDataRole.UserRole + 1)
+            if isinstance(snip_id, int):
+                get_notebook_store().delete_snippet(snip_id)
+                self._refresh_snippets()
 
     # ── Results context menu (CRUD) ─────────────────────────────────
 
@@ -1417,3 +1659,128 @@ class _AddConnectionDialog(QDialog):
                 name = database
 
         return (name, db_type, conn_str)
+
+
+#: Cached path to a painted chevron PNG used for dropdown arrows.
+#: Qt's stylesheet engine doesn't reliably render CSS triangles or
+#: SVG data URLs, but ``image: url(/tmp/...png)`` always works.
+_DROPDOWN_ARROW_PATH: str | None = None
+
+
+def _get_dropdown_arrow_path() -> str:
+    """Lazily paint and cache a chevron PNG for QComboBox dropdown arrows."""
+    global _DROPDOWN_ARROW_PATH
+    if _DROPDOWN_ARROW_PATH is not None:
+        return _DROPDOWN_ARROW_PATH
+    import tempfile
+
+    cache_dir = tempfile.mkdtemp(prefix="polyglot_combo_")
+    path = f"{cache_dir}/dropdown_arrow.png"
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor("#cccccc"))
+    pen.setWidthF(1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    # Chevron ▼: two lines forming a v
+    painter.drawLine(2, 4, 6, 8)
+    painter.drawLine(6, 8, 10, 4)
+    painter.end()
+    pixmap.save(path, "PNG")
+    _DROPDOWN_ARROW_PATH = path
+    return path
+
+
+def _combo_dropdown_style() -> str:
+    """Shared QComboBox stylesheet with a visible chevron dropdown arrow.
+
+    Used by view toggles, chart selectors, etc. so every dropdown in
+    the database panel has the same compact dark look with a real ▼.
+    """
+    arrow = _get_dropdown_arrow_path()
+    return (
+        "QComboBox { background: #1e1e1e; color: #ddd; border: 1px solid #444; "
+        "border-radius: 3px; padding: 3px 24px 3px 10px; font-size: 11px; "
+        "min-width: 100px; }"
+        "QComboBox:hover { border-color: #0e639c; }"
+        "QComboBox:focus { border-color: #0e639c; }"
+        "QComboBox::drop-down { subcontrol-origin: padding; "
+        "subcontrol-position: center right; width: 22px; "
+        "border-left: 1px solid #444; background: transparent; }"
+        "QComboBox::down-arrow { "
+        f"image: url({arrow}); width: 12px; height: 12px; }}"
+        "QComboBox QAbstractItemView { background: #252526; color: #ddd; "
+        "selection-background-color: #094771; border: 1px solid #444; "
+        "outline: none; padding: 2px; }"
+    )
+
+
+def _prompt_text(
+    parent: QWidget,
+    title: str,
+    label: str,
+    placeholder: str = "",
+) -> str:
+    """Show a styled single-line text prompt and return the entered value.
+
+    Used by database_panel for snippet naming etc. Returns "" if the
+    user cancelled.
+    """
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+    dlg.setMinimumWidth(360)
+    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(18, 16, 18, 14)
+    layout.setSpacing(10)
+
+    lbl = QLabel(label)
+    lbl.setStyleSheet("color: #ccc; font-size: 12px; font-weight: 600; background: transparent;")
+    layout.addWidget(lbl)
+
+    field = QLineEdit()
+    field.setPlaceholderText(placeholder)
+    field.setStyleSheet(
+        "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
+        "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
+        "QLineEdit:focus { border-color: #0e639c; }"
+    )
+    layout.addWidget(field)
+
+    btn_row = QHBoxLayout()
+    btn_row.setSpacing(8)
+    btn_row.addStretch()
+
+    cancel = QPushButton("Cancel")
+    cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+    cancel.setStyleSheet(
+        "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
+        "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
+        "QPushButton:hover { background: #4a4a4a; }"
+    )
+    cancel.clicked.connect(dlg.reject)
+    btn_row.addWidget(cancel)
+
+    ok = QPushButton("Save")
+    ok.setCursor(Qt.CursorShape.PointingHandCursor)
+    ok.setDefault(True)
+    ok.setStyleSheet(
+        "QPushButton { background: #0e639c; color: white; border: none; "
+        "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
+        "QPushButton:hover { background: #1a8ae8; }"
+    )
+    ok.clicked.connect(dlg.accept)
+    btn_row.addWidget(ok)
+
+    layout.addLayout(btn_row)
+    field.returnPressed.connect(dlg.accept)
+    field.setFocus()
+
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return ""
+    return field.text().strip()

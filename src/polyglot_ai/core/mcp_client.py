@@ -202,6 +202,31 @@ class MCPClient:
         self._transports: dict[str, Any] = {}  # server_name -> transport context
         self._tools: dict[str, MCPTool] = {}  # qualified_name -> MCPTool
         self._connected: set[str] = set()
+        #: Callables invoked (sync) after any connect/disconnect completes
+        #: so UI components can refresh their cached tool lists. Signature:
+        #: ``callback() -> None``. Exceptions are logged, not re-raised.
+        self._connection_change_listeners: list = []
+
+    def add_connection_change_listener(self, callback) -> None:
+        """Register a listener called after each connect/disconnect.
+
+        Used by the chat panel to refresh its snapshot of available tool
+        definitions when MCP servers come online or go offline.
+
+        IMPORTANT: listeners are invoked on whatever thread the connect
+        or disconnect call is running on. If your listener touches Qt
+        widgets, the caller is responsible for marshalling the work
+        onto the GUI thread (e.g. via ``QTimer.singleShot(0, cb)`` or
+        a queued ``pyqtSignal``).
+        """
+        self._connection_change_listeners.append(callback)
+
+    def _notify_connection_change(self) -> None:
+        for cb in list(self._connection_change_listeners):
+            try:
+                cb()
+            except Exception:
+                logger.exception("MCP connection-change listener raised")
 
     def add_server(self, config: MCPServerConfig) -> None:
         """Register an MCP server configuration."""
@@ -353,6 +378,7 @@ class MCPClient:
                 server_name,
                 len(tools_result.tools),
             )
+            self._notify_connection_change()
             return True
 
         except ImportError:
@@ -433,12 +459,17 @@ class MCPClient:
             for k in to_remove:
                 del self._tools[k]
             logger.info("Disconnected from MCP server: %s", server_name)
+            self._notify_connection_change()
 
     async def connect_all(self) -> None:
-        """Connect to all enabled servers."""
+        """Connect to all enabled servers, notifying listeners when done."""
         for name, config in self._servers.items():
             if config.enabled and name not in self._connected:
                 await self.connect(name)
+        # Fire once at the end of the batch so listeners don't get a storm
+        # of refreshes mid-connect. Individual connect()/disconnect() calls
+        # also fire so sidebar / chat panel reflect state immediately.
+        self._notify_connection_change()
 
     async def disconnect_all(self) -> None:
         """Disconnect from all servers."""

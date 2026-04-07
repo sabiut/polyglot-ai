@@ -125,6 +125,110 @@ class ReviewResult:
     error: str | None = None
     truncated_files: list[str] = field(default_factory=list)
 
+
+@dataclass
+class PRSummary:
+    """AI-generated pull-request description.
+
+    ``status`` distinguishes "ok" from "failed" so the UI can render a
+    distinct error state instead of showing an empty description.
+    """
+
+    title: str = ""
+    summary: list[str] = field(default_factory=list)
+    test_plan: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    files_changed: int = 0
+    additions: int = 0
+    deletions: int = 0
+    model: str = ""
+    provider: str = ""
+    status: str = "ok"  # "ok" | "failed" | "empty"
+    error: str | None = None
+
+    def to_markdown(self, template: str | None = None) -> str:
+        """Render the summary as a markdown PR body.
+
+        If ``template`` (the repo's .github/PULL_REQUEST_TEMPLATE.md) is
+        provided and contains a recognised section header (``## Summary``,
+        ``## Test plan``, ``## Test Plan``, ``## Risks``, ``## Changes``,
+        ``## Description``), the matching content is appended below that
+        header in the template, preserving every other section the
+        template contains. Otherwise we emit a default three-section
+        layout.
+        """
+        summary_md = "\n".join(f"- {s}" for s in self.summary) if self.summary else "_(none)_"
+        test_md = (
+            "\n".join(f"- [ ] {s}" for s in self.test_plan)
+            if self.test_plan
+            else "- [ ] _(add test steps)_"
+        )
+        risks_md = "\n".join(f"- ⚠️ {s}" for s in self.risks) if self.risks else "_None._"
+
+        if template:
+            filled = self._fill_template(template, summary_md, test_md, risks_md)
+            if filled is not None:
+                return filled
+
+        return f"## Summary\n{summary_md}\n\n## Test plan\n{test_md}\n\n## Risks\n{risks_md}\n"
+
+    @staticmethod
+    def _fill_template(
+        template: str,
+        summary_md: str,
+        test_md: str,
+        risks_md: str,
+    ) -> str | None:
+        """Fill known headers in a PR template. Returns None if no
+        recognised headers were found (caller should fall back to the
+        default layout).
+        """
+        import re
+
+        # Map case-insensitive header text to the content we want under it.
+        section_content = {
+            "summary": summary_md,
+            "description": summary_md,
+            "changes": summary_md,
+            "what changed": summary_md,
+            "test plan": test_md,
+            "testing": test_md,
+            "how to test": test_md,
+            "how has this been tested": test_md,
+            "risks": risks_md,
+            "risk": risks_md,
+            "rollback plan": risks_md,
+        }
+
+        # Match `## Header` lines (any level 1-4). Capture the header and
+        # everything until the next header or end of document.
+        header_re = re.compile(r"^(#{1,4})\s+(.+?)\s*$", re.MULTILINE)
+        matches = list(header_re.finditer(template))
+        if not matches:
+            return None
+
+        replaced_any = False
+        out_parts: list[str] = []
+        cursor = 0
+        for i, m in enumerate(matches):
+            header_text = m.group(2).strip().lower()
+            content = section_content.get(header_text)
+            section_end = matches[i + 1].start() if i + 1 < len(matches) else len(template)
+            if content is not None:
+                # Keep everything before this header, then the header
+                # itself, then our generated content.
+                out_parts.append(template[cursor : m.end()])
+                out_parts.append("\n")
+                out_parts.append(content)
+                out_parts.append("\n\n")
+                cursor = section_end
+                replaced_any = True
+
+        if not replaced_any:
+            return None
+        out_parts.append(template[cursor:])
+        return "".join(out_parts)
+
     @property
     def critical_count(self) -> int:
         return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)

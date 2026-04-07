@@ -101,6 +101,8 @@ class ActivityBarButton(QWidget):
             self._draw_docker_icon(painter, ox, oy)
         elif self._icon_type == "kubernetes":
             self._draw_kubernetes_icon(painter, ox, oy)
+        elif self._icon_type == "tests":
+            self._draw_tests_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -244,6 +246,24 @@ class ActivityBarButton(QWidget):
         # Middle stripe
         p.drawArc(QRectF(ox + 4, oy + 9, 16, 6), 180 * 16, 180 * 16)
 
+    def _draw_tests_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Tests — beaker/flask glyph."""
+        # Flask outline: narrow neck on top widening to a rounded base.
+        path = QPainterPath()
+        path.moveTo(ox + 9, oy + 3)
+        path.lineTo(ox + 15, oy + 3)
+        path.lineTo(ox + 15, oy + 9)
+        path.lineTo(ox + 19, oy + 19)
+        path.lineTo(ox + 5, oy + 19)
+        path.lineTo(ox + 9, oy + 9)
+        path.closeSubpath()
+        p.drawPath(path)
+        # Liquid line inside the flask
+        pen = p.pen()
+        pen.setWidthF(1.4)
+        p.setPen(pen)
+        p.drawLine(QPointF(ox + 7, oy + 14), QPointF(ox + 17, oy + 14))
+
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
         cx, cy = ox + 12, oy + 12
@@ -321,6 +341,7 @@ class ActivityBar(QWidget):
             ("database", "Database Explorer (Ctrl+Shift+D)"),
             ("docker", "Docker (Ctrl+Shift+K)"),
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
+            ("tests", "Tests (Ctrl+Shift+T)"),
         ]
 
         for icon_type, tooltip in top_items:

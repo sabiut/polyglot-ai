@@ -6,18 +6,19 @@ import asyncio
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QRectF
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from polyglot_ai.ui import theme_colors as tc
 
 from PyQt6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -29,10 +30,24 @@ logger = logging.getLogger(__name__)
 class GitPanel(QWidget):
     """VS Code-style source control sidebar."""
 
+    # Signals used to marshal results from the background refresh thread
+    # back onto the Qt main thread. QTimer.singleShot is broken when
+    # called from non-Qt threads, so we use proper signals instead.
+    _refresh_done = pyqtSignal(str, str)  # branch, status_output
+    _refresh_error = pyqtSignal(object)  # exception
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._project_root: Path | None = None
         self._event_bus = None
+        self._review_engine = None  # set via set_review_engine()
+        # Instance attribute (not class attribute) so multiple GitPanel
+        # instances don't share the same refresh-in-progress flag.
+        self._refreshing = False
+
+        # Cross-thread signal connections
+        self._refresh_done.connect(self._apply_refresh)
+        self._refresh_error.connect(self._apply_refresh_error)
 
         self._setup_ui()
 
@@ -62,15 +77,17 @@ class GitPanel(QWidget):
         header_layout.addWidget(title)
         header_layout.addStretch()
 
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setFixedSize(24, 24)
-        refresh_btn.setToolTip("Refresh")
-        refresh_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none; color: {tc.get('text_tertiary')}; font-size: 14px; }}"
-            f"QPushButton:hover {{ color: {tc.get('text_heading')}; }}"
-        )
+        # Header buttons — painted QPixmap icons with per-button style
+        # (parent QPushButton rules don't apply to objectName'd widgets
+        # that set their own stylesheet). Same pattern as mcp_sidebar.
+        branch_btn = self._icon_button(self._draw_branch_icon(), "Create new branch")
+        branch_btn.clicked.connect(self._on_new_branch)
+        header_layout.addWidget(branch_btn)
+
+        refresh_btn = self._icon_button(self._draw_refresh_icon(), "Refresh")
         refresh_btn.clicked.connect(self._refresh)
         header_layout.addWidget(refresh_btn)
+
         layout.addWidget(header)
 
         # Branch label
@@ -111,8 +128,14 @@ class GitPanel(QWidget):
         self._commit_input.returnPressed.connect(self._do_commit)
         commit_layout.addWidget(self._commit_input)
 
-        self._commit_btn = QPushButton("Commit")
+        # Commit + Push row, side by side. Commit is the primary action
+        # (filled blue), push is the secondary (outlined).
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(6)
+
+        self._commit_btn = QPushButton("✓  Commit")
         self._commit_btn.setFixedHeight(28)
+        self._commit_btn.setToolTip("Commit the staged changes")
         self._commit_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
@@ -123,7 +146,49 @@ class GitPanel(QWidget):
             QPushButton:disabled {{ background: {tc.get("bg_hover")}; color: {tc.get("text_disabled")}; }}
         """)
         self._commit_btn.clicked.connect(self._do_commit)
-        commit_layout.addWidget(self._commit_btn)
+        actions_row.addWidget(self._commit_btn, stretch=1)
+
+        self._push_btn = QPushButton("⇡  Push")
+        self._push_btn.setFixedHeight(28)
+        self._push_btn.setToolTip(
+            "Push the current branch to origin. Sets the upstream tracking "
+            "branch automatically the first time."
+        )
+        self._push_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("text_primary")};
+                border: 1px solid {tc.get("border_card")}; border-radius: {tc.RADIUS_SM}px;
+                font-size: {tc.FONT_MD}px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
+            QPushButton:disabled {{ color: {tc.get("text_disabled")}; }}
+        """)
+        self._push_btn.clicked.connect(self._on_push)
+        actions_row.addWidget(self._push_btn, stretch=1)
+
+        commit_layout.addLayout(actions_row)
+
+        # AI PR description generator — runs the branch diff through the
+        # review engine with a dedicated prompt and shows the result in
+        # a dialog with copy + `gh pr create` actions.
+        self._pr_btn = QPushButton("✨ Generate PR description")
+        self._pr_btn.setFixedHeight(28)
+        self._pr_btn.setToolTip(
+            "Generate a PR title, summary, test plan and risks from the "
+            "branch diff (vs main/master) using your configured AI model."
+        )
+        self._pr_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("text_primary")};
+                border: 1px solid {tc.get("border_card")}; border-radius: {tc.RADIUS_SM}px;
+                font-size: {tc.FONT_SM}px; font-weight: 500;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
+            QPushButton:disabled {{ color: {tc.get("text_disabled")}; }}
+        """)
+        self._pr_btn.clicked.connect(self._on_generate_pr)
+        commit_layout.addWidget(self._pr_btn)
+
         layout.addWidget(commit_widget)
 
         # Staged section
@@ -174,14 +239,373 @@ class GitPanel(QWidget):
             QListWidget::item:hover:!selected {{ background: {tc.get("bg_hover_subtle")}; }}
         """
 
+    # ── Painted header icons ──
+
+    def _icon_button(self, icon: QIcon, tooltip: str) -> QPushButton:
+        """Return a flat transparent icon button that won't inherit
+        the parent QPushButton blue fill."""
+        btn = QPushButton()
+        btn.setObjectName("gitHdrBtn")
+        btn.setIcon(icon)
+        btn.setFixedSize(24, 24)
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(
+            "#gitHdrBtn { background: transparent; border: none; }"
+            "#gitHdrBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        return btn
+
+    def _draw_refresh_icon(self) -> QIcon:
+        pm = QPixmap(16, 16)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#cccccc"))
+        pen.setWidthF(1.6)
+        p.setPen(pen)
+        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
+        p.drawLine(12, 2, 12, 6)
+        p.drawLine(12, 6, 8, 6)
+        p.end()
+        return QIcon(pm)
+
+    def _draw_branch_icon(self) -> QIcon:
+        """Simple Git-style branch glyph: two parallel dots joined by a fork."""
+        pm = QPixmap(16, 16)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#cccccc"))
+        pen.setWidthF(1.6)
+        p.setPen(pen)
+        # Trunk
+        p.drawLine(5, 3, 5, 13)
+        # Branch
+        p.drawLine(5, 7, 11, 10)
+        p.drawLine(11, 10, 11, 13)
+        # Node dots
+        p.setBrush(QColor("#cccccc"))
+        p.drawEllipse(3, 2, 4, 4)
+        p.drawEllipse(3, 12, 4, 4)
+        p.drawEllipse(9, 9, 4, 4)
+        p.end()
+        return QIcon(pm)
+
     def set_project_root(self, path: Path) -> None:
         self._project_root = path
         self._refresh()
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt override
+        """When the panel becomes visible, opportunistically detect a
+        project root if none has been set yet (covers cases where the
+        project was opened via a code path that didn't fire any event
+        the panel listens to)."""
+        super().showEvent(event)
+        if self._project_root is None:
+            self._try_autodetect_project_root()
+
+    def _try_autodetect_project_root(self) -> None:
+        """Find a project root by checking, in order:
+
+        1. The file explorer's current root (if any).
+        2. The directory of the active editor tab.
+        3. The directories of all open editor tabs.
+        4. The current working directory.
+
+        For each candidate, walk *up* the directory tree looking for a
+        ``.git`` folder so files opened deep inside a repo still resolve.
+        No-op if a project root has already been set.
+        """
+        logger.warning("git_panel: autodetect entry (project_root=%s)", self._project_root)
+        if self._project_root is not None:
+            return
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+
+        def add(p: Path | None) -> None:
+            if p is None:
+                return
+            try:
+                resolved = p.resolve()
+            except OSError:
+                return
+            if resolved in seen or not resolved.exists():
+                return
+            seen.add(resolved)
+            candidates.append(resolved)
+
+        window = self.window()
+
+        # 1. File explorer root
+        fe = getattr(window, "_file_explorer", None)
+        add(getattr(fe, "_project_root", None) if fe is not None else None)
+
+        # 2 & 3. Active editor tab's directory + every open tab
+        editor = getattr(window, "_editor_panel", None)
+        if editor is not None:
+            try:
+                current_tab = editor.get_current_tab()
+                if current_tab and getattr(current_tab, "file_path", None):
+                    add(Path(current_tab.file_path).parent)
+            except Exception:
+                logger.debug("git_panel: could not read current editor tab", exc_info=True)
+            try:
+                for tab in getattr(editor, "_tabs", []):
+                    fp = getattr(tab, "file_path", None)
+                    if fp:
+                        add(Path(fp).parent)
+            except Exception:
+                pass
+
+        # 4. Process working directory
+        try:
+            add(Path.cwd())
+        except OSError:
+            pass
+
+        for candidate in candidates:
+            git_root = self._find_git_root(candidate)
+            if git_root is not None:
+                logger.warning("git_panel: auto-detected project root: %s", git_root)
+                self.set_project_root(git_root)
+                return
+        logger.warning(
+            "git_panel: autodetect found no .git in %d candidate(s): %s",
+            len(candidates),
+            [str(c) for c in candidates],
+        )
+
+    @staticmethod
+    def _find_git_root(start: Path) -> Path | None:
+        """Walk upward from ``start`` looking for a directory with .git."""
+        try:
+            current = start if start.is_dir() else start.parent
+        except OSError:
+            return None
+        for path in [current, *current.parents]:
+            if (path / ".git").exists():
+                return path
+        return None
 
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
         event_bus.subscribe("file:saved", lambda **kw: self._refresh())
         event_bus.subscribe("file:created", lambda **kw: self._refresh())
+        # Also listen for project_refreshed (fired by file_explorer when
+        # its root is set through any path) so we catch projects opened
+        # via drag-drop / command palette / future entry points that
+        # don't go through the project_manager.
+        event_bus.subscribe("project_refreshed", self._on_project_refreshed)
+        event_bus.subscribe("project:opened", self._on_project_refreshed)
+        # Run autodetect once after wiring is complete (in case showEvent
+        # already fired before any of these wires existed). 500 ms delay
+        # so the editor panel has time to restore its tabs from session.
+        QTimer.singleShot(500, self._try_autodetect_project_root)
+
+    def _on_project_refreshed(self, **kwargs) -> None:
+        path = kwargs.get("path")
+        if not path:
+            return
+        new_root = Path(path)
+        if not new_root.is_dir():
+            return
+        if self._project_root == new_root:
+            return
+        logger.info("git_panel: adopting project root from event: %s", new_root)
+        self.set_project_root(new_root)
+
+    def set_review_engine(self, engine) -> None:
+        """Inject the ReviewEngine so ✨ Generate PR description works."""
+        self._review_engine = engine
+
+    def _current_model_id(self) -> str:
+        """Best-effort lookup of the user's currently selected model."""
+        window = self.window()
+        if hasattr(window, "chat_panel"):
+            try:
+                model_id, _ = window.chat_panel._get_selected_model()
+                return model_id or ""
+            except Exception:
+                logger.warning(
+                    "git_panel: could not read current model from chat panel",
+                    exc_info=True,
+                )
+        return ""
+
+    def _on_generate_pr(self) -> None:
+        """Kick off AI PR summary generation on a background task."""
+        if self._project_root is None:
+            _show_message(
+                self,
+                "No project",
+                "Open a project first before generating a PR description.",
+                kind="info",
+            )
+            return
+        if self._review_engine is None:
+            _show_message(
+                self,
+                "PR generator unavailable",
+                "Review engine is not wired. This is a setup bug — please report it.",
+                kind="warn",
+            )
+            return
+
+        self._pr_btn.setEnabled(False)
+        self._pr_btn.setText("✨ Generating PR description…")
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_pr_generation(), name="generate_pr_summary")
+
+    async def _run_pr_generation(self) -> None:
+        """Worker coroutine: pull the branch diff and call the review engine."""
+        from polyglot_ai.core.review.models import PRSummary
+        from polyglot_ai.core.review.review_engine import get_git_diff
+        from polyglot_ai.ui.dialogs.pr_summary_dialog import PRSummaryDialog
+
+        project_root = self._project_root
+        assert project_root is not None  # guarded by caller
+
+        try:
+            diff = await get_git_diff(str(project_root), mode="branch")
+        except Exception as e:
+            logger.exception("git_panel: failed to get branch diff")
+            self._reset_pr_button()
+            _show_message(
+                self,
+                "Could not read git diff",
+                f"Failed to run `git diff` against main/master:\n\n{e}",
+                kind="error",
+            )
+            return
+
+        if not diff.strip():
+            self._reset_pr_button()
+            _show_message(
+                self,
+                "Nothing to summarise",
+                "No changes found between this branch and main/master. "
+                "Commit some changes first, then try again.",
+                kind="info",
+            )
+            return
+
+        try:
+            result: PRSummary = await self._review_engine.generate_pr_summary(
+                diff, model_id=self._current_model_id()
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("git_panel: PR summary generation crashed")
+            self._reset_pr_button()
+            _show_message(
+                self,
+                "PR generation failed",
+                f"The AI request crashed:\n\n{e}",
+                kind="error",
+            )
+            return
+
+        self._reset_pr_button()
+        dlg = PRSummaryDialog(result, project_root=project_root, parent=self)
+        dlg.exec()
+
+    def _reset_pr_button(self) -> None:
+        self._pr_btn.setEnabled(True)
+        self._pr_btn.setText("✨ Generate PR description")
+
+    def _on_push(self) -> None:
+        """Push the current branch to origin on a background task.
+
+        Uses ``-u origin <branch>`` so first-time push automatically
+        sets the upstream tracking branch. Subsequent pushes are
+        equivalent to plain ``git push``.
+        """
+        if self._project_root is None:
+            _show_message(self, "No project", "Open a project first.", kind="info")
+            return
+        self._push_btn.setEnabled(False)
+        self._push_btn.setText("⇡ Pushing…")
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_push(), name="git_push")
+
+    async def _run_push(self) -> None:
+        try:
+            branch = (await self._run_git("branch", "--show-current")).strip()
+            if not branch:
+                self._reset_push_button()
+                _show_message(
+                    self,
+                    "Detached HEAD",
+                    "You are not on a branch. Check out a branch before pushing.",
+                    kind="warn",
+                )
+                return
+            await self._run_git("push", "-u", "origin", branch)
+        except Exception as e:
+            logger.exception("git_panel: push failed")
+            self._reset_push_button()
+            _show_message(self, "Push failed", str(e), kind="error")
+            return
+        self._reset_push_button()
+        _show_message(
+            self,
+            "Push succeeded",
+            f"Pushed branch '{branch}' to origin.",
+            kind="info",
+        )
+
+    def _reset_push_button(self) -> None:
+        self._push_btn.setEnabled(True)
+        self._push_btn.setText("⇡ Push branch")
+
+    def _on_new_branch(self) -> None:
+        """Prompt for a branch name and run `git checkout -b <name>`."""
+        if self._project_root is None:
+            _show_message(
+                self,
+                "No project",
+                "Open a project before creating a branch.",
+                kind="info",
+            )
+            return
+        name = _prompt_branch_name(self)
+        if not name:
+            return
+
+        # Validate the name client-side so the user gets a friendly
+        # error instead of git's cryptic "fatal: '<name>' is not a
+        # valid branch name". Mirrors the rules from `git check-ref-format`.
+        invalid_reason = _validate_branch_name(name)
+        if invalid_reason:
+            _show_message(
+                self,
+                "Invalid branch name",
+                f"'{name}' is not a valid git branch name.\n\n{invalid_reason}",
+                kind="error",
+            )
+            return
+
+        # Run `git checkout -b` off the GUI thread via the same async
+        # _run_git helper the rest of the panel uses, so a slow hook
+        # script doesn't freeze the UI.
+        from polyglot_ai.core.async_utils import safe_task
+
+        async def do_create() -> None:
+            try:
+                await self._run_git("checkout", "-b", name)
+            except Exception as e:
+                logger.exception("git_panel: branch creation failed")
+                _show_message(self, "Branch creation failed", str(e), kind="error")
+                return
+            logger.info("git_panel: created branch %s", name)
+            self._refresh()
+
+        safe_task(do_create(), name="git_checkout_b")
 
     def _refresh(self) -> None:
         if self._project_root and not self._refreshing:
@@ -195,33 +619,65 @@ class GitPanel(QWidget):
                 daemon=True,
             ).start()
 
-    _refreshing = False
-
     def _do_refresh_threaded(self) -> None:
-        """Run git commands in a background thread, then update UI on main thread."""
+        """Run git commands in a background thread, then signal the main thread.
+
+        We MUST use Qt signals here, not QTimer.singleShot — singleShot
+        from a non-Qt thread silently fails to dispatch to the GUI thread,
+        which left the panel stuck on "No project open" indefinitely.
+        """
         import subprocess
 
+        # Snapshot project_root once so we don't see a half-switched
+        # state if the user opens a different project mid-refresh.
+        project_root = self._project_root
+        if project_root is None:
+            return
+
         try:
-            branch = subprocess.run(
+            branch_proc = subprocess.run(
                 ["git", "branch", "--show-current"],
-                cwd=str(self._project_root),
+                cwd=str(project_root),
                 capture_output=True,
                 text=True,
                 timeout=5,
-            ).stdout.strip()
+            )
+            if branch_proc.returncode != 0:
+                err = (branch_proc.stderr or branch_proc.stdout or "").strip()
+                raise RuntimeError(
+                    f"git branch --show-current failed (rc={branch_proc.returncode}): {err}"
+                )
+            branch = branch_proc.stdout.strip()
 
-            status = subprocess.run(
+            # IMPORTANT: do NOT call .strip() here. git status --porcelain
+            # uses the FIRST column for index status; an unstaged-modified
+            # file appears as ' M README.md' (leading space). .strip()
+            # would chop that leading space, shift every line left by one
+            # column, and (a) classify the file as staged instead of
+            # unstaged and (b) eat the first letter of every such filename.
+            status_proc = subprocess.run(
                 ["git", "status", "--porcelain"],
-                cwd=str(self._project_root),
+                cwd=str(project_root),
                 capture_output=True,
                 text=True,
                 timeout=5,
-            ).stdout.strip()
+            )
+            if status_proc.returncode != 0:
+                err = (status_proc.stderr or status_proc.stdout or "").strip()
+                raise RuntimeError(f"git status failed (rc={status_proc.returncode}): {err}")
+            status = status_proc.stdout.rstrip("\n")
 
-            # Schedule UI update on the main thread
-            QTimer.singleShot(0, lambda: self._apply_refresh(branch, status))
-        except Exception as exc:  # noqa: F841
-            QTimer.singleShot(0, lambda err=exc: self._apply_refresh_error(err))
+            # Cross-thread signal — Qt auto-marshals to the GUI thread.
+            self._refresh_done.emit(branch, status)
+        except FileNotFoundError as exc:
+            logger.warning("git_panel: git binary not found: %s", exc)
+            self._refresh_error.emit(RuntimeError("git is not installed or not on PATH"))
+        except subprocess.TimeoutExpired:
+            logger.warning("git_panel: git status timed out")
+            self._refresh_error.emit(RuntimeError("git status timed out after 5s"))
+        except Exception as exc:
+            logger.warning("git_panel: refresh thread failed: %s", exc)
+            self._refresh_error.emit(exc)
 
     def _apply_refresh(self, branch: str, status_output: str) -> None:
         """Apply git refresh results to UI (must run on main thread)."""
@@ -260,15 +716,31 @@ class GitPanel(QWidget):
                     item.setForeground(QColor(color.get(work_status, tc.get("text_primary"))))
                     item.setData(Qt.ItemDataRole.UserRole, filepath)
                     self._unstaged_list.addItem(item)
-        except Exception as e:
-            logger.debug("Git refresh UI update failed: %s", e)
+        except Exception:
+            logger.exception("git_panel: failed to populate refresh UI")
         finally:
             self._refreshing = False
 
     def _apply_refresh_error(self, error: Exception) -> None:
-        """Handle git refresh error on main thread."""
-        self._branch_label.setText("  Not a git repository")
-        logger.debug("Git refresh failed: %s", error)
+        """Handle git refresh error on main thread.
+
+        Surfaces the actual reason as the branch label tooltip so the
+        user can see it on hover, instead of the catch-all "Not a git
+        repository" that hid every failure mode.
+        """
+        msg = str(error) or "Git refresh failed"
+        # Extract a short user-friendly tag for the label.
+        if "not installed" in msg.lower():
+            short = "git not installed"
+        elif "timed out" in msg.lower():
+            short = "git timed out"
+        elif "not a git" in msg.lower():
+            short = "Not a git repository"
+        else:
+            short = "git error"
+        self._branch_label.setText(f"  ⚠ {short}")
+        self._branch_label.setToolTip(msg)
+        logger.warning("git_panel: refresh error: %s", msg)
         self._refreshing = False
 
     def _show_file_menu(self, pos, staged: bool) -> None:
@@ -319,9 +791,23 @@ class GitPanel(QWidget):
             if self._event_bus:
                 self._event_bus.emit("git:committed", message=message)
         except Exception as e:
-            QMessageBox.warning(self, "Commit Failed", str(e))
+            # Always log the full traceback so post-mortem on a
+            # cryptic commit failure (pre-commit hook crash, IO error,
+            # signing failure) is possible from the logs.
+            logger.exception("git_panel: commit failed")
+            _show_message(self, "Commit failed", str(e), kind="error")
 
     async def _run_git(self, *args: str) -> str:
+        """Run a git command and return its stdout.
+
+        Raises ``RuntimeError`` on ANY non-zero exit code (not just
+        when stdout is empty — many git commands write partial stdout
+        before failing, so the old "and not output" guard silently
+        reported failed commits/pushes/stages as successful).
+
+        Always kills the subprocess on timeout to avoid zombie
+        processes holding the repo lock.
+        """
         if not self._project_root:
             return ""
         proc = await asyncio.create_subprocess_exec(
@@ -331,12 +817,188 @@ class GitPanel(QWidget):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("git_panel: git %s timed out, killing process", args[0])
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
+            raise RuntimeError(f"git {args[0]} timed out after 30s") from None
+
         output = stdout.decode("utf-8", errors="replace")
-        if proc.returncode != 0 and not output:
+        if proc.returncode != 0:
             err = stderr.decode("utf-8", errors="replace")
-            raise RuntimeError(err.strip() or f"git {args[0]} failed")
+            # Include both stderr and any stdout — git commit failures
+            # in particular often put hook output in stdout, not stderr.
+            detail = err.strip() or output.strip() or f"rc={proc.returncode}"
+            raise RuntimeError(f"git {args[0]} failed: {detail}")
         # Refresh list after stage/unstage
         if args[0] in ("add", "restore"):
             QTimer.singleShot(200, self._refresh)
         return output
+
+
+def _prompt_branch_name(parent: QWidget) -> str:
+    """Show a custom-styled input dialog for a new branch name.
+
+    Replaces the native QInputDialog which picks up the OS GTK theme
+    (red/green emoji icons on some KDE/GNOME setups) and looks out of
+    place against the dark IDE theme.
+    """
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("New branch")
+    dlg.setModal(True)
+    dlg.setMinimumWidth(360)
+    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(18, 16, 18, 14)
+    layout.setSpacing(10)
+
+    lbl = QLabel("Branch name:")
+    lbl.setStyleSheet("color: #ccc; font-size: 12px; font-weight: 600; background: transparent;")
+    layout.addWidget(lbl)
+
+    field = QLineEdit("feat/")
+    field.setStyleSheet(
+        "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
+        "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
+        "QLineEdit:focus { border-color: #0e639c; }"
+    )
+    layout.addWidget(field)
+
+    hint = QLabel("Will run `git checkout -b <name>` in the project root.")
+    hint.setStyleSheet("color: #777; font-size: 11px; background: transparent;")
+    layout.addWidget(hint)
+
+    btn_row = QHBoxLayout()
+    btn_row.setSpacing(8)
+    btn_row.addStretch()
+
+    cancel_btn = QPushButton("Cancel")
+    cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    cancel_btn.setStyleSheet(
+        "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
+        "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
+        "QPushButton:hover { background: #4a4a4a; }"
+    )
+    cancel_btn.clicked.connect(dlg.reject)
+    btn_row.addWidget(cancel_btn)
+
+    create_btn = QPushButton("Create")
+    create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    create_btn.setDefault(True)
+    create_btn.setStyleSheet(
+        "QPushButton { background: #0e639c; color: white; border: none; "
+        "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
+        "QPushButton:hover { background: #1a8ae8; }"
+        "QPushButton:disabled { background: #355; color: #888; }"
+    )
+    create_btn.clicked.connect(dlg.accept)
+    btn_row.addWidget(create_btn)
+
+    layout.addLayout(btn_row)
+
+    # Submit on Enter
+    field.returnPressed.connect(dlg.accept)
+    field.setFocus()
+    field.selectAll()
+
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return ""
+    return field.text().strip()
+
+
+def _validate_branch_name(name: str) -> str | None:
+    """Return None if ``name`` is a valid git ref, else a human-readable reason.
+
+    Implements a subset of the rules from `git check-ref-format`:
+    https://git-scm.com/docs/git-check-ref-format
+    """
+    if not name:
+        return "Branch name cannot be empty."
+    if " " in name:
+        return "Branch names cannot contain spaces. Use hyphens or slashes instead (e.g. feat/my-thing)."
+    if any(c in name for c in "~^:?*[\\"):
+        return "Branch names cannot contain any of: ~ ^ : ? * [ \\"
+    if name.startswith("-") or name.startswith("/") or name.startswith("."):
+        return "Branch names cannot start with -, /, or ."
+    if name.endswith("/") or name.endswith(".") or name.endswith(".lock"):
+        return "Branch names cannot end with /, ., or .lock"
+    if ".." in name or "@{" in name or "//" in name:
+        return "Branch names cannot contain .., @{, or //"
+    if name == "@":
+        return "Branch name cannot be just '@'."
+    return None
+
+
+def _show_message(
+    parent: QWidget,
+    title: str,
+    message: str,
+    kind: str = "info",
+) -> None:
+    """Show a dark-themed message dialog matching the rest of the IDE.
+
+    Replaces QMessageBox.{information,warning,critical}, which pick up
+    the OS native theme and look out of place against the dark UI.
+
+    ``kind`` is one of ``"info" | "warn" | "error"``.
+    """
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+    dlg.setMinimumWidth(380)
+    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(20, 18, 20, 14)
+    layout.setSpacing(12)
+
+    icon_map = {"info": "ℹ", "warn": "⚠", "error": "✕"}
+    colour_map = {"info": "#4ec9b0", "warn": "#e5a00d", "error": "#f48771"}
+    icon_char = icon_map.get(kind, "ℹ")
+    icon_colour = colour_map.get(kind, "#4ec9b0")
+
+    header = QHBoxLayout()
+    header.setSpacing(10)
+    icon_lbl = QLabel(icon_char)
+    icon_lbl.setStyleSheet(
+        f"color: {icon_colour}; font-size: 20px; font-weight: bold; background: transparent;"
+    )
+    icon_lbl.setFixedWidth(28)
+    header.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignTop)
+
+    title_lbl = QLabel(title)
+    title_lbl.setStyleSheet(
+        "color: #e0e0e0; font-size: 14px; font-weight: bold; background: transparent;"
+    )
+    header.addWidget(title_lbl, stretch=1)
+    layout.addLayout(header)
+
+    body = QLabel(message)
+    body.setWordWrap(True)
+    body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    body.setStyleSheet(
+        "color: #c0c0c0; font-size: 12px; background: transparent; padding-left: 38px;"
+    )
+    layout.addWidget(body)
+
+    btn_row = QHBoxLayout()
+    btn_row.addStretch()
+    ok_btn = QPushButton("OK")
+    ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    ok_btn.setDefault(True)
+    ok_btn.setStyleSheet(
+        "QPushButton { background: #0e639c; color: white; border: none; "
+        "border-radius: 4px; padding: 6px 22px; font-size: 12px; font-weight: 600; }"
+        "QPushButton:hover { background: #1a8ae8; }"
+    )
+    ok_btn.clicked.connect(dlg.accept)
+    btn_row.addWidget(ok_btn)
+    layout.addLayout(btn_row)
+
+    dlg.exec()

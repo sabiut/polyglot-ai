@@ -12,6 +12,7 @@ from .diff_parser import format_diff_for_review, parse_diff
 from .models import (
     Category,
     DiffFile,
+    PRSummary,
     ReviewFinding,
     ReviewResult,
     Severity,
@@ -245,6 +246,43 @@ _MODE_PROMPTS: dict[str, str] = {
 }
 
 
+PR_SUMMARY_SYSTEM_PROMPT = """You are a senior engineer writing a pull-request description.
+
+You will receive a unified diff of code changes. Produce a PR title and
+a structured description that a reviewer will actually read.
+
+Reason silently before writing the JSON. Your visible output must start
+with `{` — no preamble, no markdown fences, no chain-of-thought.
+
+Return JSON with this exact shape:
+{
+  "title": "Short, imperative PR title (under 72 chars)",
+  "summary": [
+    "Bullet summarising the main change",
+    "Second bullet for any other meaningful change",
+    "…up to 5 bullets total"
+  ],
+  "test_plan": [
+    "Manual step a reviewer can run to verify the change",
+    "Or an automated test command like `pytest tests/foo`"
+  ],
+  "risks": [
+    "Any migration, rollback, breaking-change, performance, or security",
+    "concern worth flagging. Empty array if none."
+  ]
+}
+
+Rules:
+- Title: imperative voice ("add X", "fix Y", "refactor Z"), under 72 chars,
+  no trailing period, no scope prefix unless the repo uses conventional commits
+- Summary: 1-5 bullets focused on *why* and *what*, not a literal file list
+- Test plan: 1-4 checkable items
+- Risks: only real concerns, never padding — empty array if genuinely none
+- All strings plain text, no markdown formatting inside values
+- Return ONLY valid JSON
+"""
+
+
 class ReviewEngine:
     """Orchestrates code review using AI providers."""
 
@@ -475,6 +513,156 @@ class ReviewEngine:
             models[0],
         )
         return provider, models[0]
+
+    async def generate_pr_summary(
+        self,
+        diff_text: str,
+        model_id: str = "",
+    ) -> PRSummary:
+        """Generate a structured PR title, summary, test plan, and risks.
+
+        Takes a unified diff, calls the AI provider, and returns a
+        :class:`PRSummary` dataclass. Failures are surfaced with
+        ``status='failed'`` so the UI can render an error state.
+        """
+        from .models import PRSummary
+
+        diff_files = parse_diff(diff_text)
+        if not diff_files:
+            return PRSummary(
+                title="",
+                status="empty",
+                error="No changes to summarise.",
+            )
+
+        diff_summary = format_diff_for_review(diff_files)
+        total_add = sum(f.additions for f in diff_files)
+        total_del = sum(f.deletions for f in diff_files)
+
+        user_prompt = (
+            f"Write a PR description for these changes "
+            f"({len(diff_files)} files, +{total_add}/-{total_del} lines):\n\n"
+            f"{diff_summary}"
+        )
+
+        resolved = await self._resolve_provider(model_id)
+        if isinstance(resolved, ReviewResult):
+            # Reuse the provider-resolution error result
+            return PRSummary(
+                title="",
+                status="failed",
+                error=resolved.error or resolved.summary,
+                model=resolved.model,
+                provider=resolved.provider,
+            )
+        provider, model = resolved
+
+        messages = [
+            {"role": "system", "content": PR_SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        full_response = ""
+        try:
+            async for chunk in provider.stream_chat(
+                messages=messages,
+                model=model,
+                temperature=0.2,
+                max_tokens=2000,
+            ):
+                if chunk.delta_content:
+                    full_response += chunk.delta_content
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("PR summary streaming failed")
+            return PRSummary(
+                title="",
+                status="failed",
+                error=str(e),
+                model=model,
+                provider=provider.name,
+                files_changed=len(diff_files),
+                additions=total_add,
+                deletions=total_del,
+            )
+
+        return self._parse_pr_summary_response(
+            full_response,
+            files_changed=len(diff_files),
+            additions=total_add,
+            deletions=total_del,
+            model=model,
+            provider=provider.name,
+        )
+
+    def _parse_pr_summary_response(
+        self,
+        response: str,
+        files_changed: int,
+        additions: int,
+        deletions: int,
+        model: str,
+        provider: str,
+    ) -> PRSummary:
+        """Parse AI response into a PRSummary, handling fence/JSON edge cases."""
+        from .models import PRSummary
+
+        response = response.strip()
+
+        # Strip markdown fences if the model ignored the instructions
+        if response.startswith("```"):
+            response = re.sub(r"^```\w*\n?", "", response)
+            response = re.sub(r"\n?```$", "", response)
+
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            # Try to find the first {...} block
+            m = re.search(r"\{[\s\S]*\}", response)
+            if not m:
+                logger.warning("PR summary: no JSON in response: %r", response[:200])
+                return PRSummary(
+                    title="",
+                    status="failed",
+                    error="AI response was not valid JSON.",
+                    files_changed=files_changed,
+                    additions=additions,
+                    deletions=deletions,
+                    model=model,
+                    provider=provider,
+                )
+            try:
+                data = json.loads(m.group(0))
+            except json.JSONDecodeError as e:
+                logger.warning("PR summary: JSON parse failed: %s", e)
+                return PRSummary(
+                    title="",
+                    status="failed",
+                    error=f"Could not parse AI JSON: {e}",
+                    files_changed=files_changed,
+                    additions=additions,
+                    deletions=deletions,
+                    model=model,
+                    provider=provider,
+                )
+
+        def _list_of_str(value) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            return [str(x).strip() for x in value if str(x).strip()]
+
+        return PRSummary(
+            title=str(data.get("title", "")).strip(),
+            summary=_list_of_str(data.get("summary")),
+            test_plan=_list_of_str(data.get("test_plan")),
+            risks=_list_of_str(data.get("risks")),
+            files_changed=files_changed,
+            additions=additions,
+            deletions=deletions,
+            model=model,
+            provider=provider,
+        )
 
     def _parse_review_response(
         self,

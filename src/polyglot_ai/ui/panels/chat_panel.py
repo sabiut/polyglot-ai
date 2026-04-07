@@ -2937,6 +2937,37 @@ class ChatPanel(QWidget):
         self._tools = tools
         self._tool_registry = registry
 
+    def prefill_input(self, text: str) -> None:
+        """Public API: load text into the chat input box and focus it.
+
+        Used by features like the test explorer's "Fix with AI" action
+        to seed the chat with diagnostic context.
+        """
+        try:
+            self._input.setPlainText(text)
+            self._input.setFocus()
+        except Exception:
+            logger.exception("chat_panel: prefill_input failed")
+
+    def refresh_mcp_tools(self, mcp_client) -> None:
+        """Merge built-in tool defs with the MCP client's current tool list.
+
+        Called when MCP servers connect/disconnect so the chat panel's
+        tool snapshot stays in sync with reality. Without this, the
+        sequential-thinking directive (and any other MCP tools) wouldn't
+        become available until the next project-open.
+        """
+        if self._tool_registry is None:
+            return
+        builtin = self._tool_registry.get_tool_definitions()
+        mcp_defs = mcp_client.get_tool_definitions() if mcp_client else []
+        self._tools = builtin + mcp_defs
+        logger.debug(
+            "chat_panel: refreshed tool list (%d builtin + %d mcp)",
+            len(builtin),
+            len(mcp_defs),
+        )
+
     def set_mcp_client(self, mcp_client) -> None:
         self._mcp_client = mcp_client
         # Check if GitHub is already connected
