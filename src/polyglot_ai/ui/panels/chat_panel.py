@@ -10,10 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtGui import QAction, QColor, QPixmap
+from PyQt6.QtGui import QAction, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
-    QDialog,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,

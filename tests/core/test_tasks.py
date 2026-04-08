@@ -179,7 +179,7 @@ def test_manager_update_state_emits_and_persists(manager):
 
 
 def test_manager_update_active_whitelists_fields(manager):
-    t = manager.create_task(TaskKind.FEATURE, "x")
+    manager.create_task(TaskKind.FEATURE, "x")
     manager.update_active(branch="feat/x", evil="payload")
     assert manager.active.branch == "feat/x"
     assert not hasattr(manager.active, "evil")

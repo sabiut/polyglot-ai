@@ -12,8 +12,6 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncGenerator
 
-import pytest
-
 from polyglot_ai.core.ai.provider import AIProvider
 from polyglot_ai.core.ai.provider_manager import ProviderManager
 from polyglot_ai.core.bridge import EventBus
