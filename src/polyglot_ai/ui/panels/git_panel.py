@@ -41,6 +41,8 @@ class GitPanel(QWidget):
         self._project_root: Path | None = None
         self._event_bus = None
         self._review_engine = None  # set via set_review_engine()
+        # Set later in set_event_bus() once init_task_manager has run.
+        self._task_manager = None
         # Instance attribute (not class attribute) so multiple GitPanel
         # instances don't share the same refresh-in-progress flag.
         self._refreshing = False
@@ -98,6 +100,20 @@ class GitPanel(QWidget):
             f"background: {tc.get('bg_base')}; padding-left: {tc.SPACING_LG}px;"
         )
         layout.addWidget(self._branch_label)
+
+        # Task branch hint — shown only when the active task points at a
+        # different branch than the one currently checked out. Clicking
+        # it runs `git checkout <task_branch>`.
+        self._task_branch_hint: str | None = None
+        self._task_hint_label = QLabel("")
+        self._task_hint_label.setFixedHeight(20)
+        self._task_hint_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._task_hint_label.setStyleSheet(
+            "color: #e5a00d; font-size: 11px; background: transparent; padding-left: 12px;"
+        )
+        self._task_hint_label.mousePressEvent = lambda _e: self._on_task_hint_clicked()  # type: ignore
+        self._task_hint_label.hide()
+        layout.addWidget(self._task_hint_label)
 
         # Commit input
         commit_widget = QWidget()
@@ -398,10 +414,78 @@ class GitPanel(QWidget):
         # don't go through the project_manager.
         event_bus.subscribe("project_refreshed", self._on_project_refreshed)
         event_bus.subscribe("project:opened", self._on_project_refreshed)
+        # Track the active task so commits / pushes / PRs append to its
+        # timeline and the panel can offer to switch branches when the
+        # user activates a task that has a different branch checked out.
+        from polyglot_ai.core.task_manager import EVT_TASK_CHANGED, get_task_manager
+
+        self._task_manager = get_task_manager()
+
+        def _on_task_changed(task=None, **_):
+            self._on_active_task_changed(task)
+
+        event_bus.subscribe(EVT_TASK_CHANGED, _on_task_changed)
         # Run autodetect once after wiring is complete (in case showEvent
         # already fired before any of these wires existed). 500 ms delay
         # so the editor panel has time to restore its tabs from session.
         QTimer.singleShot(500, self._try_autodetect_project_root)
+
+    def _on_active_task_changed(self, task) -> None:
+        """Surface a hint when the active task's branch differs from HEAD.
+
+        We deliberately do NOT auto-checkout — that would silently nuke
+        unstaged work. Instead the branch label gets a small clickable
+        indicator the user can act on.
+        """
+        if task is None:
+            self._task_branch_hint = None
+            self._update_task_hint_label()
+            return
+        task_branch = getattr(task, "branch", None)
+        if not task_branch:
+            self._task_branch_hint = None
+            self._update_task_hint_label()
+            return
+        # Compare against the current branch label text we already have.
+        current = self._branch_label.text().strip().lstrip("⎇").strip()
+        if current and current == task_branch:
+            self._task_branch_hint = None
+        else:
+            self._task_branch_hint = task_branch
+        self._update_task_hint_label()
+
+    def _update_task_hint_label(self) -> None:
+        """Show / hide the 'Switch to <task branch>?' hint under the branch label."""
+        if not hasattr(self, "_task_hint_label"):
+            return
+        if self._task_branch_hint:
+            self._task_hint_label.setText(
+                f"  Active task uses '{self._task_branch_hint}' — click to switch"
+            )
+            self._task_hint_label.show()
+        else:
+            self._task_hint_label.hide()
+
+    def _on_task_hint_clicked(self) -> None:
+        """Run `git checkout <task_branch>` after the user clicks the hint."""
+        if not self._task_branch_hint or self._project_root is None:
+            return
+        target = self._task_branch_hint
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        async def _do_checkout() -> None:
+            try:
+                await self._run_git("checkout", target)
+            except Exception as e:
+                logger.exception("git_panel: checkout %s failed", target)
+                _show_message(self, "Checkout failed", str(e), kind="error")
+                return
+            self._task_branch_hint = None
+            self._update_task_hint_label()
+            self._refresh()
+
+        safe_task(_do_checkout(), name="task_branch_checkout")
 
     def _on_project_refreshed(self, **kwargs) -> None:
         path = kwargs.get("path")
@@ -511,7 +595,36 @@ class GitPanel(QWidget):
 
         self._reset_pr_button()
         dlg = PRSummaryDialog(result, project_root=project_root, parent=self)
+        dlg.pr_created.connect(self._on_pr_created)
         dlg.exec()
+
+    def _on_pr_created(self, url: str, title: str, body: str) -> None:
+        """Transition the active task to REVIEW and stash the PR URL.
+
+        Triggered by ``PRSummaryDialog.pr_created`` after a successful
+        ``gh pr create`` invocation.
+        """
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        try:
+            # Try to extract the PR number from the URL.
+            pr_number: int | None = None
+            try:
+                pr_number = int(url.rstrip("/").rsplit("/", 1)[-1])
+            except (ValueError, IndexError):
+                pass
+            self._task_manager.update_active(pr_url=url, pr_number=pr_number)
+            self._task_manager.add_note(
+                "pr_opened",
+                f"Opened PR: {title or url}",
+                data={"url": url, "pr_number": pr_number},
+            )
+            from polyglot_ai.core.tasks import TaskState
+
+            self._task_manager.update_state(TaskState.REVIEW)
+            _ = body  # currently unused, kept for future enrichments
+        except Exception:
+            logger.exception("git_panel: failed to record PR on task")
 
     def _reset_pr_button(self) -> None:
         self._pr_btn.setEnabled(True)
@@ -552,6 +665,20 @@ class GitPanel(QWidget):
             _show_message(self, "Push failed", str(e), kind="error")
             return
         self._reset_push_button()
+        # Record on the active task so the timeline shows when the
+        # branch went up to origin.
+        if self._task_manager is not None and self._task_manager.active is not None:
+            try:
+                self._task_manager.add_note(
+                    "pushed",
+                    f"Pushed '{branch}' to origin",
+                    data={"branch": branch},
+                )
+                # Bind the branch to the task if it wasn't already.
+                if not self._task_manager.active.branch:
+                    self._task_manager.update_active(branch=branch)
+            except Exception:
+                logger.exception("git_panel: could not record push on task")
         _show_message(
             self,
             "Push succeeded",
@@ -597,6 +724,13 @@ class GitPanel(QWidget):
 
         async def do_create() -> None:
             try:
+                # Capture the previous branch BEFORE checking out so we
+                # can use it as the task's base_branch.
+                base = ""
+                try:
+                    base = (await self._run_git("branch", "--show-current")).strip()
+                except Exception:
+                    logger.debug("git_panel: could not capture base branch", exc_info=True)
                 await self._run_git("checkout", "-b", name)
             except Exception as e:
                 logger.exception("git_panel: branch creation failed")
@@ -604,6 +738,19 @@ class GitPanel(QWidget):
                 return
             logger.info("git_panel: created branch %s", name)
             self._refresh()
+            # Bind the new branch to the active task if it doesn't have
+            # one yet, and record a timeline event.
+            if self._task_manager is not None and self._task_manager.active is not None:
+                try:
+                    if not self._task_manager.active.branch:
+                        self._task_manager.update_active(branch=name, base_branch=base or None)
+                    self._task_manager.add_note(
+                        "branch_created",
+                        f"Created branch '{name}'",
+                        data={"branch": name, "base": base},
+                    )
+                except Exception:
+                    logger.exception("git_panel: could not record branch on task")
 
         safe_task(do_create(), name="git_checkout_b")
 
@@ -685,6 +832,14 @@ class GitPanel(QWidget):
             self._branch_label.setText(f"  ⎇ {branch or 'detached HEAD'}")
             self._staged_list.clear()
             self._unstaged_list.clear()
+            # Recompute the task branch hint with the freshly-known current branch.
+            if self._task_manager is not None and self._task_manager.active is not None:
+                task_branch = self._task_manager.active.branch
+                if task_branch and branch and task_branch != branch:
+                    self._task_branch_hint = task_branch
+                else:
+                    self._task_branch_hint = None
+                self._update_task_hint_label()
 
             for line in status_output.split("\n"):
                 if not line or len(line) < 3:
@@ -785,17 +940,55 @@ class GitPanel(QWidget):
 
     async def _run_commit(self, message: str) -> None:
         try:
+            # Snapshot the staged file list BEFORE committing so we can
+            # roll the names into the task timeline note. After commit
+            # the index is empty so this would return nothing.
+            staged_files: list[str] = []
+            try:
+                staged_raw = await self._run_git("diff", "--cached", "--name-only")
+                staged_files = [f for f in staged_raw.splitlines() if f.strip()]
+            except Exception:
+                logger.debug("git_panel: could not snapshot staged files", exc_info=True)
+
             await self._run_git("commit", "-m", message)
             self._commit_input.clear()
             self._refresh()
             if self._event_bus:
                 self._event_bus.emit("git:committed", message=message)
+
+            # Record the commit on the active task (if any) so the
+            # task timeline reflects the work that just shipped.
+            self._record_commit_on_task(message, staged_files)
         except Exception as e:
             # Always log the full traceback so post-mortem on a
             # cryptic commit failure (pre-commit hook crash, IO error,
             # signing failure) is possible from the logs.
             logger.exception("git_panel: commit failed")
             _show_message(self, "Commit failed", str(e), kind="error")
+
+    def _record_commit_on_task(self, message: str, files: list[str]) -> None:
+        """Append a 'committed' note to the active task and merge files
+        into ``task.modified_files`` so the system prompt knows what's
+        been touched."""
+        if self._task_manager is None:
+            return
+        active = self._task_manager.active
+        if active is None:
+            return
+        try:
+            self._task_manager.add_note(
+                "committed",
+                message.splitlines()[0][:120] if message else "(no message)",
+                data={"files": files, "message": message},
+            )
+            if files:
+                merged = list(active.modified_files)
+                for f in files:
+                    if f not in merged:
+                        merged.append(f)
+                self._task_manager.update_active(modified_files=merged)
+        except Exception:
+            logger.exception("git_panel: could not record commit on task")
 
     async def _run_git(self, *args: str) -> str:
         """Run a git command and return its stdout.

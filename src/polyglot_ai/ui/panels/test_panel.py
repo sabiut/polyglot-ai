@@ -61,6 +61,11 @@ class TestPanel(QWidget):
         self._running = False
         self._popout_dialog: QDialog | None = None
         self._popout_text: QTextEdit | None = None
+        # Per-run counters — reset at the start of every _run_node /
+        # _run_multiple, flushed to the active task on _run_finished.
+        self._run_counters: dict[str, int] = {"passed": 0, "failed": 0, "skipped": 0}
+        # Set later in set_event_bus() once init_task_manager has run.
+        self._task_manager = None
 
         self._collect_done.connect(self._apply_collect)
         self._result_received.connect(self._apply_result)
@@ -250,6 +255,14 @@ class TestPanel(QWidget):
         self._event_bus = event_bus
         # Refresh test list when files are saved (someone may have added a test).
         event_bus.subscribe("file:saved", lambda **kw: self._maybe_refresh_after_save(kw))
+        # Grab the task manager so test runs append to the active task's
+        # timeline + last_test_run snapshot.
+        try:
+            from polyglot_ai.core.task_manager import get_task_manager
+
+            self._task_manager = get_task_manager()
+        except Exception:
+            logger.exception("test_panel: could not bind task manager")
 
     def _maybe_refresh_after_save(self, kwargs: dict) -> None:
         path = kwargs.get("path", "")
@@ -568,6 +581,7 @@ class TestPanel(QWidget):
             self._append_output("A test run is already in progress.")
             return
         self._failed_node_ids.clear()
+        self._reset_run_counters()
         self._output.clear()
         target = node_id or "(all tests)"
         self._append_output(f"$ pytest {target}")
@@ -578,12 +592,16 @@ class TestPanel(QWidget):
     def _run_multiple(self, node_ids: list[str]) -> None:
         if self._project_root is None or self._running or not node_ids:
             return
+        self._reset_run_counters()
         self._output.clear()
         self._append_output(f"$ pytest {' '.join(node_ids)}")
         self._running = True
         for nid in node_ids:
             self._mark_running(nid)
         safe_task(self._do_run_multi(node_ids), name="test_run_multi")
+
+    def _reset_run_counters(self) -> None:
+        self._run_counters = {"passed": 0, "failed": 0, "skipped": 0}
 
     async def _do_run(self, node_id: str | None) -> None:
         try:
@@ -639,6 +657,11 @@ class TestPanel(QWidget):
         item.setIcon(0, self._status_icon(status, node.kind))
         if status in ("failed", "fail", "error"):
             self._failed_node_ids.add(node_id)
+            self._run_counters["failed"] += 1
+        elif status in ("passed", "pass", "xpass"):
+            self._run_counters["passed"] += 1
+        elif status in ("skipped", "skip", "xfail"):
+            self._run_counters["skipped"] += 1
         # Roll status up to file/class so the parent dot reflects worst child.
         self._update_parent_status(item)
 
@@ -755,6 +778,48 @@ class TestPanel(QWidget):
 
     def _on_run_finished(self) -> None:
         self._running = False
+        # Flush the run summary to the active task (if any) so the
+        # task card shows test counts and the timeline accumulates a
+        # 'tested' event.
+        self._flush_run_to_task()
+
+    def _flush_run_to_task(self) -> None:
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        passed = self._run_counters["passed"]
+        failed = self._run_counters["failed"]
+        skipped = self._run_counters["skipped"]
+        total = passed + failed + skipped
+        if total == 0:
+            return
+        try:
+            from polyglot_ai.core.tasks import TestRunSnapshot
+            import time as _time
+
+            snapshot = TestRunSnapshot(
+                passed=passed,
+                failed=failed,
+                skipped=skipped,
+                timestamp=_time.time(),
+            )
+            self._task_manager.update_active(last_test_run=snapshot)
+            summary = f"{passed}/{total} passed"
+            if failed:
+                summary += f" ({failed} failed)"
+            if skipped:
+                summary += f" ({skipped} skipped)"
+            self._task_manager.add_note(
+                "tested",
+                summary,
+                data={
+                    "passed": passed,
+                    "failed": failed,
+                    "skipped": skipped,
+                    "total": total,
+                },
+            )
+        except Exception:
+            logger.exception("test_panel: could not record run on task")
 
     # ── Tree interactions ───────────────────────────────────────────
 

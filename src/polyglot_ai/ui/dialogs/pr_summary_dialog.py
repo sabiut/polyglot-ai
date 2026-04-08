@@ -55,6 +55,11 @@ class PRSummaryDialog(QDialog):
     # opened this modal dialog and deadlock).
     _gh_finished = pyqtSignal(int, str, str)  # rc, stdout, stderr
 
+    # Public signal — emitted on the GUI thread when the user successfully
+    # creates a PR via the dialog. Carries (url, title, body) so callers
+    # can update an active task / record an event / refresh the CI panel.
+    pr_created = pyqtSignal(str, str, str)
+
     def __init__(
         self,
         result: PRSummary,
@@ -309,6 +314,14 @@ class PRSummaryDialog(QDialog):
         url = stdout.strip()
         logger.info("PR created: %s", url)
         self._set_status(f"PR created: {url}", ok=True)
+        # Notify subscribers (e.g. GitPanel) so they can transition the
+        # active task to REVIEW state and stash the PR URL.
+        try:
+            title = self._title_edit.text().strip()
+            body = self._body_edit.toPlainText()
+            self.pr_created.emit(url, title, body)
+        except Exception:
+            logger.exception("pr_summary_dialog: pr_created listener raised")
 
     def _set_status(self, msg: str, ok: bool) -> None:
         colour = "#4ec9b0" if ok else "#f48771"

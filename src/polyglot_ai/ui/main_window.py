@@ -31,7 +31,9 @@ from polyglot_ai.ui.panels.usage_panel import UsagePanel
 from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
 from polyglot_ai.ui.panels.terminal_panel import TerminalPanel
+from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 from polyglot_ai.ui.panels.test_panel import TestPanel
+from polyglot_ai.ui.panels.today_panel import TodayPanel
 from polyglot_ai.ui.widgets.activity_bar import ActivityBar
 from polyglot_ai.ui.widgets.command_palette import CommandPalette
 
@@ -59,6 +61,8 @@ class MainWindow(QMainWindow):
         self._docker_panel = DockerPanel()
         self._k8s_panel = K8sPanel()
         self._test_panel = TestPanel()
+        self._tasks_panel = TasksPanel()
+        self._today_panel = TodayPanel()
         self._editor_panel = EditorPanel()
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
@@ -79,6 +83,8 @@ class MainWindow(QMainWindow):
         self._sidebar_stack.addWidget(self._docker_panel)  # 5: docker
         self._sidebar_stack.addWidget(self._k8s_panel)  # 6: kubernetes
         self._sidebar_stack.addWidget(self._test_panel)  # 7: tests
+        self._sidebar_stack.addWidget(self._tasks_panel)  # 8: tasks
+        self._sidebar_stack.addWidget(self._today_panel)  # 9: today
         self._sidebar_stack.setMinimumWidth(200)
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
@@ -168,6 +174,8 @@ class MainWindow(QMainWindow):
             "docker": 5,
             "kubernetes": 6,
             "tests": 7,
+            "tasks": 8,
+            "today": 9,
         }
         index = view_map.get(view_name, 0)
 
@@ -313,6 +321,21 @@ class MainWindow(QMainWindow):
         self._action_toggle_k8s.setShortcut(QKeySequence("Ctrl+Shift+8"))
         self._action_toggle_k8s.triggered.connect(lambda: self._on_activity_changed("kubernetes"))
         view_menu.addAction(self._action_toggle_k8s)
+
+        self._action_toggle_tests = QAction("&Tests", self)
+        self._action_toggle_tests.setShortcut(QKeySequence("Ctrl+Shift+T"))
+        self._action_toggle_tests.triggered.connect(lambda: self._on_activity_changed("tests"))
+        view_menu.addAction(self._action_toggle_tests)
+
+        self._action_toggle_tasks = QAction("Tas&ks", self)
+        self._action_toggle_tasks.setShortcut(QKeySequence("Ctrl+Shift+J"))
+        self._action_toggle_tasks.triggered.connect(lambda: self._on_activity_changed("tasks"))
+        view_menu.addAction(self._action_toggle_tasks)
+
+        self._action_toggle_today = QAction("To&day", self)
+        self._action_toggle_today.setShortcut(QKeySequence("Ctrl+Shift+H"))
+        self._action_toggle_today.triggered.connect(lambda: self._on_activity_changed("today"))
+        view_menu.addAction(self._action_toggle_today)
 
         view_menu.addSeparator()
 
@@ -655,6 +678,14 @@ class MainWindow(QMainWindow):
     @property
     def test_panel(self) -> TestPanel:
         return self._test_panel
+
+    @property
+    def tasks_panel(self) -> TasksPanel:
+        return self._tasks_panel
+
+    @property
+    def today_panel(self) -> TodayPanel:
+        return self._today_panel
 
     @property
     def editor_panel(self) -> EditorPanel:

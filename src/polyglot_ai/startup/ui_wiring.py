@@ -144,6 +144,14 @@ def wire_project_events(
         window.git_panel.set_project_root(project_path)
         window.cicd_panel.set_project_root(project_path)
         window.test_panel.set_project_root(project_path)
+        # Re-scope the task manager so the Tasks sidebar shows tasks
+        # for this project (and auto-activates the most recent one).
+        try:
+            from polyglot_ai.core.task_manager import get_task_manager
+
+            get_task_manager().set_project_root(project_path)
+        except Exception:
+            logger.exception("ui_wiring: could not switch task manager project root")
         window.mcp_sidebar.refresh()
 
         audit.log("project_opened", {"path": path})

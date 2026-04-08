@@ -210,8 +210,42 @@ def main() -> None:
     window.mcp_sidebar.set_mcp_client(mcp_client)
     window.database_panel.set_mcp_client(mcp_client)
     window._file_explorer.set_event_bus(event_bus)
+
+    # Initialise the TaskManager singleton with the shared event bus
+    # BEFORE any panel calls set_event_bus(). Panels like git_panel and
+    # test_panel fetch the singleton during their set_event_bus() to
+    # record activity on the active task — if init_task_manager hasn't
+    # run yet they'd grab a manager with no event bus wired and every
+    # write would silently fail to propagate.
+    from polyglot_ai.core.task_manager import init_task_manager
+
+    task_manager = init_task_manager(event_bus)
+
     window.git_panel.set_event_bus(event_bus)
     window.test_panel.set_event_bus(event_bus)
+
+    window.tasks_panel.set_task_manager(task_manager)
+    window.tasks_panel.set_event_bus(event_bus)
+    # Today landing page — same wiring pattern. It reads the task
+    # manager for active tasks and listens for project:opened to
+    # kick off the gh-based attention fetch.
+    window.today_panel.set_task_manager(task_manager)
+    window.today_panel.set_event_bus(event_bus)
+    # Chat panel re-scopes per task: switches conversations and
+    # injects task context into the system prompt.
+    chat.set_event_bus(event_bus)
+    # Review panel: defaults to Branch vs Main when the active task
+    # has a branch, and records each review on the task timeline.
+    try:
+        window.review_panel.set_event_bus(event_bus)
+    except Exception:
+        logger.exception("app: could not wire review panel to event bus")
+    # CI/CD panel: filters runs by the active task's branch and
+    # records the latest CI status onto the task.
+    try:
+        window.cicd_panel.set_event_bus(event_bus)
+    except Exception:
+        logger.exception("app: could not wire CI/CD panel to event bus")
     window.usage_panel.set_database(db)
     window.editor_panel.set_ai_services(provider_manager, settings)
 

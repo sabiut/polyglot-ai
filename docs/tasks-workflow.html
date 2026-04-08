@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polyglot AI — Task Workflow Guide</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --bg-alt: #252526;
+    --bg-code: #181818;
+    --border: #333;
+    --text: #e0e0e0;
+    --text-dim: #a0a0a0;
+    --text-muted: #777;
+    --accent: #4ec9b0;
+    --accent-blue: #9cdcfe;
+    --accent-orange: #e5a00d;
+    --accent-red: #f48771;
+    --link: #4ec9b0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 40px 28px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 32px;
+    font-weight: 700;
+    color: #fff;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 15px;
+  }
+  h2 {
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 44px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    margin-top: 26px;
+    margin-bottom: 8px;
+  }
+  h4 {
+    color: var(--accent-blue);
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    letter-spacing: 0.3px;
+  }
+  p, li { color: var(--text); }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--accent-blue);
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text);
+  }
+  .callout {
+    background: var(--bg-alt);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-orange); }
+  .callout.tip  { border-left-color: var(--accent-blue); }
+  .callout strong { color: #fff; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    background: var(--bg-alt);
+  }
+  td code { font-size: 12px; }
+  .kind-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .dot-feature   { background: #4ec9b0; }
+  .dot-bugfix    { background: #f48771; }
+  .dot-incident  { background: #f44747; }
+  .dot-refactor  { background: #9cdcfe; }
+  .dot-explore   { background: #e5a00d; }
+  .dot-chore     { background: #888; }
+  nav.toc {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 20px;
+    margin-bottom: 28px;
+  }
+  nav.toc h3 {
+    margin: 0 0 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 700;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--text-dim);
+  }
+  nav.toc li { margin: 2px 0; font-size: 14px; }
+  kbd {
+    display: inline-block;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #ddd;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+  .state-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .state-planning { background: #333; color: #aaa; }
+  .state-active   { background: #0a3d33; color: #4ec9b0; }
+  .state-review   { background: #1e3a52; color: #9cdcfe; }
+  .state-blocked  { background: #3d2f10; color: #e5a00d; }
+  .state-done     { background: #222; color: #666; }
+  footer {
+    margin-top: 60px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Task Workflow Guide</h1>
+  <div class="subtitle">How tasks tie your branch, chat, tests, CI, and PR together in Polyglot AI.</div>
+</header>
+
+<nav class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#what">1. What is a task?</a></li>
+    <li><a href="#concepts">2. Core concepts</a></li>
+    <li><a href="#ui">3. The UI: Today, Tasks sidebar, Detail dialog</a></li>
+    <li><a href="#lifecycle">4. Task lifecycle &mdash; step by step</a></li>
+    <li><a href="#auto">5. What each panel records automatically</a></li>
+    <li><a href="#actions">6. Manual actions you can take</a></li>
+    <li><a href="#shortcuts">7. Keyboard shortcuts</a></li>
+    <li><a href="#storage">8. Where data lives &amp; how events flow</a></li>
+    <li><a href="#recipes">9. Recipes</a></li>
+    <li><a href="#troubleshooting">10. Troubleshooting</a></li>
+    <li><a href="#faq">11. FAQ</a></li>
+  </ol>
+</nav>
+
+<h2 id="what">1. What is a task?</h2>
+
+<p>
+A <strong>task</strong> is the unit of work you are doing right now &mdash; a feature, a bugfix, an
+incident, a refactor. Instead of keeping your branch, chat conversation, test runs,
+CI status and pull request in separate tools, Polyglot AI ties them all to a single
+task. Every panel (Git, Tests, CI, Chat, Review) can re-scope itself to the
+<em>active</em> task, and writes its activity back onto a shared timeline.
+</p>
+
+<p>
+The end result: when you come back to a task after lunch (or next Monday), you
+can open the <strong>Today</strong> panel, click the task, and immediately see the branch you
+were on, the last test run, any PR you opened, and the conversation you were
+having with the AI &mdash; without hunting for context.
+</p>
+
+<div class="callout tip">
+<strong>Mental model.</strong> Think of a task as a folder that collects everything relevant to one
+piece of work. The folder is invisible &mdash; it just makes the panels smarter.
+</div>
+
+<h2 id="concepts">2. Core concepts</h2>
+
+<h3>Kind</h3>
+<p>The flavour of work. Each kind has its own colour in the sidebar.</p>
+<table>
+  <tr><th>Kind</th><th>When to use</th></tr>
+  <tr><td><span class="kind-dot dot-feature"></span><code>feature</code></td>
+      <td>New functionality. FEATURE is the default choice when creating a task.</td></tr>
+  <tr><td><span class="kind-dot dot-bugfix"></span><code>bugfix</code></td>
+      <td>Short loop focused on reproducing then fixing a specific defect.</td></tr>
+  <tr><td><span class="kind-dot dot-incident"></span><code>incident</code></td>
+      <td>Production issue. Auto-created by the CI panel when a run fails on your branch.</td></tr>
+  <tr><td><span class="kind-dot dot-refactor"></span><code>refactor</code></td>
+      <td>Restructuring with no new behaviour.</td></tr>
+  <tr><td><span class="kind-dot dot-explore"></span><code>explore</code></td>
+      <td>Data or codebase exploration (scratch work that may not ship).</td></tr>
+  <tr><td><span class="kind-dot dot-chore"></span><code>chore</code></td>
+      <td>Dependency bumps, config, infra, maintenance.</td></tr>
+</table>
+
+<h3>State</h3>
+<p>Where the task sits in its lifecycle. Used to group the sidebar and drive colours.</p>
+<table>
+  <tr><th>State</th><th>Meaning</th></tr>
+  <tr><td><span class="state-chip state-planning">PLANNING</span></td>
+      <td>You&rsquo;re defining the task. New tasks start here. AI may draft a plan checklist.</td></tr>
+  <tr><td><span class="state-chip state-active">ACTIVE</span></td>
+      <td>You&rsquo;re working on it. This is where most of a task&rsquo;s life is spent.</td></tr>
+  <tr><td><span class="state-chip state-review">REVIEW</span></td>
+      <td>PR is open, waiting on review / CI. Moving to REVIEW happens automatically when you open a PR.</td></tr>
+  <tr><td><span class="state-chip state-blocked">BLOCKED</span></td>
+      <td>Waiting on something external. Use this to park a task without losing its context.</td></tr>
+  <tr><td><span class="state-chip state-done">DONE</span></td>
+      <td>Merged or closed. Still visible in the sidebar under "DONE (recent)".</td></tr>
+  <tr><td><span class="state-chip state-done">ARCHIVED</span></td>
+      <td>Hidden from normal views. Use archive to hide older finished work.</td></tr>
+</table>
+
+<h3>Active task</h3>
+<p>
+Exactly <strong>one task is active</strong> at any moment (or none). The active task is
+highlighted in the Tasks sidebar with a blue border, and every task-aware panel
+re-scopes to it:
+</p>
+<ul>
+  <li><strong>Chat</strong> switches to the task&rsquo;s saved conversation (or binds the next new one to it).</li>
+  <li><strong>Git</strong> records commits, branch creation, and PRs onto the task.</li>
+  <li><strong>Tests</strong> saves a pass/fail snapshot after each run.</li>
+  <li><strong>CI/CD</strong> records the latest status of the task&rsquo;s branch.</li>
+  <li><strong>Review</strong> defaults to <em>branch vs main</em> and logs each review pass.</li>
+</ul>
+
+<h3>Linked artifacts</h3>
+<p>The fields a task can accumulate as it progresses:</p>
+<table>
+  <tr><th>Field</th><th>What it stores</th><th>Populated by</th></tr>
+  <tr><td><code>branch</code></td><td>Git branch the task is on</td><td>Git panel (on branch create / first commit)</td></tr>
+  <tr><td><code>base_branch</code></td><td>The branch it was cut from (e.g. <code>main</code>)</td><td>Git panel</td></tr>
+  <tr><td><code>pr_url</code> / <code>pr_number</code></td><td>Pull request link</td><td>Git panel / PR summary dialog</td></tr>
+  <tr><td><code>chat_session_id</code></td><td>ID of the chat conversation bound to the task</td><td>Chat panel on first save</td></tr>
+  <tr><td><code>plan</code></td><td>Ordered checklist of steps</td><td>AI plan generator (future)</td></tr>
+  <tr><td><code>modified_files</code></td><td>Files touched so far</td><td>Git panel (on commit)</td></tr>
+  <tr><td><code>last_test_run</code></td><td>Pass / fail / skip counts</td><td>Test panel (after pytest run)</td></tr>
+  <tr><td><code>last_ci_run</code></td><td>Workflow name, status, URL</td><td>CI/CD panel</td></tr>
+  <tr><td><code>notes</code></td><td>Append-only timeline of events</td><td>All panels via <code>add_note()</code></td></tr>
+</table>
+
+<h3>Notes (timeline)</h3>
+<p>
+A task&rsquo;s timeline is a chronological list of <em>notes</em>. Each note has a
+<code>kind</code>, a human-readable <code>text</code>, and optional structured <code>data</code>. The
+Task detail dialog renders notes with icons so you can scan the history at a
+glance:
+</p>
+<table>
+  <tr><th>Note kind</th><th>Glyph</th><th>Emitted when</th></tr>
+  <tr><td><code>created</code></td><td>&#10022;</td><td>Task is first created</td></tr>
+  <tr><td><code>state_changed</code></td><td>&#8623;</td><td>You move the task between states</td></tr>
+  <tr><td><code>branch_created</code></td><td>&#9095;</td><td>Git panel creates a branch while the task is active</td></tr>
+  <tr><td><code>committed</code></td><td>&#10003;</td><td>You commit (message + sha are saved in <code>data</code>)</td></tr>
+  <tr><td><code>pushed</code></td><td>&#8673;</td><td>You push the current branch</td></tr>
+  <tr><td><code>pr_opened</code></td><td>&#8679;</td><td>A PR is opened for the task&rsquo;s branch</td></tr>
+  <tr><td><code>tested</code></td><td>&#9881;</td><td>Pytest runs and the snapshot is recorded</td></tr>
+  <tr><td><code>review_clean</code> / <code>review_findings</code> / <code>review_failed</code></td><td>&#10003; / ! / &#10007;</td><td>AI code review finishes</td></tr>
+  <tr><td><code>ci_run</code></td><td>&#9679;</td><td>CI status changes for the task&rsquo;s branch</td></tr>
+  <tr><td><code>ci_failure_imported</code></td><td>&#9888;</td><td>A failing run was imported as an incident</td></tr>
+  <tr><td><code>ai_response</code> / <code>user_message</code></td><td>&#9998;</td><td>Chat messages tied to the task</td></tr>
+</table>
+
+<h2 id="ui">3. The UI</h2>
+
+<h3>Today panel</h3>
+<p>
+The landing page that answers &ldquo;what should I do right now?&rdquo;. Open it from the
+activity bar (first icon) or with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>.
+It shows three sections:
+</p>
+<ol>
+  <li><strong>Active Tasks</strong> &mdash; cards for any ACTIVE / PLANNING / REVIEW task.
+  Click a card to make it the active task.</li>
+  <li><strong>Attention</strong> &mdash; failed CI runs and open PRs on your branches,
+  fetched via the <code>gh</code> CLI when available. Refreshes on project open and
+  every 60 seconds.</li>
+  <li><strong>Quick Actions</strong> &mdash; buttons for common commands
+  (<em>New task</em>, <em>Run all tests</em>, <em>Refresh CI</em>, etc.).</li>
+</ol>
+
+<h3>Tasks sidebar panel</h3>
+<p>
+Open from the activity bar (second icon) or with
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd>. Shows every non-archived task in the
+current project, grouped by state in this order: ACTIVE &rarr; PLANNING &rarr;
+REVIEW &rarr; BLOCKED &rarr; DONE (recent).
+</p>
+
+<h4>Task card</h4>
+<p>Each card shows:</p>
+<ul>
+  <li>A coloured dot for the <em>kind</em>.</li>
+  <li>The task title.</li>
+  <li>A meta line: kind &middot; <code>&#9095; branch</code> &middot; tests passed/total &middot; CI status &middot; age (e.g. <em>3m ago</em>).</li>
+</ul>
+
+<h4>Interactions</h4>
+<table>
+  <tr><th>Action</th><th>Effect</th></tr>
+  <tr><td><strong>Click</strong></td><td>Make the task active.</td></tr>
+  <tr><td><strong>Double-click</strong></td><td>Open the full Task Detail dialog.</td></tr>
+  <tr><td><strong>Right-click</strong></td><td>Context menu: activate, open details, move to any state, archive, delete.</td></tr>
+  <tr><td><strong>+ button</strong></td><td>Open the New Task dialog.</td></tr>
+  <tr><td><strong>Refresh button</strong></td><td>Reload from disk.</td></tr>
+  <tr><td><strong>Expand button</strong></td><td>Open Tasks in a separate, larger window that stays in sync with the sidebar.</td></tr>
+</table>
+
+<h3>New Task dialog</h3>
+<p>
+Pick a <em>kind</em>, type a <em>title</em> (required), and an optional <em>description</em>.
+The description is the strongest signal for the AI &mdash; it is injected into the
+system prompt when you chat while the task is active.
+</p>
+
+<h3>Task Detail dialog</h3>
+<p>
+Opened by double-clicking a card or by choosing <em>Open details&hellip;</em> from the
+context menu. Contents top-to-bottom:
+</p>
+<ol>
+  <li><strong>Header</strong> &mdash; kind dot, title, and a meta line (<em>kind &middot; state &middot; branch &middot; PR</em>).</li>
+  <li><strong>Description</strong> &mdash; read-only text block (shown only if set).</li>
+  <li><strong>Plan</strong> &mdash; read-only checklist if the task has plan steps. Glyphs:
+      <code>&#9744;</code> pending, <code>&#9680;</code> in progress, <code>&#9745;</code> done, <code>&#8856;</code> skipped.</li>
+  <li><strong>Stats card</strong> &mdash; test ratio, CI symbol, files-touched count, PR number (only the relevant ones render).</li>
+  <li><strong>Timeline</strong> &mdash; newest first, one row per note.</li>
+  <li><strong>Actions bar</strong>:
+    <ul>
+      <li><em>Open PR</em> &mdash; if a PR URL is set.</li>
+      <li><em>Copy as standup</em> &mdash; builds a markdown summary (title, branch, PR, recent events, tests, CI) and copies it to the clipboard. Paste straight into your daily standup.</li>
+      <li>State transition buttons (<em>Start work</em> / <em>Mark ready for review</em> / <em>Mark done</em>) for anything that isn&rsquo;t already the current state.</li>
+      <li><em>Close</em>.</li>
+    </ul>
+  </li>
+</ol>
+
+<div class="callout">
+<strong>Why the dialog closes on state change.</strong> Rebuilding the action row in place was
+leaving orphaned widgets visible, so the dialog closes after a state transition.
+The sidebar and Today page refresh instantly, and you can reopen the dialog to
+see the new timeline entry.
+</div>
+
+<h2 id="lifecycle">4. Task lifecycle &mdash; step by step</h2>
+
+<p>A typical feature flow, end to end:</p>
+
+<ol>
+  <li><strong>Open the project</strong>. The task manager auto-activates the most recently
+  updated task that is still in ACTIVE / PLANNING / REVIEW. If none, active is cleared.</li>
+
+  <li><strong>Create the task</strong>. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd>,
+  click <em>+</em>, pick <em>feature</em>, type a title like
+  <em>&ldquo;Add CSV export to user reports&rdquo;</em>, fill in a short description. It&rsquo;s
+  created in PLANNING and becomes active.</li>
+
+  <li><strong>Chat</strong>. Open the chat panel. Because the task is active, the context
+  builder injects a task block into the system prompt (<em>&ldquo;You are helping with
+  task: Add CSV export&hellip;&rdquo;</em>). Start a new conversation &mdash; when it first
+  persists, its ID is written to <code>chat_session_id</code> on the task, so next time
+  you activate the task the chat switches to that conversation automatically.</li>
+
+  <li><strong>Create a branch</strong>. In the Git panel, create a branch (e.g.
+  <code>feat/csv-export</code>). The task records <code>branch</code>, <code>base_branch</code>, and
+  a <code>branch_created</code> note.</li>
+
+  <li><strong>Move to ACTIVE</strong>. From the Task Detail dialog, click
+  <em>Start work</em>. (Or via the sidebar right-click menu.)</li>
+
+  <li><strong>Work &amp; commit</strong>. Each commit adds a <code>committed</code> note and
+  appends the touched files to <code>modified_files</code>. If the task didn&rsquo;t yet have a
+  branch, the first commit fills it in.</li>
+
+  <li><strong>Run tests</strong>. In the Tests panel, run your pytest suite. When it
+  finishes, a <code>TestRunSnapshot</code> is saved onto the task and a <code>tested</code> note
+  appears in the timeline. The sidebar card now shows <em>12/13 tests</em>.</li>
+
+  <li><strong>AI code review</strong>. Open the Review panel. With a task branch set,
+  it defaults to <em>branch vs main</em>. Run a review &mdash; results are logged as
+  <code>review_clean</code> / <code>review_findings</code> / <code>review_failed</code>.</li>
+
+  <li><strong>Open a PR</strong>. From the Git panel, click <em>Generate PR description</em>
+  and push. The task moves to REVIEW, <code>pr_url</code> and <code>pr_number</code> are saved,
+  and a <code>pr_opened</code> note is added.</li>
+
+  <li><strong>Watch CI</strong>. The CI/CD panel filters runs by the task&rsquo;s branch.
+  Each status change writes a <code>last_ci_run</code> snapshot and a <code>ci_run</code> note.
+  Today&rsquo;s <em>Attention</em> section surfaces the failure if it goes red.</li>
+
+  <li><strong>Merge &amp; mark done</strong>. After the PR merges, open details,
+  click <em>Mark done</em>. The task drops into the DONE group.</li>
+
+  <li><strong>Archive</strong> (optional). Once the task is noise, right-click &rarr;
+  <em>Archive</em> to hide it from normal views. Data is kept.</li>
+</ol>
+
+<h2 id="auto">5. What each panel records automatically</h2>
+
+<p>
+You never have to touch the task manager directly. These side-effects happen
+whenever a task is active:
+</p>
+
+<h3>Git panel</h3>
+<ul>
+  <li><strong>Branch create</strong> &rarr; if the task has no branch, fills <code>branch</code> + <code>base_branch</code>, adds a <code>branch_created</code> note.</li>
+  <li><strong>Commit</strong> &rarr; adds a <code>committed</code> note with sha + message, merges the staged files into <code>modified_files</code>.</li>
+  <li><strong>Push</strong> &rarr; adds a <code>pushed</code> note.</li>
+  <li><strong>PR opened</strong> (via the PR summary dialog) &rarr; saves <code>pr_url</code>, <code>pr_number</code>, moves state to REVIEW, adds a <code>pr_opened</code> note.</li>
+  <li><strong>Branch switch</strong> &rarr; cards that reference a branch use the task&rsquo;s
+  branch for comparisons (e.g. diff vs base).</li>
+</ul>
+
+<h3>Tests panel</h3>
+<ul>
+  <li>After a pytest run, writes <code>last_test_run = TestRunSnapshot(passed, failed, skipped, timestamp)</code>.</li>
+  <li>Adds a <code>tested</code> note summarising the result.</li>
+</ul>
+
+<h3>CI/CD panel</h3>
+<ul>
+  <li>Filters the runs table to the task&rsquo;s branch when one is set.</li>
+  <li>Records <code>last_ci_run = CIRunSnapshot(status, workflow, url, timestamp)</code> on every status change.</li>
+  <li>When a run fails and there is no active task, you can <em>Import failure as incident</em>
+  &mdash; a new INCIDENT task is created with the workflow details and made active.</li>
+</ul>
+
+<h3>Chat panel</h3>
+<ul>
+  <li>Subscribes to <code>task:changed</code>. When a task with a <code>chat_session_id</code>
+  becomes active, the panel loads that conversation.</li>
+  <li>Hands the task object to the context builder so the system prompt includes a
+  <em>&ldquo;You are helping with task X&rdquo;</em> block.</li>
+  <li>On the first persist of a new conversation, writes <code>chat_session_id</code> back onto the task.</li>
+</ul>
+
+<h3>Review panel</h3>
+<ul>
+  <li>Defaults the review mode to <em>branch vs main</em> when the active task has a branch.</li>
+  <li>Records each review run on the timeline as <code>review_clean</code>,
+  <code>review_findings</code>, or <code>review_failed</code> depending on the outcome.</li>
+</ul>
+
+<h2 id="actions">6. Manual actions you can take</h2>
+
+<h3>Create a task</h3>
+<ul>
+  <li>Tasks sidebar &rarr; <em>+</em> button.</li>
+  <li>Today panel &rarr; <em>New task</em> quick action.</li>
+  <li>CI/CD panel &rarr; <em>Import failure as incident</em> (creates an INCIDENT task).</li>
+</ul>
+
+<h3>Switch the active task</h3>
+<ul>
+  <li>Single-click any card in the Tasks sidebar or Today panel.</li>
+  <li>Right-click a card &rarr; <em>Make active</em>.</li>
+</ul>
+
+<h3>Change state</h3>
+<ul>
+  <li>Task Detail dialog &rarr; <em>Start work</em> / <em>Mark ready for review</em> / <em>Mark done</em> buttons.</li>
+  <li>Sidebar context menu &rarr; <em>Move to: &hellip;</em> for any state.</li>
+</ul>
+
+<h3>Archive or delete</h3>
+<ul>
+  <li>Context menu &rarr; <em>Archive</em> (reversible, keeps data) or <em>Delete</em> (permanent).</li>
+</ul>
+
+<h3>Copy a standup update</h3>
+<p>Task Detail dialog &rarr; <em>Copy as standup</em>. The copied markdown looks like:</p>
+<pre><code>**Add CSV export to user reports** (feature)
+Branch: `feat/csv-export`
+PR: https://github.com/you/repo/pull/42
+
+Recent:
+- 14:02  Commit: stream rows to tempfile
+- 13:50  Tests: 12/13 passing
+- 13:10  PR opened
+
+Tests: 12/13 passing
+CI: success
+</code></pre>
+
+<h3>Open the PR</h3>
+<p>Task Detail dialog &rarr; <em>Open PR</em> (only if <code>pr_url</code> is set).</p>
+
+<h2 id="shortcuts">7. Keyboard shortcuts</h2>
+<table>
+  <tr><th>Shortcut</th><th>Action</th></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>Show Today panel</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></td><td>Show Tasks sidebar</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>Show Tests panel (closely related)</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Source control</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>CI/CD inspector</td></tr>
+  <tr><td>Double-click a card</td><td>Open Task Detail dialog</td></tr>
+  <tr><td>Right-click a card</td><td>Context menu</td></tr>
+</table>
+
+<h2 id="storage">8. Where data lives &amp; how events flow</h2>
+
+<h3>Storage</h3>
+<p>Tasks are stored in their own SQLite database, independent of the main app DB:</p>
+<pre><code>~/.config/polyglot-ai/tasks.sqlite</code></pre>
+<p>
+One <code>tasks</code> table with JSON-blob columns for nested structures (<code>plan</code>,
+<code>notes</code>, <code>modified_files</code>, <code>last_test_run</code>, <code>last_ci_run</code>). Indexed by
+<code>(project_root, state)</code> and <code>(project_root, updated_at DESC)</code> so the sidebar
+query is cheap.
+</p>
+
+<div class="callout warn">
+<strong>Backup this file</strong> if you care about the history of what you&rsquo;ve been doing.
+Deleting it is a factory reset for the task system and cannot be undone.
+</div>
+
+<h3>Components</h3>
+<table>
+  <tr><th>Module</th><th>Role</th></tr>
+  <tr><td><code>core/tasks.py</code></td><td>Dataclasses: <code>Task</code>, <code>TaskKind</code>, <code>TaskState</code>, <code>PlanStep</code>, <code>TaskNote</code>, <code>TestRunSnapshot</code>, <code>CIRunSnapshot</code>.</td></tr>
+  <tr><td><code>core/task_store.py</code></td><td>Synchronous SQLite CRUD. <code>save()</code>, <code>get()</code>, <code>list_tasks()</code>, <code>delete()</code>.</td></tr>
+  <tr><td><code>core/task_manager.py</code></td><td>Singleton that owns the active task and emits events. Initialised once in <code>app.py</code> via <code>init_task_manager(event_bus)</code>.</td></tr>
+  <tr><td><code>ui/panels/tasks_panel.py</code></td><td>Sidebar list and new-task dialog.</td></tr>
+  <tr><td><code>ui/panels/today_panel.py</code></td><td>Landing page with active tasks + attention + quick actions.</td></tr>
+  <tr><td><code>ui/dialogs/task_detail_dialog.py</code></td><td>Full-screen detail viewer.</td></tr>
+</table>
+
+<h3>Event bus topics</h3>
+<p>All panels subscribe to these through the shared <code>EventBus</code>:</p>
+<table>
+  <tr><th>Topic</th><th>Payload</th><th>Emitted by</th></tr>
+  <tr><td><code>task:changed</code></td><td><code>task</code> (or <code>None</code>)</td><td>active task changed / created / cleared</td></tr>
+  <tr><td><code>task:list_changed</code></td><td>&mdash;</td><td>create, delete, archive, project switch</td></tr>
+  <tr><td><code>task:state_changed</code></td><td><code>task</code>, <code>old_state</code>, <code>new_state</code></td><td><code>update_state()</code></td></tr>
+  <tr><td><code>task:note_added</code></td><td><code>task</code>, <code>note</code></td><td><code>add_note()</code></td></tr>
+</table>
+
+<h3>Wiring order (important)</h3>
+<p>
+In <code>app.py</code>, <code>init_task_manager(event_bus)</code> runs <strong>before</strong> any panel&rsquo;s
+<code>set_event_bus()</code> is called. Panels (git, tests, CI, chat&hellip;) fetch the
+singleton via <code>get_task_manager()</code> during wiring. If the order was reversed,
+those panels would grab a manager without an event bus and every write would
+silently fail to propagate.
+</p>
+
+<h3>Project switching</h3>
+<p>
+<code>ui_wiring.wire_project_events</code> listens for <code>project:opened</code> and calls
+<code>task_manager.set_project_root(path)</code>. That re-scopes the sidebar and
+auto-activates the most recent ACTIVE / PLANNING / REVIEW task in the new
+project, or clears the active task if there are none.
+</p>
+
+<h2 id="recipes">9. Recipes</h2>
+
+<h3>Quick bugfix loop</h3>
+<ol>
+  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd>, <em>+</em>, pick <em>bugfix</em>, title
+  <em>&ldquo;NPE in invoice totals&rdquo;</em>. Description: paste the traceback.</li>
+  <li>Ask the chat to explain / fix. Apply the patch.</li>
+  <li>Run the targeted test in the Tests panel.</li>
+  <li>Commit, push, open PR &mdash; state auto-advances to REVIEW.</li>
+  <li>Task Detail &rarr; <em>Copy as standup</em> for your daily update.</li>
+</ol>
+
+<h3>Triage a CI failure</h3>
+<ol>
+  <li>Open Today panel. The failed run shows up under <em>Attention</em>.</li>
+  <li>Click <em>Import failure as incident</em> in the CI panel row, or the equivalent action in the attention card.</li>
+  <li>An INCIDENT task is created and activated. The CI snapshot and a
+  <code>ci_failure_imported</code> note are seeded so you have the workflow and URL in hand.</li>
+  <li>Proceed as for a bugfix.</li>
+</ol>
+
+<h3>Parallel tasks</h3>
+<p>
+You can have as many PLANNING / ACTIVE tasks as you like &mdash; only one is
+<em>active</em>. Click a different card in the Tasks sidebar to hot-swap. Chat switches to
+the other task&rsquo;s conversation automatically; git actions will now attach to the
+new task. Nothing is lost on the old one.
+</p>
+
+<h3>Park a task</h3>
+<p>
+Waiting on a code owner? Move the task to <em>BLOCKED</em> via the context menu or
+detail dialog. It stays in the sidebar (in the BLOCKED group) so you don&rsquo;t
+forget it, but it&rsquo;s out of your ACTIVE list.
+</p>
+
+<h2 id="troubleshooting">10. Troubleshooting</h2>
+
+<h3>&ldquo;No project open&rdquo; in the Tasks sidebar</h3>
+<p>
+The task manager is scoped per project. Open a folder via <em>File &rarr; Open Project</em>
+first; the sidebar will re-populate.
+</p>
+
+<h3>My commit didn&rsquo;t show up on the timeline</h3>
+<p>Check the following:</p>
+<ul>
+  <li>Was a task <em>active</em> at the moment you committed? The Git panel is a no-op on the task side when there is no active task.</li>
+  <li>Was the commit made through the Git panel, not a terminal? External commits are not detected by the panel.</li>
+</ul>
+
+<h3>Chat didn&rsquo;t switch when I clicked the task</h3>
+<ul>
+  <li>If the task has never been bound to a conversation (<code>chat_session_id</code> is empty), the chat panel will leave the current conversation alone and bind the next new one.</li>
+  <li>If you&rsquo;re already on the right conversation, nothing happens (guarded against a reload race with <code>_persist_conversation</code>).</li>
+</ul>
+
+<h3>The state transition buttons closed my dialog</h3>
+<p>
+Expected &mdash; see the callout in section 3. Reopen by double-clicking the card to
+see the new timeline entry.
+</p>
+
+<h3>I deleted a task by mistake</h3>
+<p>
+Delete is permanent. If you want a safer option, prefer <em>Archive</em> &mdash; it hides
+the task but keeps all its data. If you need to recover a deleted task, restore
+<code>~/.config/polyglot-ai/tasks.sqlite</code> from backup.
+</p>
+
+<h2 id="faq">11. FAQ</h2>
+
+<h4>Can I run tasks across multiple projects?</h4>
+<p>
+Tasks are scoped to a project root. Opening a different project switches the
+sidebar to that project&rsquo;s tasks. Archived tasks remain attached to their
+original project.
+</p>
+
+<h4>Is the plan checklist filled in by AI?</h4>
+<p>
+The model and UI support it (read-only for now). A FEATURE task can carry plan
+steps in <code>task.plan</code>; the Detail dialog renders them with status glyphs. An AI
+plan generator is the next thing on the workflow roadmap; when it lands it will
+populate those steps automatically during PLANNING.
+</p>
+
+<h4>Where are the tests for this feature?</h4>
+<p>
+<code>tests/core/test_tasks.py</code> covers the model, store (round-trip, filtering,
+project scoping, delete, corrupt-JSON fallback), and manager (CRUD, state
+transitions, event emission, whitelist guard, listener-exception isolation,
+project switching). The UI panels themselves are not tested as there is no Qt
+test harness in the repo.
+</p>
+
+<h4>How do I reset everything?</h4>
+<p>
+Close the app and delete <code>~/.config/polyglot-ai/tasks.sqlite</code>. The next launch
+will recreate an empty schema. This does not affect your chat history, settings,
+or any other data &mdash; tasks live in their own database.
+</p>
+
+<h4>Can I script against the task store?</h4>
+<p>
+Yes &mdash; <code>TaskStore</code> is a plain Python class with no async. From a script:
+</p>
+<pre><code>from polyglot_ai.core.task_store import TaskStore
+from polyglot_ai.core.tasks import TaskState
+
+store = TaskStore()
+for t in store.list_tasks("/path/to/project", state_filter=[TaskState.ACTIVE]):
+    print(t.title, t.branch, t.pr_url)
+</code></pre>
+<p>The schema is stable; feel free to build custom reports on top of it.</p>
+
+<footer>
+  Polyglot AI &middot; Task Workflow Guide &middot; generated for the v0.6 series.
+</footer>
+
+</div>
+</body>
+</html>

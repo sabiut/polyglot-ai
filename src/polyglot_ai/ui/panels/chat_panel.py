@@ -170,6 +170,11 @@ class ChatPanel(QWidget):
         self._onboarding_shown = False
         self._drop_overlay: QLabel | None = None
         self._github_btn: QPushButton | None = None  # Initialized if GitHub connected
+        # Task-aware state — populated when set_event_bus() runs after
+        # init_task_manager() has bound the global manager.
+        self._task_manager = None
+        self._active_task = None
+        self._event_bus = None
 
         self._setup_ui()
 
@@ -1159,6 +1164,8 @@ class ChatPanel(QWidget):
 
     def _connect_github(self) -> None:
         """Open GitHub connection consent dialog."""
+        from polyglot_ai.ui.dialogs.github_connect_dialog import GitHubConnectDialog
+
         dialog = GitHubConnectDialog(self)
         if dialog.exec():
             token = dialog.get_token()
@@ -2172,10 +2179,28 @@ class ChatPanel(QWidget):
         conv = self._current_conversation
         if conv.id is None:
             title = conv.messages[0].content[:50] if conv.messages else "New Chat"
+            # If a task is active, prefix the conversation title so it's
+            # easy to spot in the conversation list.
+            if self._active_task is not None:
+                task_title = getattr(self._active_task, "title", "")
+                if task_title:
+                    title = f"[{task_title[:30]}] {title}"[:80]
             conv.id = await self._db.create_conversation(title, conv.model)
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, conv.id)
             self._conv_list.insertItem(0, item)
+            # Bind this freshly-created conversation to the active task
+            # so future activations of the same task land back here.
+            if self._task_manager is not None and self._active_task is not None:
+                try:
+                    self._task_manager.update_active(chat_session_id=str(conv.id))
+                    self._task_manager.add_note(
+                        "chat_started",
+                        f"Started conversation '{title}'",
+                        data={"conversation_id": conv.id},
+                    )
+                except Exception:
+                    logger.exception("chat_panel: could not bind conversation to task")
 
         new_messages = conv.messages[self._persisted_message_count :]
         for msg in new_messages:
@@ -2194,7 +2219,48 @@ class ChatPanel(QWidget):
                 tokens_in=msg.tokens_in,
                 tokens_out=msg.tokens_out,
             )
+        # Append a single rolled-up note per persist call so the task
+        # timeline doesn't get spammed with one entry per token. We log
+        # how many user/assistant messages were just persisted plus the
+        # last assistant reply preview.
+        if (
+            self._task_manager is not None
+            and self._active_task is not None
+            and self._task_manager.active is not None
+            and new_messages
+        ):
+            try:
+                self._record_chat_note(new_messages)
+            except Exception:
+                logger.exception("chat_panel: could not record chat note on task")
         self._persisted_message_count = len(conv.messages)
+
+    def _record_chat_note(self, new_messages: list) -> None:
+        """Append a single timeline note summarising the latest exchange."""
+        if self._task_manager is None:
+            return
+        user_msgs = [m for m in new_messages if m.role == "user"]
+        ai_msgs = [m for m in new_messages if m.role == "assistant"]
+        if not user_msgs and not ai_msgs:
+            return
+        if ai_msgs and ai_msgs[-1].content:
+            preview = ai_msgs[-1].content.strip().splitlines()[0][:120]
+            text = f"AI replied: {preview}"
+            kind = "ai_response"
+        elif user_msgs:
+            preview = user_msgs[-1].content.strip().splitlines()[0][:120]
+            text = f"You asked: {preview}"
+            kind = "user_message"
+        else:
+            return
+        self._task_manager.add_note(
+            kind,
+            text,
+            data={
+                "user_messages": len(user_msgs),
+                "ai_messages": len(ai_msgs),
+            },
+        )
 
     # ─── Conversation loading ───────────────────────────────────────
 
@@ -2898,6 +2964,73 @@ class ChatPanel(QWidget):
         # Scan project files for @mention
         self._refresh_project_files()
 
+    def set_event_bus(self, event_bus) -> None:
+        """Wire the chat panel into the task lifecycle.
+
+        Subscribes to ``task:changed`` so the chat panel automatically
+        switches to the task's conversation (creating one if needed)
+        and informs the context builder about the active task so the
+        system prompt is scoped accordingly.
+        """
+        from polyglot_ai.core.task_manager import (
+            EVT_TASK_CHANGED,
+            get_task_manager,
+        )
+
+        self._event_bus = event_bus
+        self._task_manager = get_task_manager()
+
+        def _on_task_changed(task=None, **_):
+            self._on_active_task_changed(task)
+
+        event_bus.subscribe(EVT_TASK_CHANGED, _on_task_changed)
+
+    def _on_active_task_changed(self, task) -> None:
+        """Switch the chat to the task's conversation and update the prompt.
+
+        - If the task already has a ``chat_session_id`` we load that
+          conversation.
+        - If not, we leave the current conversation alone but bind the
+          next-created conversation to the task (handled in
+          ``_save_current_conversation``).
+        - Either way we hand the task off to the context builder so the
+          system prompt block at the top reflects the new task.
+        """
+        if self._context_builder is not None:
+            try:
+                self._context_builder.set_active_task(task)
+            except Exception:
+                logger.exception("chat_panel: failed to set active task on context builder")
+
+        self._active_task = task
+        if task is None:
+            return
+
+        session_id = getattr(task, "chat_session_id", None)
+        if session_id:
+            try:
+                conv_id = int(session_id)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "chat_panel: task %s has non-integer chat_session_id %r",
+                    getattr(task, "id", "?"),
+                    session_id,
+                )
+                return
+
+            # Guard: if the current conversation is ALREADY this task's
+            # session, skip the reload. Otherwise we'd race with
+            # ``_persist_conversation`` which calls update_active()
+            # (fires task:changed) BEFORE it finishes inserting the new
+            # messages, causing the UI to briefly reload an empty
+            # conversation and drop the assistant reply the user just saw.
+            if self._current_conversation is not None and self._current_conversation.id == conv_id:
+                return
+
+            from polyglot_ai.core.async_utils import safe_task
+
+            safe_task(self._load_conversation(conv_id), name="task_conv_load")
+
     def _refresh_project_files(self) -> None:
         """Scan project for files and feed to @mention popup."""
         project_root = self._get_project_root()
@@ -3192,170 +3325,6 @@ class ChatPanel(QWidget):
         if hasattr(window, "terminal_panel"):
             window.terminal_panel.setFocus()
 
-
-class GitHubConnectDialog(QDialog):
-    """Professional GitHub connection consent dialog."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._token = ""
-        self.setWindowTitle("Connect GitHub")
-        self.setFixedSize(440, 560)
-        self.setStyleSheet("QDialog { background-color: #202020; }")
-
-        # Request dark title bar on GNOME/KDE via Qt platform hints
-        try:
-            from PyQt6.QtGui import QPalette
-
-            dark_palette = self.palette()
-            dark_palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
-            dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#e0e0e0"))
-            dark_palette.setColor(QPalette.ColorRole.Button, QColor("#333333"))
-            dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#cccccc"))
-            self.setPalette(dark_palette)
-        except Exception:
-            pass
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 16, 24, 24)
-        layout.setSpacing(0)
-
-        # Close button row
-        close_row = QHBoxLayout()
-        close_row.addStretch()
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #666; font-size: 16px; "
-            "border: none; border-radius: 14px; }"
-            "QPushButton:hover { background: #333; color: #ccc; }"
-        )
-        close_btn.clicked.connect(self.reject)
-        close_row.addWidget(close_btn)
-        layout.addLayout(close_row)
-
-        # Icons — drawn as colored circles with letters
-        icons_row = QHBoxLayout()
-        icons_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icons_row.setSpacing(10)
-
-        from polyglot_ai.ui.panels.chat_message import AvatarWidget
-
-        icons_row.addWidget(AvatarWidget("C", "#10a37f"))  # Codex
-        dots = QLabel("···")
-        dots.setStyleSheet("color: #555; font-size: 18px; background: transparent;")
-        dots.setFixedWidth(30)
-        dots.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icons_row.addWidget(dots)
-        icons_row.addWidget(AvatarWidget("G", "#8b5cf6"))  # GitHub
-        layout.addLayout(icons_row)
-
-        layout.addSpacing(14)
-
-        # Title
-        title = QLabel("Connect GitHub")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 17px; font-weight: bold; color: #e8e8e8; background: transparent;"
-        )
-        layout.addWidget(title)
-
-        subtitle = QLabel("via MCP Server")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("font-size: 11px; color: #666; background: transparent;")
-        layout.addWidget(subtitle)
-
-        layout.addSpacing(18)
-
-        # Info sections — simple divider-separated list, not cards
-        info_items = [
-            (
-                "Permissions always respected",
-                "Access is limited to permissions you explicitly grant.\n"
-                "Disable access anytime to revoke.",
-            ),
-            (
-                "You're in control",
-                "Your token is stored locally in your system keyring.\n"
-                "It is never sent to any third party.",
-            ),
-            (
-                "Connectors may introduce risk",
-                "Use fine-grained tokens with minimal scopes.\n"
-                "Only grant access to repos you need.",
-            ),
-        ]
-        for i, (heading, desc) in enumerate(info_items):
-            if i > 0:
-                sep = QWidget()
-                sep.setFixedHeight(1)
-                sep.setStyleSheet("background-color: #333;")
-                layout.addWidget(sep)
-
-            section = QWidget()
-            section.setStyleSheet("background: transparent;")
-            sec_layout = QVBoxLayout(section)
-            sec_layout.setContentsMargins(4, 10, 4, 10)
-            sec_layout.setSpacing(3)
-
-            h = QLabel(heading)
-            h.setStyleSheet(
-                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent;"
-            )
-            sec_layout.addWidget(h)
-
-            d = QLabel(desc)
-            d.setWordWrap(True)
-            d.setMinimumHeight(36)
-            d.setStyleSheet("font-size: 12px; color: #9a9a9a; background: transparent;")
-            sec_layout.addWidget(d)
-
-            layout.addWidget(section)
-
-        layout.addSpacing(14)
-
-        # Token input
-        self._token_input = QLineEdit()
-        self._token_input.setPlaceholderText("Paste your token here...")
-        self._token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._token_input.setStyleSheet(
-            "QLineEdit { background: #161616; color: #d4d4d4; border: 1px solid #3a3a3a; "
-            "border-radius: 10px; padding: 10px 14px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #555; }"
-        )
-        layout.addWidget(self._token_input)
-
-        layout.addSpacing(14)
-
-        # Connect button — full width pill
-        connect_btn = QPushButton("Continue to GitHub  ↗")
-        connect_btn.setFixedHeight(44)
-        connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        connect_btn.setStyleSheet(
-            "QPushButton { background-color: #f0f0f0; color: #111; font-size: 14px; "
-            "font-weight: 600; border: none; border-radius: 22px; "
-            "font-family: -apple-system, 'Segoe UI', sans-serif; }"
-            "QPushButton:hover { background-color: #fff; }"
-            "QPushButton:pressed { background-color: #ddd; }"
-        )
-        connect_btn.clicked.connect(self._on_connect)
-        layout.addWidget(connect_btn)
-
-    def _on_connect(self) -> None:
-        token = self._token_input.text().strip()
-        if not token:
-            self._token_input.setStyleSheet(
-                "QLineEdit { background: #161616; color: #d4d4d4; "
-                "border: 1px solid #d32f2f; border-radius: 10px; "
-                "padding: 10px 14px; font-size: 13px; }"
-            )
-            return
-        self._token = token
-        self.accept()
-
-    def get_token(self) -> str:
-        return self._token
 
 
 class FileMentionPopup(QWidget):

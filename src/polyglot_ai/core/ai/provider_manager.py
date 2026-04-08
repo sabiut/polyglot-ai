@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -81,21 +82,40 @@ class ProviderManager:
         return None
 
     async def get_all_models(self) -> list[ModelEntry]:
-        """Fetch models from all registered providers."""
+        """Fetch models from all registered providers in parallel.
+
+        A slow provider must not block the rest of the dropdown from
+        populating — run every ``list_models()`` concurrently and treat
+        failures as empty lists so one bad provider can't poison the
+        whole fetch. Ordering is preserved to match registration order
+        so the dropdown is stable across refreshes.
+        """
+        providers = list(self._providers.values())
+        if not providers:
+            return []
+
+        results = await asyncio.gather(
+            *(p.list_models() for p in providers),
+            return_exceptions=True,
+        )
+
         entries: list[ModelEntry] = []
-        for provider in self._providers.values():
-            try:
-                models = await provider.list_models()
-                for model_id in models:
-                    entries.append(
-                        ModelEntry(
-                            provider_name=provider.name,
-                            provider_display=provider.display_name,
-                            model_id=model_id,
-                        )
+        for provider, result in zip(providers, results):
+            if isinstance(result, BaseException):
+                logger.exception(
+                    "Failed to fetch models from %s",
+                    provider.display_name,
+                    exc_info=result,
+                )
+                continue
+            for model_id in result:
+                entries.append(
+                    ModelEntry(
+                        provider_name=provider.name,
+                        provider_display=provider.display_name,
+                        model_id=model_id,
                     )
-            except Exception:
-                logger.exception("Failed to fetch models from %s", provider.display_name)
+                )
         return entries
 
     @property

@@ -1106,34 +1106,40 @@ class _DatabaseWindow(QWidget):
         return " AND ".join(conditions) if conditions else ""
 
     def _execute_write(self, sql: str, success_msg: str) -> None:
-        """Execute a write query and refresh the table."""
-        import asyncio
+        """Execute a write query and refresh the table.
 
+        qasync owns the running event loop, so ``run_until_complete``
+        would always raise ``RuntimeError`` from a Qt slot — the old
+        try/except was effectively using the ``RuntimeError`` branch
+        every time and the sync path was dead code. Stick to one model:
+        schedule the work as an async task and update the UI when it
+        finishes. The callbacks run on the qasync loop which in this
+        app is the GUI thread, so ``setText`` is safe without an extra
+        marshal.
+        """
         self._results_status.setText("Executing...")
-        try:
-            loop = asyncio.get_event_loop()
-            result = loop.run_until_complete(self._conn.execute_query(sql))
+
+        table_name = self._current_table_name
+
+        async def do_write() -> None:
+            # Catch everything: a driver crash, a lost connection, or
+            # asyncio cancellation would otherwise get swallowed by
+            # ``safe_task`` and leave the status bar stuck on
+            # "Executing...". Surface the error to the user directly.
+            try:
+                result = await self._conn.execute_query(sql)
+            except Exception as exc:
+                logger.exception("db_write failed")
+                self._results_status.setText(f"Error: {exc}")
+                return
             if result.error:
                 self._results_status.setText(f"Error: {result.error[:80]}")
-            else:
-                self._results_status.setText(success_msg)
-                # Refresh the table view
-                if self._current_table_name:
-                    self._query_table(self._current_table_name)
-        except RuntimeError:
+                return
+            self._results_status.setText(success_msg)
+            if table_name:
+                self._query_table(table_name)
 
-            async def do_write():
-                result = await self._conn.execute_query(sql)
-                if result.error:
-                    QTimer.singleShot(
-                        0, lambda: self._results_status.setText(f"Error: {result.error[:80]}")
-                    )
-                else:
-                    QTimer.singleShot(0, lambda: self._results_status.setText(success_msg))
-                    if self._current_table_name:
-                        QTimer.singleShot(100, lambda: self._query_table(self._current_table_name))
-
-            safe_task(do_write(), name="db_write")
+        safe_task(do_write(), name="db_write")
 
 
 class _InsertRowDialog(QDialog):

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.core.tasks import CIRunSnapshot, TaskKind
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,16 @@ class CICDPanel(QWidget):
         self._project_root: Path | None = None
         self._runs_data: list[dict] = []
         self._gh_available: bool | None = None
+        # Task wiring — populated by set_event_bus(). When the active
+        # task has a branch and the filter toggle is on, the runs list
+        # is filtered to that branch only.
+        self._task_manager = None
+        self._filter_to_task = True
+        self._active_task_branch: str | None = None
+        # Cached list of currently-visible runs (post-filter). Used by
+        # row-based handlers so selection still works when the filter
+        # is on and table row N is no longer ``_runs_data[N]``.
+        self._visible_runs_cache: list[dict] = []
 
         self._setup_ui()
 
@@ -58,6 +69,27 @@ class CICDPanel(QWidget):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._auto_refresh)
         self._refresh_timer.start(30_000)
+
+    def set_event_bus(self, event_bus) -> None:
+        """Subscribe to task lifecycle events.
+
+        Tracks the active task's branch so the runs table can be
+        scoped to that branch and the latest CI status can be
+        recorded back on the task.
+        """
+        from polyglot_ai.core.task_manager import EVT_TASK_CHANGED, get_task_manager
+
+        self._task_manager = get_task_manager()
+
+        def _on_task_changed(task=None, **_):
+            self._active_task_branch = getattr(task, "branch", None) if task is not None else None
+            # Re-render whatever's already loaded so the filter applies
+            # immediately, then schedule a fresh fetch.
+            self._render_runs()
+            if self._project_root and self.isVisible():
+                QTimer.singleShot(50, self._refresh_runs)
+
+        event_bus.subscribe(EVT_TASK_CHANGED, _on_task_changed)
 
     def showEvent(self, event) -> None:
         """Refresh when tab becomes visible."""
@@ -138,6 +170,8 @@ class CICDPanel(QWidget):
         )
         self._runs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._runs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._runs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
         self._runs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._runs_table.setColumnWidth(0, 50)
         self._runs_table.setColumnWidth(2, 120)
@@ -286,8 +320,30 @@ class CICDPanel(QWidget):
             self._status_label.setText("  Error: Failed to parse gh output")
             return
 
-        self._runs_table.setRowCount(len(self._runs_data))
-        for row, run in enumerate(self._runs_data):
+        self._render_runs()
+        # Now that we have fresh data, push the latest CI status for the
+        # active task's branch onto the task itself so other panels (the
+        # Tasks sidebar, the Today page) reflect the new state.
+        self._record_ci_on_task()
+
+    def _visible_runs(self) -> list[dict]:
+        """Return the subset of runs that should be displayed.
+
+        When ``_filter_to_task`` is on AND there's an active task branch,
+        only runs whose ``headBranch`` matches the task's branch are
+        shown. Otherwise the full list is returned.
+        """
+        if self._filter_to_task and self._active_task_branch:
+            return [r for r in self._runs_data if r.get("headBranch") == self._active_task_branch]
+        return self._runs_data
+
+    def _render_runs(self) -> None:
+        """Re-render the runs table from ``_runs_data`` (no fetch)."""
+        rows = self._visible_runs()
+        # Cache so row-based handlers stay correct even when filtered.
+        self._visible_runs_cache = rows
+        self._runs_table.setRowCount(len(rows))
+        for row_idx, run in enumerate(rows):
             status = run.get("conclusion") or run.get("status", "unknown")
             icon, color = _STATUS_MAP.get(status, ("?", tc.get("text_muted")))
 
@@ -295,33 +351,157 @@ class CICDPanel(QWidget):
             status_item = QTableWidgetItem(icon)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(self._make_color(color))
-            self._runs_table.setItem(row, 0, status_item)
+            self._runs_table.setItem(row_idx, 0, status_item)
 
             # Workflow name
-            self._runs_table.setItem(row, 1, QTableWidgetItem(run.get("name", "")))
+            self._runs_table.setItem(row_idx, 1, QTableWidgetItem(run.get("name", "")))
 
             # Branch
-            self._runs_table.setItem(row, 2, QTableWidgetItem(run.get("headBranch", "")))
+            self._runs_table.setItem(row_idx, 2, QTableWidgetItem(run.get("headBranch", "")))
 
             # Time
             created = run.get("createdAt", "")
             display_time = self._format_time(created)
-            self._runs_table.setItem(row, 3, QTableWidgetItem(display_time))
+            self._runs_table.setItem(row_idx, 3, QTableWidgetItem(display_time))
 
             # Conclusion
             conclusion = run.get("conclusion") or run.get("status", "")
             conc_item = QTableWidgetItem(conclusion)
             conc_item.setForeground(self._make_color(color))
-            self._runs_table.setItem(row, 4, conc_item)
+            self._runs_table.setItem(row_idx, 4, conc_item)
 
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        self._status_label.setText(f"  Last refreshed: {now} | {len(self._runs_data)} runs")
+        scope = ""
+        if self._filter_to_task and self._active_task_branch:
+            scope = f" (filtered to '{self._active_task_branch}')"
+        self._status_label.setText(f"  Last refreshed: {now} | {len(rows)} runs{scope}")
 
-    def _on_run_selected(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
-        if row < 0 or row >= len(self._runs_data):
+    def _record_ci_on_task(self) -> None:
+        """Update the active task's last_ci_run with the most recent run
+        for that task's branch."""
+        if (
+            self._task_manager is None
+            or self._task_manager.active is None
+            or not self._active_task_branch
+        ):
+            return
+        # Find the newest run on that branch.
+        branch_runs = [
+            r for r in self._runs_data if r.get("headBranch") == self._active_task_branch
+        ]
+        if not branch_runs:
+            return
+        newest = branch_runs[0]  # gh run list returns newest first
+        try:
+            import time as _time
+
+            status = newest.get("conclusion") or newest.get("status", "")
+            snapshot = CIRunSnapshot(
+                status=status,
+                workflow=newest.get("name", ""),
+                url="",  # gh run list doesn't include htmlUrl in our query
+                timestamp=_time.time(),
+            )
+            existing = self._task_manager.active.last_ci_run
+            self._task_manager.update_active(last_ci_run=snapshot)
+            # Only add a timeline note when the status actually changes,
+            # otherwise the auto-refresh would spam the timeline every 30s.
+            if existing is None or existing.status != status:
+                self._task_manager.add_note(
+                    "ci_run",
+                    f"CI {status}: {newest.get('name', '')}",
+                    data={
+                        "status": status,
+                        "workflow": newest.get("name", ""),
+                        "branch": self._active_task_branch,
+                    },
+                )
+        except Exception:
+            logger.exception("cicd_panel: could not record CI status on task")
+
+    def _on_runs_context_menu(self, pos) -> None:
+        """Show a right-click menu on the runs table.
+
+        For failing/cancelled runs the menu offers a "Debug this
+        failure" action that creates an Incident task pre-populated
+        with the run context, then activates it.
+        """
+        from PyQt6.QtWidgets import QMenu
+
+        item = self._runs_table.itemAt(pos)
+        if item is None:
+            return
+        row = item.row()
+        rows = self._visible_runs_cache or self._runs_data
+        if row < 0 or row >= len(rows):
+            return
+        run = rows[row]
+
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
+            "QMenu::item { padding: 5px 18px; }"
+            "QMenu::item:selected { background: #094771; }"
+        )
+        view_action = menu.addAction("View jobs / logs")
+        debug_action = None
+        conclusion = run.get("conclusion") or run.get("status", "")
+        if conclusion in ("failure", "cancelled", "timed_out", "startup_failure"):
+            debug_action = menu.addAction("✨ Debug this failure as a new task")
+
+        chosen = menu.exec(self._runs_table.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen == view_action:
+            self._runs_table.selectRow(row)
+        elif debug_action is not None and chosen == debug_action:
+            self._create_incident_from_run(run)
+
+    def _create_incident_from_run(self, run: dict) -> None:
+        """Create an Incident task pre-populated with the failing run's context."""
+        if self._task_manager is None or self._task_manager.project_root is None:
             return
 
-        run = self._runs_data[row]
+        workflow = run.get("name", "(unnamed workflow)")
+        branch = run.get("headBranch", "")
+        run_id = run.get("databaseId")
+        conclusion = run.get("conclusion") or run.get("status", "")
+        title = f"Debug CI failure: {workflow}"[:120]
+        description_parts = [
+            f"Workflow: **{workflow}**",
+            f"Branch: `{branch}`",
+            f"Status: `{conclusion}`",
+        ]
+        if run_id:
+            description_parts.append(f"Run id: `{run_id}`")
+        description_parts.append("")
+        description_parts.append(
+            "Investigate the failing job(s), reproduce locally, and propose a fix."
+        )
+        description = "\n".join(description_parts)
+        try:
+            new_task = self._task_manager.create_task(TaskKind.INCIDENT, title, description)
+            if new_task is not None and branch:
+                # Bind the failing branch so the panel filter will pick
+                # this run up under the new task.
+                self._task_manager.update_active(branch=branch)
+                self._task_manager.add_note(
+                    "ci_failure_imported",
+                    f"Imported from CI run #{run_id} ({conclusion})",
+                    data={"run_id": run_id, "workflow": workflow, "branch": branch},
+                )
+        except Exception:
+            logger.exception("cicd_panel: could not create incident task")
+
+    def _on_run_selected(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
+        # Use the visible-runs cache so selection still maps correctly
+        # when a task filter is active and table row N is no longer
+        # the same as ``_runs_data[N]``.
+        rows = self._visible_runs_cache or self._runs_data
+        if row < 0 or row >= len(rows):
+            return
+
+        run = rows[row]
         run_id = run.get("databaseId")
         if not run_id:
             return

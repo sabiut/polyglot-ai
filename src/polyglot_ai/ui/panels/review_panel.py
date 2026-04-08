@@ -56,6 +56,8 @@ class ReviewPanel(QWidget):
         self._provider_manager = None
         self._project_root: str = ""
         self._current_result: ReviewResult | None = None
+        # Set later via set_event_bus() once init_task_manager has run.
+        self._task_manager = None
 
         self.setStyleSheet("background-color: #1e1e1e;")
 
@@ -193,6 +195,28 @@ class ReviewPanel(QWidget):
     def set_project_root(self, path: str) -> None:
         self._project_root = path
 
+    def set_event_bus(self, event_bus) -> None:
+        """Subscribe to task lifecycle events.
+
+        When the active task changes and has a branch, default the
+        review mode dropdown to "Branch vs Main" so the natural
+        workflow ("review what I've done on this task") is one click.
+        """
+        from polyglot_ai.core.task_manager import EVT_TASK_CHANGED, get_task_manager
+
+        self._task_manager = get_task_manager()
+
+        def _on_task_changed(task=None, **_):
+            if task is not None and getattr(task, "branch", None):
+                # 2 = "Branch vs Main" — keep in sync with the
+                # mode_combo.addItemWithDesc() ordering above.
+                try:
+                    self._mode_combo.setCurrentIndex(2)
+                except Exception:
+                    logger.debug("review_panel: could not preset mode for task", exc_info=True)
+
+        event_bus.subscribe(EVT_TASK_CHANGED, _on_task_changed)
+
     def _on_run_review(self) -> None:
         if not self._project_root:
             self._show_message("Open a project first.", "#f44747")
@@ -271,6 +295,52 @@ class ReviewPanel(QWidget):
 
         self._run_btn.setEnabled(True)
         self._run_btn.setText("▶ Run Review")
+
+        # Record on the active task so the timeline reflects the review
+        # and the AI's system prompt knows the latest review outcome.
+        self._record_review_on_task(result)
+
+    def _record_review_on_task(self, result) -> None:
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        try:
+            findings = list(getattr(result, "findings", []) or [])
+            critical = sum(
+                1
+                for f in findings
+                if str(getattr(getattr(f, "severity", ""), "value", "")) == "critical"
+            )
+            high = sum(
+                1
+                for f in findings
+                if str(getattr(getattr(f, "severity", ""), "value", "")) == "high"
+            )
+            status = getattr(result, "status", "ok")
+            if status == "failed":
+                text = "Review failed"
+                kind = "review_failed"
+            elif not findings:
+                text = "Review clean — no findings"
+                kind = "review_clean"
+            else:
+                text = f"Review: {len(findings)} finding(s)"
+                if critical:
+                    text += f" · {critical} critical"
+                if high:
+                    text += f" · {high} high"
+                kind = "review_findings"
+            self._task_manager.add_note(
+                kind,
+                text,
+                data={
+                    "findings": len(findings),
+                    "critical": critical,
+                    "high": high,
+                    "status": status,
+                },
+            )
+        except Exception:
+            logger.exception("review_panel: could not record review on task")
 
     def _clear_results(self) -> None:
         while self._content_layout.count():

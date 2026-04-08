@@ -20,12 +20,37 @@ class ContextBuilder:
         self._project_root = project_root
         self._indexer = None
         self._sequential_thinking_tool: str | None = None
+        # Active task context — set via set_active_task() so the system
+        # prompt can include "you're helping with task X". Kept as a
+        # plain dict so this module doesn't have a hard dependency on
+        # the task module (and tests can pass any dict).
+        self._active_task: dict | None = None
 
     def set_project_root(self, root: Path | str) -> None:
         self._project_root = Path(root) if isinstance(root, str) else root
 
     def set_indexer(self, indexer) -> None:
         self._indexer = indexer
+
+    def set_active_task(self, task) -> None:
+        """Inject the active Task into the system prompt as context.
+
+        Pass ``None`` to clear the task block. Accepts the
+        ``polyglot_ai.core.tasks.Task`` dataclass but only reads
+        attributes by name, so any duck-typed object works (useful
+        for tests).
+        """
+        if task is None:
+            self._active_task = None
+            return
+        self._active_task = {
+            "kind": getattr(getattr(task, "kind", None), "value", "") or "",
+            "title": getattr(task, "title", "") or "",
+            "description": getattr(task, "description", "") or "",
+            "branch": getattr(task, "branch", None),
+            "state": getattr(getattr(task, "state", None), "value", "") or "",
+            "modified_files": list(getattr(task, "modified_files", []) or []),
+        }
 
     def set_available_tools(self, tool_names: list[str]) -> None:
         """Inform the builder which tool names are currently registered.
@@ -79,7 +104,40 @@ class ContextBuilder:
         return "\n".join(parts)
 
     def build_system_prompt(self, custom_prompt: str = "") -> str:
-        parts = [
+        parts: list[str] = []
+
+        # If the user is working on a specific task, lead with it so the
+        # AI's responses stay scoped. Goes BEFORE the boilerplate so the
+        # task framing is the first thing the model reads.
+        if self._active_task:
+            t = self._active_task
+            parts.append("ACTIVE TASK")
+            parts.append(f"Title: {t['title']}")
+            if t["kind"]:
+                parts.append(f"Kind:  {t['kind']}")
+            if t["state"]:
+                parts.append(f"State: {t['state']}")
+            if t["branch"]:
+                parts.append(f"Branch: {t['branch']}")
+            if t["description"]:
+                parts.append("")
+                parts.append("Description:")
+                parts.append(t["description"])
+            if t["modified_files"]:
+                parts.append("")
+                parts.append("Files touched so far on this task:")
+                for f in t["modified_files"][:20]:
+                    parts.append(f"- {f}")
+                if len(t["modified_files"]) > 20:
+                    parts.append(f"... and {len(t['modified_files']) - 20} more")
+            parts.append("")
+            parts.append(
+                "Stay scoped to this task. If the user asks something off-topic, "
+                "answer briefly and offer to create a new task for it."
+            )
+            parts.append("")
+
+        parts += [
             "You are a coding assistant built into a desktop IDE.",
             "The user's project files are included below — you can read everything.",
             "",

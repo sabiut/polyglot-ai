@@ -103,6 +103,10 @@ class ActivityBarButton(QWidget):
             self._draw_kubernetes_icon(painter, ox, oy)
         elif self._icon_type == "tests":
             self._draw_tests_icon(painter, ox, oy)
+        elif self._icon_type == "tasks":
+            self._draw_tasks_icon(painter, ox, oy)
+        elif self._icon_type == "today":
+            self._draw_today_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -246,6 +250,32 @@ class ActivityBarButton(QWidget):
         # Middle stripe
         p.drawArc(QRectF(ox + 4, oy + 9, 16, 6), 180 * 16, 180 * 16)
 
+    def _draw_today_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Today — sun-with-rays glyph."""
+        cx, cy = ox + 12, oy + 12
+        # Central disc
+        p.drawEllipse(QRectF(cx - 4, cy - 4, 8, 8))
+        # 8 rays
+        for i in range(8):
+            angle = (math.pi / 4) * i
+            x1 = cx + 7 * math.cos(angle)
+            y1 = cy + 7 * math.sin(angle)
+            x2 = cx + 11 * math.cos(angle)
+            y2 = cy + 11 * math.sin(angle)
+            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+    def _draw_tasks_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Tasks — checklist clipboard glyph."""
+        # Clipboard outline
+        p.drawRect(QRectF(ox + 4, oy + 4, 16, 18))
+        # Clip at the top
+        p.drawRect(QRectF(ox + 9, oy + 1, 6, 4))
+        # Three checklist rows: a checkbox + a line
+        for i, y in enumerate((9, 13, 17)):
+            p.drawRect(QRectF(ox + 7, oy + y, 3, 3))
+            p.drawLine(QPointF(ox + 12, oy + y + 1.5), QPointF(ox + 18, oy + y + 1.5))
+            _ = i
+
     def _draw_tests_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Tests — beaker/flask glyph."""
         # Flask outline: narrow neck on top widening to a rounded base.
@@ -334,6 +364,8 @@ class ActivityBar(QWidget):
 
         # Top icons
         top_items = [
+            ("today", "Today (Ctrl+Shift+H)"),
+            ("tasks", "Tasks (Ctrl+Shift+J)"),
             ("files", "Explorer (Ctrl+Shift+E)"),
             ("search", "Search (Ctrl+Shift+F)"),
             ("git", "Source Control (Ctrl+Shift+G)"),
