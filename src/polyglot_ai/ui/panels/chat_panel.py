@@ -3325,7 +3325,6 @@ class ChatPanel(QWidget):
             window.terminal_panel.setFocus()
 
 
-
 class FileMentionPopup(QWidget):
     """Popup for @file mention fuzzy search."""
 

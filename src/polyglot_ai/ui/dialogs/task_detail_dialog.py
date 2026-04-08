@@ -295,15 +295,11 @@ class TaskDetailDialog(QDialog):
             row.setSpacing(8)
             icon = QLabel(glyph)
             icon.setFixedWidth(16)
-            icon.setStyleSheet(
-                f"color: {colour}; font-size: 13px; background: transparent;"
-            )
+            icon.setStyleSheet(f"color: {colour}; font-size: 13px; background: transparent;")
             row.addWidget(icon)
             text_colour = "#666" if step.status in ("done", "skipped") else "#d0d0d0"
             text = QLabel(step.text or "(untitled step)")
-            text.setStyleSheet(
-                f"color: {text_colour}; font-size: 12px; background: transparent;"
-            )
+            text.setStyleSheet(f"color: {text_colour}; font-size: 12px; background: transparent;")
             text.setWordWrap(True)
             row.addWidget(text, stretch=1)
             v.addLayout(row)
