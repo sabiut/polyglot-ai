@@ -125,6 +125,35 @@ class ReviewResult:
     error: str | None = None
     truncated_files: list[str] = field(default_factory=list)
 
+    # ── Derived counters used by the review panel ──────────────────
+    # Note: these were historically indented under ``PRSummary`` by
+    # mistake, which made ``result.critical_count`` raise
+    # ``AttributeError`` at render time even though the field loop
+    # in the panel was correct. They belong here because they read
+    # ``self.findings`` which only exists on this class.
+
+    @property
+    def critical_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
+
+    @property
+    def high_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.HIGH)
+
+    @property
+    def by_severity(self) -> dict[str, list[ReviewFinding]]:
+        grouped: dict[str, list[ReviewFinding]] = {}
+        for f in self.findings:
+            grouped.setdefault(f.severity.value, []).append(f)
+        return grouped
+
+    @property
+    def by_file(self) -> dict[str, list[ReviewFinding]]:
+        grouped: dict[str, list[ReviewFinding]] = {}
+        for f in self.findings:
+            grouped.setdefault(f.file, []).append(f)
+        return grouped
+
 
 @dataclass
 class PRSummary:
@@ -228,25 +257,3 @@ class PRSummary:
             return None
         out_parts.append(template[cursor:])
         return "".join(out_parts)
-
-    @property
-    def critical_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
-
-    @property
-    def high_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == Severity.HIGH)
-
-    @property
-    def by_severity(self) -> dict[str, list[ReviewFinding]]:
-        result: dict[str, list[ReviewFinding]] = {}
-        for f in self.findings:
-            result.setdefault(f.severity.value, []).append(f)
-        return result
-
-    @property
-    def by_file(self) -> dict[str, list[ReviewFinding]]:
-        result: dict[str, list[ReviewFinding]] = {}
-        for f in self.findings:
-            result.setdefault(f.file, []).append(f)
-        return result
