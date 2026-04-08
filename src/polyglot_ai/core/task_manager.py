@@ -16,7 +16,7 @@ from pathlib import Path
 
 from polyglot_ai.core.bridge import EventBus
 from polyglot_ai.core.task_store import TaskStore, get_task_store
-from polyglot_ai.core.tasks import Task, TaskKind, TaskNote, TaskState
+from polyglot_ai.core.tasks import PlanStep, Task, TaskKind, TaskNote, TaskState
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +47,24 @@ class TaskManager:
         self,
         store: TaskStore | None = None,
         event_bus: EventBus | None = None,
+        plan_generator=None,
     ) -> None:
         self._store = store or get_task_store()
         self._bus = event_bus
         self._project_root: Path | None = None
         self._active_task: Task | None = None
+        # Optional AI plan generator. Injected from app.py once a
+        # provider manager exists. Kept loose-typed so this module
+        # has no hard dependency on the AI layer.
+        self._plan_generator = plan_generator
+
+    def set_plan_generator(self, plan_generator) -> None:
+        """Late-bind the plan generator (used by ``app.py``)."""
+        self._plan_generator = plan_generator
+
+    @property
+    def plan_generator(self):
+        return self._plan_generator
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -140,11 +153,27 @@ class TaskManager:
         self._active_task = task
         self._emit(EVT_TASK_CHANGED, task=task)
 
-    def update_state(self, new_state: TaskState) -> None:
+    def update_state(
+        self,
+        new_state: TaskState,
+        *,
+        reason: str = "",
+        source: str = "user",
+    ) -> None:
         """Transition the active task to a new state.
 
         Emits both ``task:state_changed`` (so UI can animate) and
         ``task:list_changed`` (so the sidebar regrouping refreshes).
+
+        ``reason`` is stored on the timeline note (useful for
+        blocking/unblocking decisions). ``source`` tags the note as
+        ``"user"``, ``"ai"``, ``"automation"``, or ``"system"`` so
+        the timeline can later be filtered by origin. Defaults to
+        ``"user"`` because explicit state changes almost always come
+        from a user click.
+
+        Leaving BLOCKED clears ``blocked_reason`` so a stale reason
+        doesn't linger on the card after the user unparks the task.
         """
         task = self._active_task
         if task is None:
@@ -152,21 +181,33 @@ class TaskManager:
         old_state = task.state
         if old_state == new_state:
             return
+        prev_blocked_reason = task.blocked_reason
         task.state = new_state
+        # If we're moving OUT of BLOCKED, clear the reason so the
+        # card stops showing it. The transition note below still
+        # mentions the reason we came from.
+        if old_state == TaskState.BLOCKED and new_state != TaskState.BLOCKED:
+            task.blocked_reason = ""
         # Touch BEFORE building the note so the note's timestamp
         # reflects *this* mutation, not the previous one.
         task.touch()
+        note_text = f"State: {old_state.value} → {new_state.value}"
+        if reason:
+            note_text += f" ({reason})"
         task.notes.append(
             TaskNote(
                 timestamp=task.updated_at,
                 kind="state_changed",
-                text=f"State: {old_state.value} → {new_state.value}",
-                data={"from": old_state.value, "to": new_state.value},
+                text=note_text,
+                data={"from": old_state.value, "to": new_state.value, "reason": reason},
+                source=source,
+                category="workflow",
             )
         )
         if not self._store.save(task):
             # Roll back the in-memory change so the UI and disk agree.
             task.state = old_state
+            task.blocked_reason = prev_blocked_reason
             task.notes.pop()
             self._emit(EVT_TASK_WRITE_FAILED, operation="state_change", task_id=task.id)
             return
@@ -177,6 +218,52 @@ class TaskManager:
             new_state=new_state,
         )
         self._emit(EVT_TASK_LIST_CHANGED)
+
+    def block_task(self, reason: str, *, source: str = "user") -> bool:
+        """Move the active task to BLOCKED and capture *why*.
+
+        Refuses an empty reason — the whole point of this helper is
+        that BLOCKED without a reason is useless. Returns ``True``
+        on success, ``False`` if there is no active task, the
+        reason is empty, or the store write failed. The caller
+        should surface ``False`` to the user.
+        """
+        reason = (reason or "").strip()
+        if not reason:
+            logger.warning("task_manager: block_task refused — empty reason")
+            return False
+        task = self._active_task
+        if task is None:
+            return False
+        old_state = task.state
+        prev_blocked_reason = task.blocked_reason
+        task.blocked_reason = reason
+        task.state = TaskState.BLOCKED
+        task.touch()
+        task.notes.append(
+            TaskNote(
+                timestamp=task.updated_at,
+                kind="blocked",
+                text=f"Blocked: {reason}",
+                data={"from": old_state.value, "reason": reason},
+                source=source,
+                category="workflow",
+            )
+        )
+        if not self._store.save(task):
+            task.state = old_state
+            task.blocked_reason = prev_blocked_reason
+            task.notes.pop()
+            self._emit(EVT_TASK_WRITE_FAILED, operation="block", task_id=task.id)
+            return False
+        self._emit(
+            EVT_TASK_STATE_CHANGED,
+            task=task,
+            old_state=old_state,
+            new_state=TaskState.BLOCKED,
+        )
+        self._emit(EVT_TASK_LIST_CHANGED)
+        return True
 
     def update_active(self, **fields) -> None:
         """Patch arbitrary fields on the active task and persist.
@@ -219,8 +306,49 @@ class TaskManager:
             return
         self._emit(EVT_TASK_CHANGED, task=task)
 
-    def add_note(self, kind: str, text: str, data: dict | None = None) -> None:
-        """Append a timeline event to the active task."""
+    def set_plan(self, steps: list[PlanStep]) -> bool:
+        """Replace the active task's plan with ``steps``.
+
+        Used by the AI plan generator. Kept separate from
+        :meth:`update_active` because ``plan`` is internal-only and
+        we don't want it on the field whitelist where any panel
+        could overwrite it. Returns ``True`` on success.
+        """
+        task = self._active_task
+        if task is None:
+            return False
+        previous_plan = list(task.plan)
+        prev_updated_at = task.updated_at
+        task.plan = list(steps)
+        task.touch()
+        if not self._store.save(task):
+            task.plan = previous_plan
+            task.updated_at = prev_updated_at
+            self._emit(EVT_TASK_WRITE_FAILED, operation="set_plan", task_id=task.id)
+            return False
+        # Drop a timeline note so the user can see when the plan was
+        # generated/regenerated. We use add_note here intentionally so
+        # the note timestamp is independent of the save we just did.
+        self.add_note("plan_generated", f"Plan generated ({len(steps)} steps)")
+        self._emit(EVT_TASK_CHANGED, task=task)
+        return True
+
+    def add_note(
+        self,
+        kind: str,
+        text: str,
+        data: dict | None = None,
+        *,
+        source: str = "system",
+        category: str = "",
+    ) -> None:
+        """Append a timeline event to the active task.
+
+        ``source`` / ``category`` tag the note for the future
+        timeline filter UI. Callers that don't care can omit both
+        and get the legacy defaults (``system`` / ``""``), so
+        existing call sites are unchanged.
+        """
         task = self._active_task
         if task is None:
             return
@@ -234,6 +362,8 @@ class TaskManager:
             kind=kind,
             text=text,
             data=data or {},
+            source=source,
+            category=category,
         )
         task.notes.append(note)
         if not self._store.save(task):

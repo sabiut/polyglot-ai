@@ -138,6 +138,62 @@ def test_active_task_block_precedes_boilerplate():
     assert active_idx < boilerplate_idx
 
 
+def test_plan_steps_render_in_prompt_when_present():
+    """Generated plan steps must reach the model — the chat needs to
+    see them so the user can ask "what's step 3?" without re-pasting.
+    """
+    plan = [
+        SimpleNamespace(text="Sketch the routes", status="done"),
+        SimpleNamespace(text="Stand up the templates", status="in_progress"),
+        SimpleNamespace(text="Wire the contact form", status="pending"),
+        SimpleNamespace(text="Write deployment notes", status="pending"),
+    ]
+    cb = ContextBuilder()
+    cb.set_active_task(
+        _task(
+            modified_files=[],
+            **{"description": ""},
+        )
+    )
+    # Re-set with plan attached (the helper doesn't take a plan kwarg).
+    task_with_plan = _task()
+    task_with_plan.plan = plan
+    cb.set_active_task(task_with_plan)
+
+    prompt = cb.build_system_prompt()
+    assert "Plan checklist:" in prompt
+    assert "Sketch the routes" in prompt
+    assert "Stand up the templates" in prompt
+    assert "Wire the contact form" in prompt
+    # Status glyphs render the right state.
+    assert "[x] Sketch the routes" in prompt
+    assert "[~] Stand up the templates" in prompt
+    assert "[ ] Wire the contact form" in prompt
+
+
+def test_plan_block_omitted_when_empty():
+    cb = ContextBuilder()
+    task = _task()
+    task.plan = []
+    cb.set_active_task(task)
+    assert "Plan checklist:" not in cb.build_system_prompt()
+
+
+def test_plan_skips_blank_text_entries():
+    cb = ContextBuilder()
+    task = _task()
+    task.plan = [
+        SimpleNamespace(text="", status="pending"),
+        SimpleNamespace(text="   ", status="pending"),
+        SimpleNamespace(text="Real step", status="pending"),
+    ]
+    cb.set_active_task(task)
+    prompt = cb.build_system_prompt()
+    assert "Real step" in prompt
+    # Only one numbered line for the real step.
+    assert prompt.count("[ ] Real step") == 1
+
+
 def test_stay_scoped_directive_only_appears_with_task():
     cb = ContextBuilder()
     empty = cb.build_system_prompt()

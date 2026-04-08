@@ -46,12 +46,26 @@ class TestApprovalPolicy:
     def test_web_search_auto_approved(self, registry):
         assert registry.is_auto_approved("web_search") is True
 
-    def test_file_write_requires_approval(self, registry):
-        assert registry.needs_approval("file_write") is True
-        assert registry.is_auto_approved("file_write") is False
+    def test_file_write_auto_approved(self, registry):
+        # File mutation tools are auto-approved — the chat contract
+        # is that the model must ask the user in plain text first
+        # (Claude-style conversational consent). See
+        # ``definitions.AUTO_APPROVE`` and the system prompt's
+        # MUTATION TOOLS rules.
+        assert registry.is_auto_approved("file_write") is True
+        assert registry.needs_approval("file_write") is False
 
-    def test_file_patch_requires_approval(self, registry):
-        assert registry.needs_approval("file_patch") is True
+    def test_file_patch_auto_approved(self, registry):
+        assert registry.is_auto_approved("file_patch") is True
+
+    def test_file_delete_auto_approved(self, registry):
+        assert registry.is_auto_approved("file_delete") is True
+
+    def test_dir_create_auto_approved(self, registry):
+        assert registry.is_auto_approved("dir_create") is True
+
+    def test_dir_delete_auto_approved(self, registry):
+        assert registry.is_auto_approved("dir_delete") is True
 
     def test_shell_exec_requires_approval(self, registry):
         assert registry.needs_approval("shell_exec") is True

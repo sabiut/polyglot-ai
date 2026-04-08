@@ -83,6 +83,121 @@ def test_store_save_and_get_round_trip(store, tmp_path):
     assert len(loaded.notes) == 2  # created + committed
 
 
+def test_store_full_field_round_trip(store, tmp_path):
+    """Exhaustive round-trip: every field on Task and TaskNote.
+
+    Pinned so that the next person adding a field can't silently
+    drop data by forgetting to extend ``save`` or ``_row_to_task``.
+    """
+    t = Task.new(str(tmp_path), TaskKind.FEATURE, "full round trip", "with description")
+    t.branch = "feat/full"
+    t.base_branch = "main"
+    t.pr_url = "https://example.com/pr/99"
+    t.pr_number = 99
+    t.chat_session_id = "1234"
+    t.plan = [
+        PlanStep(text="step 1", status="done", files=["a.py"], ai_notes="note"),
+        PlanStep(text="step 2", status="pending"),
+    ]
+    t.modified_files = ["a.py", "b.py", "c/d.py"]
+    t.last_test_run = TestRunSnapshot(passed=9, failed=1, skipped=2, timestamp=11.0)
+    t.last_ci_run = CIRunSnapshot(
+        status="failure", workflow="release.yml", url="https://ci/1", timestamp=22.0
+    )
+    t.notes.append(
+        TaskNote(
+            timestamp=33.0,
+            kind="committed",
+            text="commit abc",
+            data={"sha": "abc"},
+            source="user",
+            category="git",
+        )
+    )
+    t.acceptance_criteria = ["Tests green", "Docs updated", "Reviewer approved"]
+    t.blocked_reason = ""
+    t.priority = "high"
+    t.blocked_by = ["dep-1", "dep-2"]
+    t.state = TaskState.REVIEW
+    store.save(t)
+
+    loaded = store.get(t.id)
+    assert loaded is not None
+    assert loaded.id == t.id
+    assert loaded.project_root == t.project_root
+    assert loaded.kind == TaskKind.FEATURE
+    assert loaded.title == "full round trip"
+    assert loaded.description == "with description"
+    assert loaded.state == TaskState.REVIEW
+    assert loaded.branch == "feat/full"
+    assert loaded.base_branch == "main"
+    assert loaded.pr_url == "https://example.com/pr/99"
+    assert loaded.pr_number == 99
+    assert loaded.chat_session_id == "1234"
+    assert len(loaded.plan) == 2
+    assert loaded.plan[0].text == "step 1"
+    assert loaded.plan[0].status == "done"
+    assert loaded.plan[0].files == ["a.py"]
+    assert loaded.plan[0].ai_notes == "note"
+    assert loaded.modified_files == ["a.py", "b.py", "c/d.py"]
+    assert loaded.last_test_run.passed == 9
+    assert loaded.last_test_run.failed == 1
+    assert loaded.last_test_run.skipped == 2
+    assert loaded.last_ci_run.status == "failure"
+    assert loaded.last_ci_run.workflow == "release.yml"
+    assert loaded.last_ci_run.url == "https://ci/1"
+    committed_note = [n for n in loaded.notes if n.kind == "committed"][0]
+    assert committed_note.text == "commit abc"
+    assert committed_note.data == {"sha": "abc"}
+    assert committed_note.source == "user"
+    assert committed_note.category == "git"
+    assert loaded.acceptance_criteria == ["Tests green", "Docs updated", "Reviewer approved"]
+    assert loaded.priority == "high"
+    assert loaded.blocked_by == ["dep-1", "dep-2"]
+    assert loaded.blocked_reason == ""
+    assert loaded.created_at == t.created_at
+
+
+def test_store_defaults_for_missing_workflow_json(store, tmp_path):
+    """Opening a pre-v2 row (workflow_json NULL) falls back cleanly."""
+    import sqlite3
+
+    t = Task.new(str(tmp_path), TaskKind.CHORE, "legacy")
+    store.save(t)
+    # Simulate an old row that was written before the v2 migration
+    # by nulling out the workflow column directly.
+    with sqlite3.connect(store._path) as c:
+        c.execute("UPDATE tasks SET workflow_json = NULL WHERE id = ?", (t.id,))
+        c.commit()
+
+    loaded = store.get(t.id)
+    assert loaded is not None
+    assert loaded.acceptance_criteria == []
+    assert loaded.blocked_reason == ""
+    assert loaded.priority == ""
+    assert loaded.blocked_by == []
+
+
+def test_store_old_notes_without_source_and_category(store, tmp_path):
+    """An older row with a note missing the new fields should load."""
+    import sqlite3
+
+    t = Task.new(str(tmp_path), TaskKind.BUGFIX, "legacy notes")
+    store.save(t)
+    # Overwrite notes_json with a v1-style payload lacking source/category.
+    legacy_note = '[{"timestamp": 1.0, "kind": "committed", "text": "old", "data": {}}]'
+    with sqlite3.connect(store._path) as c:
+        c.execute("UPDATE tasks SET notes_json = ? WHERE id = ?", (legacy_note, t.id))
+        c.commit()
+
+    loaded = store.get(t.id)
+    assert loaded is not None
+    assert len(loaded.notes) == 1
+    assert loaded.notes[0].text == "old"
+    assert loaded.notes[0].source == "system"  # defaulted
+    assert loaded.notes[0].category == ""  # defaulted
+
+
 def test_store_list_filters_and_excludes_archived(store, tmp_path):
     p = str(tmp_path)
     t1 = Task.new(p, TaskKind.FEATURE, "t1")
@@ -451,3 +566,71 @@ def test_manager_update_state_note_timestamp_matches_updated_at(manager):
     state_notes = [n for n in manager.active.notes if n.kind == "state_changed"]
     assert state_notes
     assert state_notes[-1].timestamp == manager.active.updated_at
+
+
+# ── block_task + source tagging ─────────────────────────────────────
+
+
+def test_manager_block_task_requires_non_empty_reason(manager):
+    manager.create_task(TaskKind.FEATURE, "x")
+    assert manager.block_task("") is False
+    assert manager.block_task("   ") is False
+    assert manager.active.state == TaskState.PLANNING
+    assert manager.active.blocked_reason == ""
+
+
+def test_manager_block_task_no_active(tmp_path, store):
+    m = TaskManager(store=store, event_bus=EventBus())
+    m.set_project_root(tmp_path)
+    assert m.block_task("anything") is False
+
+
+def test_manager_block_task_sets_state_reason_and_note(manager):
+    manager.create_task(TaskKind.FEATURE, "x")
+    assert manager.block_task("waiting on reviewer") is True
+    assert manager.active.state == TaskState.BLOCKED
+    assert manager.active.blocked_reason == "waiting on reviewer"
+    blocked_notes = [n for n in manager.active.notes if n.kind == "blocked"]
+    assert blocked_notes
+    assert "waiting on reviewer" in blocked_notes[-1].text
+    assert blocked_notes[-1].source == "user"
+    assert blocked_notes[-1].category == "workflow"
+
+
+def test_manager_unblock_via_update_state_clears_reason(manager):
+    manager.create_task(TaskKind.FEATURE, "x")
+    manager.block_task("parked for now")
+    manager.update_state(TaskState.ACTIVE)
+    assert manager.active.state == TaskState.ACTIVE
+    assert manager.active.blocked_reason == ""
+
+
+def test_manager_update_state_source_reaches_note(manager):
+    manager.create_task(TaskKind.FEATURE, "x")
+    manager.update_state(TaskState.ACTIVE, source="automation", reason="branch created")
+    state_notes = [n for n in manager.active.notes if n.kind == "state_changed"]
+    assert state_notes[-1].source == "automation"
+    assert state_notes[-1].category == "workflow"
+    assert "branch created" in state_notes[-1].text
+
+
+def test_manager_add_note_source_and_category(manager):
+    manager.create_task(TaskKind.FEATURE, "x")
+    manager.add_note("committed", "abc", source="user", category="git")
+    recent = manager.active.notes[-1]
+    assert recent.source == "user"
+    assert recent.category == "git"
+
+
+def test_manager_block_task_rollback_on_save_failure(tmp_path, store):
+    bus = EventBus()
+    m = TaskManager(store=store, event_bus=bus)
+    m.set_project_root(tmp_path)
+    m.create_task(TaskKind.FEATURE, "x")
+    m._store = _FailingStore(store, fail_saves=1)
+    events = _subscribe_write_failures(bus)
+
+    assert m.block_task("nope") is False
+    assert m.active.state == TaskState.PLANNING
+    assert m.active.blocked_reason == ""
+    assert events and events[0][0] == "block"

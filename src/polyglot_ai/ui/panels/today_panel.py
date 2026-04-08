@@ -87,6 +87,11 @@ class TodayPanel(QWidget):
         self._event_bus = None
         self._project_root: Path | None = None
         self._attention_items: list[_AttentionItem] = []
+        # Task-derived attention rows computed synchronously in
+        # ``_refresh_attention_async`` and then merged with the gh
+        # worker's results, so the user sees task health rows even
+        # when gh is slow or broken.
+        self._pending_task_attention: list[_AttentionItem] = []
         self._standalone = standalone
         self._standalone_window: QWidget | None = None
 
@@ -318,14 +323,34 @@ class TodayPanel(QWidget):
         child of the main window (so it stays with the app group) but
         floats independently and can be resized / maximised.
         """
+        # If a previous standalone window was opened and then closed,
+        # the ``destroyed`` lambda below SHOULD have reset this back
+        # to ``None``, but in practice the signal can fire late (or
+        # the Python reference can outlive the C++ object). Probe
+        # the existing window with a method that touches the C++
+        # side — if that raises ``RuntimeError`` or the window isn't
+        # visible, treat it as gone and fall through to building a
+        # fresh one. Otherwise we'd silently no-op on every click.
         existing = getattr(self, "_standalone_window", None)
         if existing is not None:
+            alive = False
             try:
-                existing.raise_()
-                existing.activateWindow()
-                return
+                alive = existing.isVisible()
+            except RuntimeError:
+                # "wrapped C/C++ object has been deleted"
+                alive = False
             except Exception:
                 logger.debug("today_panel: stale standalone window", exc_info=True)
+                alive = False
+            if alive:
+                try:
+                    existing.raise_()
+                    existing.activateWindow()
+                    return
+                except Exception:
+                    logger.debug("today_panel: could not raise standalone window", exc_info=True)
+            # Stale or dead — drop the reference and build a new one.
+            self._standalone_window = None
 
         win = QWidget(self.window(), Qt.WindowType.Window)
         win.setWindowTitle("Today — Polyglot AI")
@@ -407,24 +432,82 @@ class TodayPanel(QWidget):
         except Exception:
             logger.exception("today_panel: could not open task detail dialog")
 
+    def open_task(self, task_id: str) -> None:
+        """Public entry point used by attention-row action buttons."""
+        self._open_task_detail(task_id)
+
     # ── Attention rendering ─────────────────────────────────────────
 
     def _refresh_attention_async(self) -> None:
         """Spawn a background thread that runs gh queries and emits a signal."""
         if self._project_root is None or not self._project_root.is_dir():
             return
+        # Start with task-derived attention rows — these don't need
+        # gh or any network call. Even if gh isn't installed or the
+        # worker fails the user still sees blocked/stale/failing
+        # tasks.
+        task_rows = self._task_attention_items()
         if shutil.which("gh") is None:
-            self._on_attention_loaded(
-                [
-                    _AttentionItem(
-                        severity="info",
-                        text="Install GitHub CLI (gh) to see PRs and CI status here.",
-                        action_label=None,
-                        action_data=None,
-                    )
-                ]
+            rows = list(task_rows)
+            rows.append(
+                _AttentionItem(
+                    severity="info",
+                    text="Install GitHub CLI (gh) to see PRs and CI status here.",
+                )
             )
+            self._on_attention_loaded(rows)
             return
+
+        cwd = str(self._project_root)
+        # Stash the task rows on the instance so the worker can
+        # prepend them to whatever gh returns.
+        self._pending_task_attention = task_rows
+        thread = threading.Thread(
+            target=self._gh_attention_worker,
+            args=(cwd,),
+            daemon=True,
+            name="today_attention",
+        )
+        thread.start()
+        return
+
+    def _task_attention_items(self) -> list[_AttentionItem]:
+        """Translate task health into attention rows.
+
+        Blocked and NEEDS_ATTENTION tasks render as errors; stale
+        tasks render as warnings. Keeps the Today page useful even
+        without any GitHub integration.
+        """
+        if self._task_manager is None:
+            return []
+        from polyglot_ai.core.task_health import HealthLevel, compute_health
+
+        rows: list[_AttentionItem] = []
+        severity_map = {
+            HealthLevel.BLOCKED: "error",
+            HealthLevel.NEEDS_ATTENTION: "error",
+            HealthLevel.STALE: "warn",
+        }
+        for task in self._task_manager.list_tasks():
+            health = compute_health(task)
+            if not health.attention:
+                continue
+            severity = severity_map.get(health.level, "warn")
+            text = f"{task.title} — {health.label}"
+            rows.append(
+                _AttentionItem(
+                    severity=severity,
+                    text=text,
+                    action_label="Open",
+                    action_data={"kind": "task", "value": task.id},
+                    tooltip=health.reason,
+                )
+            )
+        return rows
+
+    def _legacy_refresh_attention_unused(self) -> None:
+        """Placeholder replaced by the new entry point above."""
+        return
 
         cwd = str(self._project_root)
         thread = threading.Thread(
@@ -552,7 +635,12 @@ class TodayPanel(QWidget):
                 )
         except Exception:
             logger.exception("today_panel: attention worker crashed")
-        self._attention_loaded.emit(items)
+        # Prepend task-derived rows (blocked, stale, failing) so they
+        # appear at the top regardless of what gh returned. The list
+        # was snapshot on the GUI thread before the worker started so
+        # no cross-thread access is needed here.
+        combined = list(self._pending_task_attention) + items
+        self._attention_loaded.emit(combined)
 
     def _on_attention_loaded(self, items: list) -> None:
         self._attention_items = items
@@ -683,13 +771,15 @@ class _AttentionItem:
         self,
         severity: str,
         text: str,
-        action_label: str | None,
-        action_data: dict | None,
+        action_label: str | None = None,
+        action_data: dict | None = None,
+        tooltip: str = "",
     ) -> None:
         self.severity = severity  # "error" | "warn" | "info"
         self.text = text
         self.action_label = action_label
         self.action_data = action_data
+        self.tooltip = tooltip
 
 
 class _AttentionRow(QWidget):
@@ -705,6 +795,8 @@ class _AttentionRow(QWidget):
         self._item = item
         self._panel = panel
         self.setStyleSheet("background: transparent;")
+        if item.tooltip:
+            self.setToolTip(item.tooltip)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -719,6 +811,8 @@ class _AttentionRow(QWidget):
         text = QLabel(item.text)
         text.setWordWrap(True)
         text.setStyleSheet("color: #ddd; font-size: 11px; background: transparent;")
+        if item.tooltip:
+            text.setToolTip(item.tooltip)
         layout.addWidget(text, stretch=1)
 
         if item.action_label:
@@ -740,6 +834,10 @@ class _AttentionRow(QWidget):
             self._open_url(value)
         elif kind == "investigate_ci" and isinstance(value, dict):
             self._panel.investigate_ci_failure(value)
+        elif kind == "task" and isinstance(value, str):
+            # Activate the task and open its detail dialog so the
+            # user can see the timeline, change state, or unblock.
+            self._panel.open_task(value)
 
     def _open_url(self, url: str) -> None:
         try:

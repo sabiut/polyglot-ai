@@ -91,19 +91,69 @@ class FileOperations:
         logger.info("Wrote file: %s", resolved)
 
     def delete(self, path: str, force_directory: bool = False) -> None:
-        """Delete a file or directory.
+        """Delete a file or directory inside the project root.
+
+        Same safety policy as :meth:`write`:
+        - Path must resolve inside the project root (handled by
+          ``validate_path``).
+        - Sensitive CI / hooks paths are refused.
+        - The project root itself can never be deleted.
+        - Symlinks are refused so the AI can't escape via a planted
+          link.
+        - Recursive directory removal requires ``force_directory=True``
+          to prevent accidents.
 
         Args:
             path: Relative path from project root.
             force_directory: Must be True to recursively delete a directory.
-                             Prevents accidental recursive deletion.
         """
+        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
+
+        # Symlink protection MUST happen on the unresolved path —
+        # ``validate_path`` calls ``.resolve()`` which silently
+        # follows symlinks, so once we resolve we're already looking
+        # at the target. Check the raw join first.
+        if self._project_root is None:
+            raise ValueError("No project is open")
+        unresolved = self._project_root / path
+        if unresolved.is_symlink():
+            raise PermissionError(f"Refusing to delete a symlink: {path}")
+
         resolved = self.validate_path(path)
+
+        if resolved == self._project_root:
+            raise PermissionError("Refusing to delete the project root itself.")
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"Path does not exist: {path}")
+
+        # Apply the same blocklists used for writes so deletions
+        # cannot bypass them.
+        blocked = check_blocked_file(path)
+        if blocked:
+            raise PermissionError(blocked)
+        if is_sensitive_path(path):
+            raise PermissionError(
+                f"Cannot delete '{path}': CI / workflow / hooks config paths "
+                "must be removed manually for safety."
+            )
+
+        # Also reject if any parent component along the unresolved
+        # path is a symlink (covers ``link/inside.txt`` where ``link``
+        # is a symlink that resolves into the project root).
+        for parent in unresolved.parents:
+            if parent == self._project_root:
+                break
+            if parent.is_symlink():
+                raise PermissionError(f"Refusing to delete through a symlink: {path}")
+
         if resolved.is_file():
             resolved.unlink()
             self._event_bus.emit(EVT_FILE_DELETED, path=str(resolved))
             logger.info("Deleted file: %s", resolved)
-        elif resolved.is_dir():
+            return
+
+        if resolved.is_dir():
             if not force_directory:
                 raise PermissionError(
                     f"Refusing to recursively delete directory '{path}'. "
@@ -114,6 +164,34 @@ class FileOperations:
             shutil.rmtree(resolved)
             self._event_bus.emit(EVT_FILE_DELETED, path=str(resolved))
             logger.info("Deleted directory: %s", resolved)
+
+    def make_directory(self, path: str) -> None:
+        """Create a directory (including parents) inside the project root.
+
+        Refuses sensitive paths and existing non-directory targets.
+        Idempotent: creating an already-existing directory is a no-op.
+        """
+        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
+
+        resolved = self.validate_path(path)
+
+        blocked = check_blocked_file(path)
+        if blocked:
+            raise PermissionError(blocked)
+        if is_sensitive_path(path):
+            raise PermissionError(
+                f"Cannot create '{path}': CI / workflow / hooks config paths "
+                "must be created manually for safety."
+            )
+
+        if resolved.exists():
+            if resolved.is_dir():
+                return
+            raise FileExistsError(f"Path exists and is not a directory: {path}")
+
+        resolved.mkdir(parents=True, exist_ok=True)
+        self._event_bus.emit(EVT_FILE_CREATED, path=str(resolved))
+        logger.info("Created directory: %s", resolved)
 
     _MAX_SEARCH_PATTERN_LEN = 500
 

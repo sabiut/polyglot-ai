@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import difflib
 
-from PyQt6.QtGui import QColor, QFont, QTextCharFormat
+from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -19,6 +20,13 @@ class DiffViewer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # Make the viewer claim every spare vertical pixel its parent
+        # gives it. Without this the outer QWidget keeps the default
+        # ``Preferred/Preferred`` size policy and the parent dialog
+        # leaves unused space scattered around the diff instead of
+        # growing it. Same goes for horizontal expansion.
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -64,7 +72,9 @@ class DiffViewer(QWidget):
             self._left_editor.verticalScrollBar().setValue
         )
 
-        layout.addWidget(splitter)
+        # Stretch=1 so the splitter (and the QPlainTextEdits inside it)
+        # actually fills the DiffViewer top-to-bottom.
+        layout.addWidget(splitter, 1)
 
     def set_diff(self, old_content: str, new_content: str) -> None:
         """Display a diff between old and new content with line highlighting."""
@@ -94,8 +104,12 @@ class DiffViewer(QWidget):
                 for line_num in range(i1, i2):
                     block = self._left_editor.document().findBlockByNumber(line_num)
                     cursor.setPosition(block.position())
-                    cursor.moveToEndOfBlock()
-                    cursor.select(cursor.SelectionType.LineUnderCursor)
+                    # ``select(LineUnderCursor)`` already spans the
+                    # whole logical line; no need for an explicit
+                    # move-to-end first. (The old code called
+                    # ``moveToEndOfBlock`` which is a Qt 5 / PyQt5
+                    # name and doesn't exist in PyQt6.)
+                    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
                     cursor.setCharFormat(fmt_removed)
 
     def _highlight_added(self, old_lines: list[str], new_lines: list[str]) -> None:
@@ -110,11 +124,17 @@ class DiffViewer(QWidget):
                 for line_num in range(j1, j2):
                     block = self._right_editor.document().findBlockByNumber(line_num)
                     cursor.setPosition(block.position())
-                    cursor.moveToEndOfBlock()
-                    cursor.select(cursor.SelectionType.LineUnderCursor)
+                    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
                     cursor.setCharFormat(fmt_added)
 
-    def set_command_preview(self, command: str) -> None:
-        """Display a command for approval (not a diff)."""
-        self._left_editor.setPlainText("Command to execute:")
+    def set_command_preview(self, command: str, label: str = "Command to execute:") -> None:
+        """Display a command (or any action body) for approval.
+
+        ``label`` is shown in the left pane and ``command`` in the
+        right. The default label is kept for backwards compatibility
+        with shell-style approvals; pass a tool-specific phrase
+        ("File to delete:", "Directory to create:", etc.) for other
+        tools so the dialog framing matches the action.
+        """
+        self._left_editor.setPlainText(label)
         self._right_editor.setPlainText(command)

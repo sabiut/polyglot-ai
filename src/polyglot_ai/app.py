@@ -217,9 +217,15 @@ def main() -> None:
     # record activity on the active task — if init_task_manager hasn't
     # run yet they'd grab a manager with no event bus wired and every
     # write would silently fail to propagate.
+    from polyglot_ai.core.plan_generator import PlanGenerator
     from polyglot_ai.core.task_manager import init_task_manager
 
     task_manager = init_task_manager(event_bus)
+    # Inject the AI plan generator so the task detail dialog can ask
+    # the configured provider to draft a checklist for FEATURE tasks.
+    # The generator is loose-typed on the manager so this module is
+    # the only place that knows about the AI layer.
+    task_manager.set_plan_generator(PlanGenerator(provider_manager))
 
     window.git_panel.set_event_bus(event_bus)
     window.test_panel.set_event_bus(event_bus)

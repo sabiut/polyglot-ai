@@ -46,6 +46,11 @@ class GitPanel(QWidget):
         # Instance attribute (not class attribute) so multiple GitPanel
         # instances don't share the same refresh-in-progress flag.
         self._refreshing = False
+        # Cached "is the current project a git repo?" — recomputed on
+        # every project switch in ``set_project_root``. Defaults to
+        # False so the periodic timer is a no-op until a project is
+        # actually open.
+        self._is_git_repo = False
 
         # Cross-thread signal connections
         self._refresh_done.connect(self._apply_refresh)
@@ -310,7 +315,41 @@ class GitPanel(QWidget):
 
     def set_project_root(self, path: Path) -> None:
         self._project_root = path
+        # Cache "is this a git repo?" once per project switch so the
+        # 10-second poll can short-circuit cheaply when the user opens
+        # a folder that isn't under version control. Without this the
+        # panel shells out to ``git branch --show-current`` every tick,
+        # gets ``fatal: not a git repository``, and spams the log.
+        self._is_git_repo = self._detect_git_repo(path)
+        if not self._is_git_repo:
+            # One-shot UI update; no background work needed.
+            self._branch_label.setText("  ⎇ (not a git repository)")
+            self._branch_label.setToolTip(
+                f"{path} is not a git repository — branch / status polling is paused."
+            )
+            self._staged_list.clear()
+            self._unstaged_list.clear()
+            logger.info("git_panel: %s is not a git repository, polling paused", path)
+            return
         self._refresh()
+
+    @staticmethod
+    def _detect_git_repo(path: Path) -> bool:
+        """Return True if ``path`` (or any parent) contains a ``.git`` entry.
+
+        Walks up the parent chain so a project opened at a subdirectory
+        of a repo still counts as a git project. ``.git`` is normally a
+        directory but can also be a file (worktrees, submodules), so we
+        check ``exists`` rather than ``is_dir``.
+        """
+        try:
+            current = Path(path).resolve()
+        except (OSError, RuntimeError):
+            return False
+        for candidate in (current, *current.parents):
+            if (candidate / ".git").exists():
+                return True
+        return False
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt override
         """When the panel becomes visible, opportunistically detect a
@@ -755,16 +794,23 @@ class GitPanel(QWidget):
         safe_task(do_create(), name="git_checkout_b")
 
     def _refresh(self) -> None:
-        if self._project_root and not self._refreshing:
-            self._refreshing = True
-            # Run git commands in a thread to avoid qasync task conflicts.
-            # Qt widgets are updated via QTimer.singleShot from the thread result.
-            import threading
+        if not self._project_root or self._refreshing:
+            return
+        # Skip the shell-out entirely when the open project isn't a
+        # git repo. ``_is_git_repo`` is recomputed on every project
+        # switch via ``set_project_root``, so this stays correct as
+        # the user moves between repos and non-repo folders.
+        if not self._is_git_repo:
+            return
+        self._refreshing = True
+        # Run git commands in a thread to avoid qasync task conflicts.
+        # Qt widgets are updated via QTimer.singleShot from the thread result.
+        import threading
 
-            threading.Thread(
-                target=self._do_refresh_threaded,
-                daemon=True,
-            ).start()
+        threading.Thread(
+            target=self._do_refresh_threaded,
+            daemon=True,
+        ).start()
 
     def _do_refresh_threaded(self) -> None:
         """Run git commands in a background thread, then signal the main thread.
@@ -823,7 +869,14 @@ class GitPanel(QWidget):
             logger.warning("git_panel: git status timed out")
             self._refresh_error.emit(RuntimeError("git status timed out after 5s"))
         except Exception as exc:
-            logger.warning("git_panel: refresh thread failed: %s", exc)
+            # Demote the expected "not a git repository" race to info;
+            # the main-thread handler ``_apply_refresh_error`` will
+            # also flip ``_is_git_repo`` so subsequent ticks short-
+            # circuit. Genuine failures still log at WARNING.
+            if "not a git" in str(exc).lower():
+                logger.info("git_panel: refresh thread: %s", exc)
+            else:
+                logger.warning("git_panel: refresh thread failed: %s", exc)
             self._refresh_error.emit(exc)
 
     def _apply_refresh(self, branch: str, status_output: str) -> None:
@@ -885,17 +938,29 @@ class GitPanel(QWidget):
         """
         msg = str(error) or "Git refresh failed"
         # Extract a short user-friendly tag for the label.
+        not_a_repo = "not a git" in msg.lower()
         if "not installed" in msg.lower():
             short = "git not installed"
         elif "timed out" in msg.lower():
             short = "git timed out"
-        elif "not a git" in msg.lower():
+        elif not_a_repo:
             short = "Not a git repository"
+            # Cache the result so the timer stops re-checking. This
+            # covers the rare race where the project root WAS a repo
+            # at ``set_project_root`` time but ``.git`` was removed
+            # between then and now.
+            self._is_git_repo = False
         else:
             short = "git error"
         self._branch_label.setText(f"  ⚠ {short}")
         self._branch_label.setToolTip(msg)
-        logger.warning("git_panel: refresh error: %s", msg)
+        # "Not a git repo" is an expected steady state for non-repo
+        # projects, not an error worth a WARNING per tick. Only log
+        # genuine failures (git missing, timeouts, unknown) loudly.
+        if not_a_repo:
+            logger.info("git_panel: %s", msg)
+        else:
+            logger.warning("git_panel: refresh error: %s", msg)
         self._refreshing = False
 
     def _show_file_menu(self, pos, staged: bool) -> None:

@@ -1,7 +1,8 @@
 """Tool registry for AI function calling.
 
 Domain-specific implementations are in submodules:
-  - file_tools: file_read, file_write, file_patch, file_search, list_directory
+  - file_tools: file_read, file_write, file_patch, file_delete,
+                dir_create, dir_delete, file_search, list_directory
   - git_tools: git_status, git_diff, git_log, git_commit, git_show_file
   - shell_tools: shell_exec, web_search
 """
@@ -144,6 +145,18 @@ class ToolRegistry:
                 from .file_tools import file_patch
 
                 return await file_patch(self._sandbox, self._file_ops, args)
+            elif tool_name == "file_delete":
+                from .file_tools import file_delete
+
+                return await file_delete(self._file_ops, args)
+            elif tool_name == "dir_create":
+                from .file_tools import dir_create
+
+                return await dir_create(self._file_ops, args)
+            elif tool_name == "dir_delete":
+                from .file_tools import dir_delete
+
+                return await dir_delete(self._file_ops, args)
             elif tool_name == "file_search":
                 from .file_tools import file_search
 

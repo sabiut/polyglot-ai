@@ -97,6 +97,75 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         return f"Error patching {path}: {e}"
 
 
+async def file_delete(file_ops, args: dict) -> str:
+    """Delete a single file inside the project root.
+
+    Refuses to act on directories — use ``dir_delete`` for those, so
+    the AI has to be explicit about recursive removal.
+    """
+    path = args.get("path", "")
+    if not path:
+        return "Error: No file path provided"
+    try:
+        resolved = file_ops.validate_path(path)
+    except (PermissionError, ValueError) as exc:
+        return f"Error: {exc}"
+
+    if resolved.is_dir():
+        return f"Error: '{path}' is a directory. Use dir_delete to remove it recursively."
+
+    try:
+        file_ops.delete(path)
+    except (PermissionError, FileNotFoundError) as exc:
+        return f"Error: {exc}"
+    return f"Deleted file: {path}"
+
+
+async def dir_create(file_ops, args: dict) -> str:
+    """Create a directory (and any missing parents) inside the project root."""
+    path = args.get("path", "")
+    if not path:
+        return "Error: No directory path provided"
+    try:
+        file_ops.make_directory(path)
+    except (PermissionError, FileExistsError, ValueError) as exc:
+        return f"Error: {exc}"
+    return f"Created directory: {path}"
+
+
+async def dir_delete(file_ops, args: dict) -> str:
+    """Recursively delete a directory inside the project root.
+
+    Requires the caller to pass ``recursive: true`` so the AI cannot
+    accidentally wipe a folder by typing the wrong path. The
+    underlying ``file_ops.delete`` enforces the same flag.
+    """
+    path = args.get("path", "")
+    recursive = bool(args.get("recursive", False))
+    if not path:
+        return "Error: No directory path provided"
+    if not recursive:
+        return (
+            "Error: dir_delete refuses to remove a directory unless 'recursive' "
+            'is set to true. Pass {"path": ..., "recursive": true} to confirm.'
+        )
+    try:
+        resolved = file_ops.validate_path(path)
+    except (PermissionError, ValueError) as exc:
+        return f"Error: {exc}"
+
+    if not resolved.exists():
+        return f"Error: Directory does not exist: {path}"
+    if not resolved.is_dir():
+        return f"Error: '{path}' is not a directory. Use file_delete instead."
+
+    try:
+        file_ops.delete(path, force_directory=True)
+    except (PermissionError, FileNotFoundError) as exc:
+        return f"Error: {exc}"
+    return f"Deleted directory (recursive): {path}"
+
+
 async def file_search(file_ops, args: dict) -> str:
     pattern = args.get("pattern", "")
     search_path = args.get("path", ".")

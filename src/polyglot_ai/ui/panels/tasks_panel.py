@@ -250,15 +250,27 @@ class TasksPanel(QWidget):
         """
         # Keep a reference on ``self`` so the window isn't GC'd the
         # instant this method returns. Re-opening raises the existing
-        # window instead of creating a second one.
+        # window instead of creating a second one. Probe the C++
+        # object via ``isVisible()`` so we don't no-op on a closed
+        # window whose ``destroyed`` signal hasn't fired yet.
         existing = getattr(self, "_standalone_window", None)
         if existing is not None:
+            alive = False
             try:
-                existing.raise_()
-                existing.activateWindow()
-                return
+                alive = existing.isVisible()
+            except RuntimeError:
+                alive = False
             except Exception:
                 logger.debug("tasks_panel: stale standalone window", exc_info=True)
+                alive = False
+            if alive:
+                try:
+                    existing.raise_()
+                    existing.activateWindow()
+                    return
+                except Exception:
+                    logger.debug("tasks_panel: could not raise standalone window", exc_info=True)
+            self._standalone_window = None
         from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 
         win = QWidget(self.window(), Qt.WindowType.Window)
@@ -403,8 +415,29 @@ class TasksPanel(QWidget):
         elif chosen == delete:
             self._task_manager.delete(task_id)
         elif chosen.data() and chosen.data()[0] == "state":
+            target_state = chosen.data()[1]
             self._task_manager.set_active(task_id)
-            self._task_manager.update_state(chosen.data()[1])
+            # Moving to BLOCKED goes through the dedicated dialog so
+            # the user is forced to supply a reason. Everything else
+            # flows through the plain state update.
+            if target_state == TaskState.BLOCKED:
+                self._prompt_block(task)
+            else:
+                self._task_manager.update_state(target_state)
+
+    def _prompt_block(self, task: Task) -> None:
+        """Show the block-reason dialog and apply the result."""
+        if self._task_manager is None:
+            return
+        from polyglot_ai.ui.dialogs.block_task_dialog import BlockTaskDialog
+
+        dlg = BlockTaskDialog(task.title, current_reason=task.blocked_reason, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        reason = dlg.reason
+        if not reason:
+            return
+        self._task_manager.block_task(reason)
 
     def _on_new_task(self) -> None:
         if self._task_manager is None or self._task_manager.project_root is None:
@@ -465,9 +498,34 @@ class _TaskCard(QWidget):
         )
         title_lbl.setWordWrap(True)
         title_row.addWidget(title_lbl, stretch=1)
+
+        # Health badge: one small coloured chip at the end of the
+        # title row. Uses the short ``badge`` label (never the full
+        # reason) so a 200-char blocker message can't push the task
+        # title off the card. The tooltip carries ``label + reason``
+        # so hovering still shows the full context.
+        from polyglot_ai.core.task_health import compute_health
+
+        health = compute_health(task)
+        health_badge = QLabel(health.badge)
+        health_badge.setToolTip(
+            f"{health.label}\n{health.reason}" if health.reason else health.label
+        )
+        health_badge.setStyleSheet(
+            f"color: {health.colour}; font-size: 10px; font-weight: 600; "
+            f"background: rgba(0,0,0,0.35); border: 1px solid {health.colour}; "
+            "border-radius: 3px; padding: 1px 6px;"
+        )
+        # Cap the chip width and disable word-wrap so even a future
+        # long badge label is structurally incapable of overlapping
+        # the task title. ``setMaximumWidth`` on the QLabel combined
+        # with ``stretch=0`` on ``addWidget`` keeps the chip compact.
+        health_badge.setMaximumWidth(110)
+        health_badge.setWordWrap(False)
+        title_row.addWidget(health_badge, 0)
         layout.addLayout(title_row)
 
-        # Meta row: kind, branch, age, test/CI status
+        # Meta row: kind, branch, age, test/CI status, blocker
         meta_parts: list[str] = [task.kind.value]
         if task.branch:
             meta_parts.append(f"⎇ {task.branch}")
@@ -478,6 +536,12 @@ class _TaskCard(QWidget):
             ci = task.last_ci_run.status
             symbol = {"success": "✓", "failure": "✗", "in_progress": "…"}.get(ci, "·")
             meta_parts.append(f"CI {symbol}")
+        if task.state == TaskState.BLOCKED and task.blocked_reason:
+            # Trim so a long reason doesn't blow out the card width.
+            reason = task.blocked_reason
+            if len(reason) > 50:
+                reason = reason[:47] + "…"
+            meta_parts.append(f"blocked: {reason}")
         meta_parts.append(_relative_time(task.updated_at))
         meta_lbl = QLabel("  ·  ".join(meta_parts))
         meta_lbl.setStyleSheet("color: #888; font-size: 10px; background: transparent;")

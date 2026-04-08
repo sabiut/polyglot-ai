@@ -43,6 +43,17 @@ class ContextBuilder:
         if task is None:
             self._active_task = None
             return
+        # Snapshot the plan into a list of (text, status) tuples so the
+        # context block can render the AI-generated checklist when one
+        # exists. Tolerant of duck-typed PlanStep stand-ins (anything
+        # with ``.text`` and ``.status`` attributes works).
+        plan_snapshot: list[tuple[str, str]] = []
+        for step in getattr(task, "plan", None) or []:
+            text = str(getattr(step, "text", "") or "").strip()
+            if not text:
+                continue
+            status = str(getattr(step, "status", "pending") or "pending")
+            plan_snapshot.append((text, status))
         self._active_task = {
             "kind": getattr(getattr(task, "kind", None), "value", "") or "",
             "title": getattr(task, "title", "") or "",
@@ -50,6 +61,7 @@ class ContextBuilder:
             "branch": getattr(task, "branch", None),
             "state": getattr(getattr(task, "state", None), "value", "") or "",
             "modified_files": list(getattr(task, "modified_files", []) or []),
+            "plan": plan_snapshot,
         }
 
     def set_available_tools(self, tool_names: list[str]) -> None:
@@ -123,6 +135,22 @@ class ContextBuilder:
                 parts.append("")
                 parts.append("Description:")
                 parts.append(t["description"])
+            # Render the AI-generated plan checklist (if present) so
+            # the model can refer to "step 3" or check progress without
+            # having to ask the user. Status glyphs match the dialog.
+            plan_steps = t.get("plan") or []
+            if plan_steps:
+                parts.append("")
+                parts.append("Plan checklist:")
+                glyphs = {
+                    "pending": "[ ]",
+                    "in_progress": "[~]",
+                    "done": "[x]",
+                    "skipped": "[-]",
+                }
+                for idx, (text, status) in enumerate(plan_steps, start=1):
+                    glyph = glyphs.get(status, "[ ]")
+                    parts.append(f"{idx}. {glyph} {text}")
             if t["modified_files"]:
                 parts.append("")
                 parts.append("Files touched so far on this task:")
@@ -146,6 +174,20 @@ class ContextBuilder:
             "2. NEVER output code blocks with file changes unless the user explicitly says 'yes', 'go ahead', 'do it', 'apply', or similar confirmation.",
             "3. When reviewing code, give feedback and suggestions — do NOT immediately output changed files.",
             "4. When the user confirms, THEN output the code block with the complete file.",
+            "",
+            "MUTATION TOOLS — file_write, file_patch, file_delete, dir_create, dir_delete:",
+            "These tools execute IMMEDIATELY with no confirmation dialog. The ONLY safety",
+            "gate is your behaviour. Therefore:",
+            "- NEVER call any of these tools on the same turn the user first describes the work.",
+            "- ALWAYS describe what you will do in plain text first (path, kind of change, any",
+            "  files being deleted or overwritten) and ask 'Should I go ahead?' or similar.",
+            "- ONLY call these tools after the user has replied with explicit consent in the",
+            "  current conversation: 'yes', 'go ahead', 'do it', 'apply', 'agree', 'sure', etc.",
+            "- For file_delete and dir_delete, name every file/directory that will be removed",
+            "  BEFORE asking, so the user knows exactly what they are agreeing to.",
+            "- A vague 'looks good' or an unrelated answer is NOT consent — ask again.",
+            "- Consent for one action is NOT consent for follow-up actions. Re-ask for each",
+            "  destructive batch unless the user said 'do all of these'.",
             "",
             "HOW TO PROPOSE CHANGES:",
             "First, explain what you would change and why. For example:",

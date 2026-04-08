@@ -31,7 +31,6 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.ai.models import Conversation, Message, ToolCall
-from polyglot_ai.ui.dialogs.approval_dialog import ApprovalDialog
 from polyglot_ai.ui.panels.chat_message import ChatMessage
 from polyglot_ai.ui import theme_colors as tc
 
@@ -1119,21 +1118,11 @@ class ChatPanel(QWidget):
             if hasattr(window, "_plan_panel"):
                 window._plan_panel.update_plan()
 
-        # Tool approval callback — use Future instead of blocking dialog.exec()
+        # Tool approval callback — use the same inline card the
+        # main streaming flow uses, so the user experience is
+        # consistent and the chat transcript records the decision.
         async def on_tool_approval(tool_name, args):
-            from polyglot_ai.ui.dialogs.approval_dialog import ApprovalDialog
-
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[bool] = loop.create_future()
-
-            def _on_finished(_result: int) -> None:
-                if not future.done():
-                    future.set_result(dialog.approved)
-
-            dialog = ApprovalDialog(tool_name, args, parent=self)
-            dialog.finished.connect(_on_finished)
-            dialog.open()
-            return await future
+            return await self._request_tool_approval(tool_name, args)
 
         try:
             plan.approve_all()
@@ -1931,6 +1920,9 @@ class ChatPanel(QWidget):
             "file_read": "Reading file...",
             "file_write": "Writing file...",
             "file_patch": "Patching file...",
+            "file_delete": "Deleting file...",
+            "dir_create": "Creating directory...",
+            "dir_delete": "Deleting directory...",
             "file_search": "Searching files...",
             "list_directory": "Listing directory...",
             "shell_exec": "Running command...",
@@ -2019,6 +2011,9 @@ class ChatPanel(QWidget):
                 "shell_exec": "Ran command",
                 "file_write": "Wrote file",
                 "file_patch": "Patched file",
+                "file_delete": "Deleted file",
+                "dir_create": "Created directory",
+                "dir_delete": "Deleted directory",
                 "git_commit": "Committed changes",
             }
             done_label = _tool_done_labels.get(
@@ -2041,36 +2036,25 @@ class ChatPanel(QWidget):
         await self._stream_followup(provider, model_id, display_model, system_prompt)
 
     async def _request_tool_approval(self, tool_name: str, arguments: str) -> bool:
-        import json
+        # Inline approval — append a one-line approve/reject row to
+        # the chat stream and await the user's click. The row matches
+        # the existing italic-gray tool-status label aesthetic so it
+        # blends into the conversation instead of breaking it up with
+        # a popup.
+        from polyglot_ai.ui.panels.inline_approval_card import InlineApprovalCard
 
-        from polyglot_ai.core.async_utils import run_blocking
-
-        current_content = None
-        if tool_name in ("file_write", "file_patch"):
-            try:
-                args = json.loads(arguments) if arguments else {}
-                path = args.get("path", "")
-                project_root = self._get_project_root()
-                if project_root and path:
-                    full = project_root / path
-                    if full.is_file():
-                        current_content = await run_blocking(full.read_text, "utf-8", "replace")
-            except Exception:
-                pass
-
-        # qasync cannot suspend an async task while a blocking Qt dialog
-        # is open.  Use a non-blocking dialog with a Future so the async
-        # coroutine properly yields control back to the event loop.
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
 
-        def _on_finished(_result: int) -> None:
-            if not future.done():
-                future.set_result(dialog.approved)
+        row = InlineApprovalCard(tool_name, arguments, parent=self._message_widget)
 
-        dialog = ApprovalDialog(tool_name, arguments, current_content=current_content, parent=self)
-        dialog.finished.connect(_on_finished)
-        dialog.open()
+        def _on_decided(approved: bool) -> None:
+            if not future.done():
+                future.set_result(approved)
+
+        row.decided.connect(_on_decided)
+        self._message_layout.addWidget(row)
+        self._scroll_to_bottom()
         return await future
 
     async def _stream_followup(

@@ -2,12 +2,12 @@
 
 Renders everything the panels have recorded onto a task: title,
 kind, state, branch/base_branch, description, modified files,
-latest test/CI snapshots, and the full chronological timeline of
-events. Also renders a read-only plan checklist reserved for a
-future AI plan generator (``task.plan`` is empty until that lands).
+latest test/CI snapshots, the AI-generated plan checklist (if
+populated), and the full chronological timeline of events.
 
-Provides actions to change state, open the PR, and copy the task
-as a markdown report (great for standups).
+Provides actions to change state, open the PR, copy the task as
+a markdown report (great for standups), and ask the AI to draft
+or regenerate the plan checklist via the configured provider.
 
 Opened by double-clicking a task card in the Tasks sidebar or the
 Today landing page.
@@ -18,13 +18,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QGuiApplication
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTextEdit,
@@ -87,6 +88,13 @@ class TaskDetailDialog(QDialog):
     edits made elsewhere are reflected.
     """
 
+    # Emitted from the plan-generator coroutine when it finishes.
+    # Carries the result so the GUI thread can apply it via
+    # ``_on_plan_ready``. Using a signal keeps every Qt mutation on
+    # the main thread regardless of where the awaited continuation
+    # ran.
+    _plan_ready = pyqtSignal(object)
+
     def __init__(
         self,
         task: Task,
@@ -96,11 +104,14 @@ class TaskDetailDialog(QDialog):
         super().__init__(parent)
         self._task = task
         self._manager = manager
+        self._plan_btn: QPushButton | None = None
+        self._plan_busy = False
 
         self.setWindowTitle(f"Task — {task.title}")
         self.setMinimumSize(720, 600)
         self.setStyleSheet("QDialog { background: #1e1e1e; }")
 
+        self._plan_ready.connect(self._on_plan_ready)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -225,6 +236,20 @@ class TaskDetailDialog(QDialog):
         copy_btn.clicked.connect(self._copy_as_standup)
         actions.addWidget(copy_btn)
 
+        # AI plan generator button — only shown when a generator is
+        # available (set in app.py once a provider manager exists).
+        # The button label flips between "Generate plan" and
+        # "Regenerate plan" depending on whether the task already
+        # has steps, so the user knows what's about to happen.
+        if self._manager.plan_generator is not None:
+            label = "Regenerate plan" if self._task.plan else "Generate plan"
+            self._plan_btn = self._mk_button(label)
+            self._plan_btn.setToolTip(
+                "Ask the configured AI provider to draft an ordered checklist for this task."
+            )
+            self._plan_btn.clicked.connect(self._on_generate_plan)
+            actions.addWidget(self._plan_btn)
+
         actions.addStretch()
 
         # State transitions: build a small group of state-change buttons
@@ -240,6 +265,7 @@ class TaskDetailDialog(QDialog):
             TaskState.ACTIVE,
             TaskState.REVIEW,
             TaskState.DONE,
+            TaskState.BLOCKED,
         ):
             if self._task.state == state:
                 continue
@@ -258,9 +284,8 @@ class TaskDetailDialog(QDialog):
     def _build_plan_card(self) -> QFrame | None:
         """Render the task's plan steps as a read-only checklist.
 
-        Plan steps are populated by the AI for FEATURE tasks (not yet
-        wired to a generator — when the generator lands it will write
-        into ``task.plan`` and this card will start showing content).
+        Plan steps are produced by :class:`PlanGenerator` when the
+        user clicks the "Generate plan" button in the actions row.
         Each step renders with a glyph reflecting its status:
         ``☐`` pending, ``◐`` in_progress, ``☑`` done, ``⊘`` skipped.
         """
@@ -455,12 +480,92 @@ class TaskDetailDialog(QDialog):
         Today page both auto-refresh on ``task:state_changed``, so
         the user sees the new state immediately there; they can
         reopen the detail dialog to see the fresh timeline.
+
+        BLOCKED is special: it's routed through the block-reason
+        dialog so the user has to say *why*, which then populates
+        ``blocked_reason`` and the timeline note.
         """
         try:
             self._manager.set_active(self._task.id)
-            self._manager.update_state(state)
+            if state == TaskState.BLOCKED:
+                from polyglot_ai.ui.dialogs.block_task_dialog import BlockTaskDialog
+
+                dlg = BlockTaskDialog(
+                    self._task.title,
+                    current_reason=self._task.blocked_reason,
+                    parent=self,
+                )
+                if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.reason:
+                    return  # user cancelled — leave the dialog open
+                self._manager.block_task(dlg.reason)
+            else:
+                self._manager.update_state(state)
         except Exception:
             logger.exception("task_detail: state change failed")
+            return
+        self.accept()
+
+    def _on_generate_plan(self) -> None:
+        """Kick off the AI plan generator for the current task.
+
+        Runs as a background coroutine via ``safe_task`` so the GUI
+        thread stays responsive. The result is delivered back via
+        the ``_plan_ready`` signal so all Qt mutations happen on the
+        main thread (the awaited continuation may resume off-thread).
+        """
+        if self._plan_busy:
+            return
+        generator = self._manager.plan_generator
+        if generator is None:
+            return
+        self._plan_busy = True
+        if self._plan_btn is not None:
+            self._plan_btn.setEnabled(False)
+            self._plan_btn.setText("Generating…")
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        task_snapshot = self._task
+
+        async def _run() -> None:
+            try:
+                result = await generator.generate(task_snapshot)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.exception("task_detail: plan generator crashed")
+                from polyglot_ai.core.plan_generator import PlanGenerationResult
+
+                result = PlanGenerationResult(steps=[], error=str(exc))
+            self._plan_ready.emit(result)
+
+        safe_task(_run(), name="task_plan_generate")
+
+    def _on_plan_ready(self, result) -> None:
+        """Apply a plan generator result on the GUI thread."""
+        self._plan_busy = False
+        if not getattr(result, "ok", False):
+            error = getattr(result, "error", "Unknown error")
+            QMessageBox.warning(
+                self,
+                "Plan generation failed",
+                f"Could not generate a plan:\n\n{error}",
+            )
+            if self._plan_btn is not None:
+                self._plan_btn.setEnabled(True)
+                self._plan_btn.setText("Regenerate plan" if self._task.plan else "Generate plan")
+            return
+        # Activate this task so set_plan() writes to the right one,
+        # then persist the new steps. The dialog closes on success
+        # so the rebuilt sidebar / detail view picks up the change.
+        self._manager.set_active(self._task.id)
+        if not self._manager.set_plan(result.steps):
+            QMessageBox.warning(
+                self,
+                "Plan generation failed",
+                "The generator produced steps but they could not be saved.",
+            )
+            if self._plan_btn is not None:
+                self._plan_btn.setEnabled(True)
+                self._plan_btn.setText("Regenerate plan" if self._task.plan else "Generate plan")
             return
         self.accept()
 

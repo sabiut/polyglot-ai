@@ -91,6 +91,13 @@ class TaskStore:
                     ON tasks(project_root, updated_at DESC);
                 """
             )
+            # v2 migration: add the bundled workflow_json column if
+            # an older DB is being opened. SQLite has no "ADD COLUMN
+            # IF NOT EXISTS" so we check PRAGMA first and add it on
+            # demand. The loader tolerates a missing column too.
+            existing_cols = {row[1] for row in c.execute("PRAGMA table_info(tasks)").fetchall()}
+            if "workflow_json" not in existing_cols:
+                c.execute("ALTER TABLE tasks ADD COLUMN workflow_json TEXT")
 
     # ── CRUD ────────────────────────────────────────────────────────
 
@@ -105,19 +112,27 @@ class TaskStore:
         """
         try:
             with self._conn() as c:
+                workflow_payload = json.dumps(
+                    {
+                        "acceptance_criteria": list(task.acceptance_criteria),
+                        "blocked_reason": task.blocked_reason,
+                        "priority": task.priority,
+                        "blocked_by": list(task.blocked_by),
+                    }
+                )
                 c.execute(
                     """
                     INSERT INTO tasks (
                         id, project_root, kind, title, description, state,
                         branch, base_branch, pr_url, pr_number, chat_session_id,
                         plan_json, modified_files_json, last_test_run_json,
-                        last_ci_run_json, notes_json,
+                        last_ci_run_json, notes_json, workflow_json,
                         created_at, updated_at, archived_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?,
                         ?, ?, ?,
-                        ?, ?,
+                        ?, ?, ?,
                         ?, ?, ?
                     )
                     ON CONFLICT(id) DO UPDATE SET
@@ -136,6 +151,7 @@ class TaskStore:
                         last_test_run_json = excluded.last_test_run_json,
                         last_ci_run_json = excluded.last_ci_run_json,
                         notes_json = excluded.notes_json,
+                        workflow_json = excluded.workflow_json,
                         updated_at = excluded.updated_at,
                         archived_at = excluded.archived_at
                     """,
@@ -156,6 +172,7 @@ class TaskStore:
                         json.dumps(asdict(task.last_test_run)) if task.last_test_run else None,
                         json.dumps(asdict(task.last_ci_run)) if task.last_ci_run else None,
                         json.dumps([asdict(n) for n in task.notes]),
+                        workflow_payload,
                         task.created_at,
                         task.updated_at,
                         task.archived_at,
@@ -253,8 +270,24 @@ class TaskStore:
         plan_data = _load_json("plan_json", [])
         plan = [PlanStep(**p) for p in plan_data] if plan_data else []
 
+        # Notes may have been written by an older version without the
+        # ``source`` / ``category`` fields. Build each one explicitly
+        # so extra / missing keys don't explode ``TaskNote(**n)``.
         notes_data = _load_json("notes_json", [])
-        notes = [TaskNote(**n) for n in notes_data] if notes_data else []
+        notes: list[TaskNote] = []
+        for n in notes_data or []:
+            if not isinstance(n, dict):
+                continue
+            notes.append(
+                TaskNote(
+                    timestamp=n.get("timestamp", 0.0),
+                    kind=n.get("kind", ""),
+                    text=n.get("text", ""),
+                    data=n.get("data") or {},
+                    source=n.get("source", "system"),
+                    category=n.get("category", ""),
+                )
+            )
 
         last_test_data = _load_json("last_test_run_json", None)
         last_test = TestRunSnapshot(**last_test_data) if last_test_data else None
@@ -263,6 +296,14 @@ class TaskStore:
         last_ci = CIRunSnapshot(**last_ci_data) if last_ci_data else None
 
         modified_files = _load_json("modified_files_json", [])
+
+        # Workflow bundle (v2) — tolerate the column being absent on
+        # databases created before the migration ran.
+        workflow_data = _load_json("workflow_json", {}) or {}
+        acceptance_criteria = list(workflow_data.get("acceptance_criteria") or [])
+        blocked_reason = str(workflow_data.get("blocked_reason") or "")
+        priority = str(workflow_data.get("priority") or "")
+        blocked_by = list(workflow_data.get("blocked_by") or [])
 
         return Task(
             id=row["id"],
@@ -281,6 +322,10 @@ class TaskStore:
             last_test_run=last_test,
             last_ci_run=last_ci,
             notes=notes,
+            acceptance_criteria=acceptance_criteria,
+            blocked_reason=blocked_reason,
+            priority=priority,
+            blocked_by=blocked_by,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             archived_at=row["archived_at"],

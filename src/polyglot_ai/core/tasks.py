@@ -19,9 +19,7 @@ class TaskKind(str, Enum):
     """The flavour of work the user is doing.
 
     Each kind unlocks a slightly different default workflow:
-    - FEATURE: reserved for an AI plan-checklist generator (not yet
-      wired — ``task.plan`` is currently always empty unless a caller
-      populates it manually)
+    - FEATURE: AI can draft a step-by-step plan via ``PlanGenerator``
     - BUGFIX:  shorter loop, focused on reproducing then fixing
     - INCIDENT: triggers the trace-extractor flow (paste a stack trace)
     - REFACTOR: cleanup / restructure with no new behaviour
@@ -55,11 +53,10 @@ class TaskState(str, Enum):
 class PlanStep:
     """A single checkbox in a task's plan.
 
-    Reserved for a future AI plan-checklist generator. No code path
-    currently populates ``task.plan`` — the model and the read-only
-    UI are in place so that the generator can be wired in without a
-    schema change. Each step optionally tracks the files it touched
-    and any AI notes about the implementation strategy.
+    Populated by :class:`polyglot_ai.core.plan_generator.PlanGenerator`
+    when the user clicks "Generate plan" in the task detail dialog.
+    Each step optionally tracks the files it touched and any AI notes
+    about the implementation strategy.
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -77,12 +74,24 @@ class TaskNote:
     test runs, CI events, PR opened/merged. The UI renders them as a
     chronological feed so the user (or a future ``Share`` button) can
     reconstruct what happened.
+
+    ``source`` and ``category`` let the UI filter and group the feed
+    once it gets noisy — "show only git events" or "hide automation".
+    Both default to backward-compatible values so existing rows in
+    the store load without migration.
     """
 
     timestamp: float
     kind: str  # "created" | "committed" | "tested" | "ai_response" | "pr_opened" | ...
     text: str
     data: dict = field(default_factory=dict)  # freeform payload for UI rendering
+    # "user" = explicit user action (clicked button / typed command)
+    # "ai" = a response or action attributed to the AI
+    # "automation" = watchers, pollers, CI webhooks
+    # "system" = default for anything the task manager writes itself
+    source: str = "system"
+    # Coarse filter bucket: "git" | "tests" | "ci" | "chat" | "workflow" | ""
+    category: str = ""
 
 
 @dataclass
@@ -146,6 +155,19 @@ class Task:
     last_test_run: TestRunSnapshot | None = None
     last_ci_run: CIRunSnapshot | None = None
     notes: list[TaskNote] = field(default_factory=list)
+
+    # ── Workflow clarity (added in v2) ──────────────────────────────
+    # What "done" looks like. Each entry is a short checkbox line.
+    acceptance_criteria: list[str] = field(default_factory=list)
+    # Why the task is blocked. Required when transitioning to BLOCKED
+    # (enforced by TaskManager.block_task).
+    blocked_reason: str = ""
+    # Optional free-form priority — "low" / "medium" / "high" / "urgent"
+    # by convention but not enforced so project-specific labels work.
+    priority: str = ""
+    # IDs of tasks that must land before this one can progress. Flat
+    # list on purpose — a full dependency graph is deferred to v3.
+    blocked_by: list[str] = field(default_factory=list)
 
     # Lifecycle timestamps
     created_at: float = field(default_factory=time.time)

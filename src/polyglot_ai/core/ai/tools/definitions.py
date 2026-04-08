@@ -43,6 +43,72 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "file_delete",
+            "description": (
+                "Delete a single file inside the project root. Refuses directories — "
+                "use dir_delete for those. Refuses CI/workflow/hooks paths and symlinks. "
+                "Always shows a confirmation dialog before running."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative file path from project root",
+                    }
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dir_create",
+            "description": (
+                "Create a directory (and any missing parents) inside the project root. "
+                "Idempotent — succeeds silently if the directory already exists."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative directory path from project root",
+                    }
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dir_delete",
+            "description": (
+                "Recursively delete a directory inside the project root. Requires "
+                "'recursive: true' as an explicit safety flag. Refuses the project root "
+                "itself, sensitive CI/hooks paths, and symlinks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative directory path from project root",
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Must be set to true to confirm recursive deletion",
+                    },
+                },
+                "required": ["path", "recursive"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "file_search",
             "description": "Search for a text pattern in files under the project root (plain text, not regex).",
             "parameters": {
@@ -654,6 +720,18 @@ AUTO_APPROVE = {
     "git_show_file",
     "create_plan",
     "web_search",  # read-only external fetch; auto-approved for UX
+    # File / directory mutations are auto-approved because the chat
+    # contract (enforced via the system prompt) is that the model
+    # MUST ask the user in plain text before calling any of these,
+    # and only call them after the user replies "yes"/"go ahead"/etc.
+    # This trades a single UI click for a Claude-style conversational
+    # flow — the user grants permission once in the chat, the tool
+    # runs, and the transcript records what happened.
+    "file_write",
+    "file_patch",
+    "file_delete",
+    "dir_create",
+    "dir_delete",
     # Docker read-only tools
     "docker_list_containers",
     "docker_list_images",
@@ -673,8 +751,10 @@ AUTO_APPROVE = {
     "db_get_schema",
 }
 REQUIRES_APPROVAL = {
-    "file_write",
-    "file_patch",
+    # ``shell_exec`` and ``git_commit`` stay on approval because they
+    # can do truly arbitrary things (network, git push, system mods,
+    # rewriting history) that the file-mutation tools cannot. One
+    # explicit click for a shell command is worth the friction.
     "shell_exec",
     "git_commit",
     # Mutating Docker tools
