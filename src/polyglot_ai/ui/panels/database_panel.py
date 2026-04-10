@@ -255,10 +255,11 @@ class DatabasePanel(QWidget):
     def _show_add_dialog(self) -> None:
         dialog = _AddConnectionDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            name, db_type, conn_str = dialog.get_values()
+            name, db_type, conn_str, read_only = dialog.get_values()
             if name and conn_str:
                 self._db_manager.add_connection_sync(
-                    name, db_type, conn_str, mcp_client=self._mcp_client
+                    name, db_type, conn_str, mcp_client=self._mcp_client,
+                    read_only=read_only,
                 )
                 self._conn_combo.addItem(f"{name} ({db_type})")
                 self._conn_combo.setCurrentIndex(self._conn_combo.count() - 1)
@@ -274,7 +275,11 @@ class DatabasePanel(QWidget):
         for name, conn in self._db_manager.connections.items():
             # Store connection string in keyring (may contain passwords)
             keyring.set_password("polyglot-ai-db", name, conn._connection_string)
-            data.append({"name": name, "db_type": conn.db_type})
+            data.append({
+                "name": name,
+                "db_type": conn.db_type,
+                "read_only": conn.read_only,
+            })
 
         from polyglot_ai.core.security import secure_write
 
@@ -293,10 +298,12 @@ class DatabasePanel(QWidget):
             for entry in data:
                 name = entry.get("name", "")
                 db_type = entry.get("db_type", "sqlite")
+                read_only = entry.get("read_only", True)
                 conn_str = keyring.get_password("polyglot-ai-db", name) or ""
                 if name and conn_str:
                     self._db_manager.add_connection_sync(
-                        name, db_type, conn_str, mcp_client=self._mcp_client
+                        name, db_type, conn_str, mcp_client=self._mcp_client,
+                        read_only=read_only,
                     )
                     self._conn_combo.addItem(f"{name} ({db_type})")
             if self._conn_combo.count() > 0:
@@ -1562,6 +1569,21 @@ class _AddConnectionDialog(QDialog):
         self._help_label.setWordWrap(True)
         form_layout.addWidget(self._help_label)
 
+        # Read-only checkbox (defaults to checked for safety)
+        from PyQt6.QtWidgets import QCheckBox
+
+        self._read_only_cb = QCheckBox("Read-only (recommended)")
+        self._read_only_cb.setChecked(True)
+        self._read_only_cb.setStyleSheet(
+            f"QCheckBox {{ color: {tc.get('text_secondary')}; "
+            f"font-size: {tc.FONT_SM}px; margin-top: 4px; }}"
+        )
+        self._read_only_cb.setToolTip(
+            "When checked, write statements (INSERT, UPDATE, DELETE, DDL) are blocked. "
+            "Uncheck only for connections where you intentionally need write access."
+        )
+        form_layout.addWidget(self._read_only_cb)
+
         layout.addWidget(form_widget)
         layout.addStretch()
 
@@ -1636,9 +1658,10 @@ class _AddConnectionDialog(QDialog):
             if not self._name_input.text():
                 self._name_input.setText(Path(path).stem)
 
-    def get_values(self) -> tuple[str, str, str]:
+    def get_values(self) -> tuple[str, str, str, bool]:
         db_type = self._type_combo.currentData() or "sqlite"
         name = self._name_input.text().strip()
+        read_only = self._read_only_cb.isChecked()
 
         if db_type == "sqlite":
             conn_str = self._conn_input.text().strip()
@@ -1664,7 +1687,7 @@ class _AddConnectionDialog(QDialog):
             if not name and database:
                 name = database
 
-        return (name, db_type, conn_str)
+        return (name, db_type, conn_str, read_only)
 
 
 #: Cached path to a painted chevron PNG used for dropdown arrows.

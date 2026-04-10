@@ -94,7 +94,15 @@ class ReviewPanel(QWidget):
             "🔍 Dockerfile Security", "Scan Dockerfiles for container security issues"
         )
         self._mode_combo.addItemWithDesc(
+            "🔍 Docker Compose Security",
+            "Scan docker-compose files for misconfig and secrets",
+        )
+        self._mode_combo.addItemWithDesc(
             "🔍 Helm Chart Security", "Scan Helm templates and values for security issues"
+        )
+        self._mode_combo.addItemWithDesc(
+            "🎨 Frontend Design Audit",
+            "Audit UI components, styles, and tokens for hierarchy, accessibility, and polish",
         )
         self._mode_combo.setFixedWidth(220)
         self._mode_combo.setFixedHeight(30)
@@ -236,7 +244,14 @@ class ReviewPanel(QWidget):
 
         idx = self._mode_combo.currentIndex()
         diff_modes = {0: "working", 1: "staged", 2: "branch"}
-        iac_modes = {3: "terraform", 4: "kubernetes", 5: "dockerfile", 6: "helm"}
+        iac_modes = {
+            3: "terraform",
+            4: "kubernetes",
+            5: "dockerfile",
+            6: "docker_compose",
+            7: "helm",
+            8: "frontend_design",
+        }
 
         # Get current model from parent chat panel if possible. If this
         # fails we fall back to the provider manager's default — log so
@@ -252,6 +267,11 @@ class ReviewPanel(QWidget):
                     "falling back to provider default",
                     exc_info=True,
                 )
+
+        # Shared across branches so we can publish one snapshot after
+        # the result lands, regardless of diff vs IaC path.
+        review_mode_label: str = "unknown"
+        files_scanned: list[str] = []
 
         if idx in diff_modes:
             # Existing diff review path
@@ -270,23 +290,44 @@ class ReviewPanel(QWidget):
             self._clear_results()
             self._show_message("Analyzing changes with AI...", "#569cd6")
             result = await self._review_engine.review_diff(diff_text, model_id=model_id)
+            review_mode_label = mode
+            # Diff modes embed file info in the diff itself — listing
+            # files_scanned separately would be noisy and redundant.
+            files_scanned = []
         else:
-            # IaC review path
+            # IaC / frontend review path. ``iac_mode`` is the engine
+            # key (e.g. ``docker_compose``); ``mode_pretty`` is the
+            # user-facing string we drop into status messages so the
+            # underscore-y enum doesn't leak into the UI.
             iac_mode = iac_modes.get(idx, "terraform")
+            mode_pretty = {
+                "terraform": "Terraform",
+                "kubernetes": "Kubernetes",
+                "dockerfile": "Dockerfile",
+                "docker_compose": "Docker Compose",
+                "helm": "Helm chart",
+                "frontend_design": "frontend",
+            }.get(iac_mode, iac_mode)
             self._clear_results()
-            self._show_message(f"Scanning for {iac_mode} files...", "#888")
+            self._show_message(f"Scanning for {mode_pretty} files...", "#888")
 
             files = collect_iac_files(self._project_root, iac_mode)
             if not files:
                 self._clear_results()
-                self._show_message(f"No {iac_mode} files found in this project.", "#cca700")
+                self._show_message(
+                    f"No {mode_pretty} files found in this project.", "#cca700"
+                )
                 self._run_btn.setEnabled(True)
                 self._run_btn.setText("▶ Run Review")
                 return
 
             self._clear_results()
-            self._show_message(f"Analyzing {len(files)} {iac_mode} file(s) with AI...", "#569cd6")
+            self._show_message(
+                f"Analyzing {len(files)} {mode_pretty} file(s) with AI...", "#569cd6"
+            )
             result = await self._review_engine.review_content(files, iac_mode, model_id=model_id)
+            review_mode_label = iac_mode
+            files_scanned = sorted(files.keys())
 
         self._current_result = result
 
@@ -299,6 +340,24 @@ class ReviewPanel(QWidget):
         # Record on the active task so the timeline reflects the review
         # and the AI's system prompt knows the latest review outcome.
         self._record_review_on_task(result)
+
+        # Publish the review snapshot to panel_state so the AI chat
+        # can see it — both as a compact block in the system prompt
+        # and via the get_review_findings tool for drill-down. See
+        # polyglot_ai/core/panel_state.py for the contract.
+        try:
+            from polyglot_ai.core import panel_state
+            from polyglot_ai.core.review.snapshot import build_review_snapshot
+
+            snapshot = build_review_snapshot(result, review_mode_label, files_scanned)
+            panel_state.set_last_review(snapshot)
+        except Exception:
+            logger.exception("review_panel: failed to publish review snapshot")
+            self._show_message(
+                "Review complete, but AI integration failed. "
+                "The chat may not see these findings.",
+                "#cca700",
+            )
 
     def _record_review_on_task(self, result) -> None:
         if self._task_manager is None or self._task_manager.active is None:

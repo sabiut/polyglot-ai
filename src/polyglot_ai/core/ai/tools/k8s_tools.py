@@ -239,16 +239,21 @@ async def k8s_scale_deployment(args: dict) -> str:
     return f"Deployment '{deployment}' scaled to {replicas} replicas. {output}"
 
 
-async def k8s_apply(args: dict) -> str:
+async def k8s_apply(args: dict, *, project_root: "Path | None" = None) -> str:
     """Apply a Kubernetes manifest from YAML content or a file path.
 
     File paths are sandboxed: URLs are rejected, the path must resolve
-    under the current working directory (i.e. the open project), and the
-    file must actually exist. This prevents the AI (or a compromised
-    prompt) from asking kubectl to apply an arbitrary remote manifest
-    (kubectl supports URLs via `-f`) or a sensitive system path.
+    under the open project root, and the file must actually exist.
+    This prevents the AI (or a compromised prompt) from asking kubectl
+    to apply an arbitrary remote manifest (kubectl supports URLs via
+    ``-f``) or a sensitive system path.
+
+    ``project_root`` is passed by the tool dispatcher from the Sandbox.
+    Falls back to ``Path.cwd()`` only when no project is open (which
+    means the sandbox guard in ``_execute_single`` would have already
+    rejected the call for non-standalone tools).
     """
-    from pathlib import Path
+    from pathlib import Path as _Path
 
     yaml_content = args.get("yaml", "") or args.get("manifest", "")
     file_path = args.get("file", "")
@@ -267,17 +272,17 @@ async def k8s_apply(args: dict) -> str:
                 "Download the manifest into the project first, then reference the local path."
             )
         try:
-            project_root = Path.cwd().resolve()
-            resolved = Path(file_path).expanduser().resolve()
+            root = (project_root or _Path.cwd()).resolve()
+            resolved = _Path(file_path).expanduser().resolve()
         except (OSError, RuntimeError) as e:
             return f"Error resolving manifest path: {e}"
 
         try:
-            resolved.relative_to(project_root)
+            resolved.relative_to(root)
         except ValueError:
             return (
                 f"Error: manifest path '{resolved}' is outside the current project "
-                f"('{project_root}'). Only files inside the open project may be applied."
+                f"('{root}'). Only files inside the open project may be applied."
             )
 
         if not resolved.is_file():

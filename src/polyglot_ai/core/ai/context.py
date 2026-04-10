@@ -165,6 +165,16 @@ class ContextBuilder:
             )
             parts.append("")
 
+        # Panel-state block: anything published by UI panels via
+        # ``core.panel_state`` (currently the most recent code review).
+        # Placed before the boilerplate rules so the model sees it as
+        # high-priority, user-visible context — not buried under the
+        # file listing.
+        panel_block = self._render_panel_state_block()
+        if panel_block:
+            parts.append(panel_block)
+            parts.append("")
+
         parts += [
             "You are a coding assistant built into a desktop IDE.",
             "The user's project files are included below — you can read everything.",
@@ -241,9 +251,31 @@ class ContextBuilder:
             # Use project directory name only — avoid leaking absolute
             # home path (username, directory structure) to AI providers.
             parts.append(f"\nProject: {self._project_root.name}")
-            parts.append(self._detect_project_type())
-            parts.append(self._get_project_tree())
-            parts.append(self._get_file_contents())
+            project_type = self._detect_project_type()
+            parts.append(project_type)
+            project_tree = self._get_project_tree()
+            parts.append(project_tree)
+            file_contents = self._get_file_contents()
+            parts.append(file_contents)
+
+            # Empty-project guardrail: when the folder has no detected
+            # stack AND no code files, the model would otherwise silently
+            # pick a framework (usually Next.js or Django) and scaffold
+            # it without asking. That's a bad experience for users who
+            # had a specific stack in mind. Inject a directive that
+            # forces a stack question before create_plan is emitted.
+            if not project_type.strip() and not self._has_any_code_files():
+                parts.append("")
+                parts.append("EMPTY PROJECT DIRECTIVE:")
+                parts.append(
+                    "This project directory is empty or has no recognisable "
+                    "source files. BEFORE calling create_plan or writing any "
+                    "files, you MUST ask the user which stack/framework they "
+                    "want (language, web framework, database, styling, auth), "
+                    "unless they already stated it in the current message. "
+                    "Do NOT guess. List 2-3 sensible options if they seem "
+                    "unsure, but wait for their answer before proposing a plan."
+                )
 
         if custom_prompt:
             parts.append("")
@@ -251,6 +283,111 @@ class ContextBuilder:
             parts.append(custom_prompt)
 
         return "\n".join(parts)
+
+    def _has_any_code_files(self) -> bool:
+        """Return True if the project has at least one code/source file.
+
+        Used by the empty-project directive — we intentionally reuse
+        ``_walk_files`` so "code file" means the same thing here as it
+        does in the file-contents section (same extensions, same
+        SKIP_DIRS). Limited to depth 3 to keep the check fast.
+        """
+        if not self._project_root or not self._project_root.is_dir():
+            return False
+        try:
+            files = self._walk_files(self._project_root, depth=3)
+            return len(files) > 0
+        except OSError:
+            # Err on the side of NOT emitting the directive: a transient
+            # permission error shouldn't nag a user whose project is
+            # perfectly populated.
+            logger.debug(
+                "_has_any_code_files: filesystem error scanning %s, assuming populated",
+                self._project_root,
+                exc_info=True,
+            )
+            return True
+
+    def _render_panel_state_block(self) -> str:
+        """Render a compact ``--- PANEL STATE ---`` block.
+
+        Currently only shows the most recent review (if any). The
+        block names the review mode, file list, finding counts, the
+        top five findings by severity, and nudges the model to call
+        ``get_review_findings`` when it needs more detail. Returns an
+        empty string when nothing has been published yet.
+
+        Wrapped in a top-level try/except so a malformed snapshot can
+        never crash :meth:`build_system_prompt`.
+        """
+        try:
+            return self._render_panel_state_block_inner()
+        except Exception:
+            logger.debug(
+                "_render_panel_state_block: failed to render, skipping",
+                exc_info=True,
+            )
+            return ""
+
+    def _render_panel_state_block_inner(self) -> str:
+        """Inner renderer — may raise on malformed snapshot data."""
+        from polyglot_ai.core import panel_state
+
+        review = panel_state.get_last_review()
+        if not review:
+            return ""
+
+        lines: list[str] = ["--- PANEL STATE ---", ""]
+
+        mode = review.get("mode") or "unknown"
+        status = review.get("status") or "ok"
+        lines.append(f"Last review: {mode} (status: {status})")
+
+        files = review.get("files") or []
+        if files:
+            shown = ", ".join(files[:5])
+            if len(files) > 5:
+                shown += f", ... +{len(files) - 5} more"
+            lines.append(f"Files scanned: {shown}")
+
+        counts = review.get("counts") or {}
+        try:
+            total = int(review.get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if total:
+            parts_counts = [
+                f"{counts.get(sev, 0)} {sev}"
+                for sev in ("critical", "high", "medium", "low", "info")
+                if counts.get(sev, 0)
+            ]
+            lines.append(f"Findings: {total} ({' · '.join(parts_counts)})")
+        else:
+            lines.append("Findings: 0 (clean)")
+
+        findings = review.get("findings") or []
+        if findings:
+            lines.append("")
+            lines.append("Top findings (most severe first):")
+            for f in findings[:5]:
+                sev = str(f.get("severity") or "").upper()
+                file = f.get("file") or ""
+                line_no = f.get("line") or 0
+                title = f.get("title") or ""
+                lines.append(f"  - [{sev}] {file}:{line_no} {title}")
+            if len(findings) > 5:
+                lines.append(
+                    f"  ... and {len(findings) - 5} more "
+                    "(call get_review_findings for the full list)"
+                )
+
+        lines.append("")
+        lines.append(
+            "The user just ran this review in the Code Review panel. "
+            "Call the get_review_findings tool to filter by severity or "
+            "file when the user asks about specific issues."
+        )
+        return "\n".join(lines)
 
     def _get_project_tree(self) -> str:
         """Generate project directory tree."""

@@ -21,10 +21,12 @@ class AuditLogger:
     def log(self, event_type: str, detail: dict | None = None) -> None:
         now = datetime.now(timezone.utc)
         log_file = self._log_dir / f"audit-{now.strftime('%Y-%m-%d')}.jsonl"
+        # Redact SQL content that may contain embedded secrets
+        safe_detail = self._redact_sql_in_detail(detail or {})
         entry = {
             "timestamp": now.isoformat(),
             "event_type": event_type,
-            "detail": detail or {},
+            "detail": safe_detail,
         }
         try:
             is_new = not log_file.exists()
@@ -38,3 +40,18 @@ class AuditLogger:
                     pass
         except OSError:
             logger.exception("Failed to write audit log")
+
+    @staticmethod
+    def _redact_sql_in_detail(detail: dict) -> dict:
+        """Redact SQL values in audit detail if they contain secrets."""
+        if "sql" not in detail or not isinstance(detail["sql"], str):
+            return detail
+        try:
+            from polyglot_ai.core.security import scan_content_for_secrets
+
+            if scan_content_for_secrets(detail["sql"]):
+                detail = dict(detail)  # shallow copy
+                detail["sql"] = "[REDACTED: contained potential secrets]"
+        except Exception:
+            pass
+        return detail

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from polyglot_ai.core.ai.tools.definitions import (
     AUTO_APPROVE,
@@ -54,6 +55,8 @@ _STANDALONE_TOOL_NAMES = frozenset(
         "db_get_schema",
         "db_query",
         "db_execute",
+        # Panel state (reads in-process dict, no sandbox needed)
+        "get_review_findings",
     }
 )
 
@@ -71,22 +74,123 @@ class ToolRegistry:
         self._sandbox = sandbox
         self._file_ops = file_ops
         self._mcp_client = None
+        # Bootstrap mode — a time-boxed window during which shell_exec
+        # is auto-approved so the user doesn't have to click through
+        # every `npm install`, `pip install`, `go mod tidy`, etc. when
+        # scaffolding a greenfield project. See ``enable_bootstrap_mode``
+        # for the contract. Stored as a monotonic deadline (seconds) so
+        # clock changes can't extend or shrink it.
+        self._bootstrap_deadline: float = 0.0
 
     @staticmethod
     def get_tool_definitions() -> list[dict]:
         return TOOL_DEFINITIONS
 
-    def needs_approval(self, tool_name: str) -> bool:
+    def needs_approval(self, tool_name: str, args: dict | None = None) -> bool:
         """Check if a tool requires user approval.
 
         Fail-safe: any tool NOT in AUTO_APPROVE requires approval,
         including unknown tools and MCP tools.
+
+        When bootstrap mode is active, ``shell_exec`` is auto-approved
+        only for safelisted command prefixes (package installs and
+        project scaffolding). Destructive commands still require
+        explicit approval.
         """
+        if self._is_bootstrap_approved(tool_name, args):
+            return False
         return tool_name not in AUTO_APPROVE
 
-    def is_auto_approved(self, tool_name: str) -> bool:
-        """Check if a tool can run without user approval."""
+    def is_auto_approved(self, tool_name: str, args: dict | None = None) -> bool:
+        """Check if a tool can run without user approval.
+
+        Mirrors :meth:`needs_approval` so they can't disagree — the
+        bootstrap-mode override applies here too.
+        """
+        if self._is_bootstrap_approved(tool_name, args):
+            return True
         return tool_name in AUTO_APPROVE
+
+    def _is_bootstrap_approved(self, tool_name: str, args: dict | None = None) -> bool:
+        """Return True if bootstrap mode approves this specific invocation.
+
+        Only ``shell_exec`` calls whose command starts with a safelisted
+        prefix qualify. Everything else — including shell_exec with
+        unrecognised commands — still requires normal approval.
+        """
+        if tool_name != "shell_exec" or not self.is_bootstrap_active():
+            return False
+        if args is None:
+            return False
+        cmd = (args.get("command") or "").strip()
+        return any(cmd.startswith(p) for p in self._BOOTSTRAP_SAFE_PREFIXES)
+
+    # ── Bootstrap mode ──────────────────────────────────────────────
+    #
+    # A short, time-boxed relaxation of shell_exec approval so
+    # greenfield scaffolding (``npm install``, ``pip install -r``,
+    # ``go mod tidy``, ``cargo new``, …) doesn't require the user to
+    # click through dozens of dialogs. Only shell_exec is affected —
+    # every other tool in REQUIRES_APPROVAL still prompts. The mode
+    # auto-expires via a monotonic deadline and can be disabled
+    # explicitly.
+
+    # Default window. Chosen to be long enough for a Next.js + Prisma
+    # + Tailwind install to finish on a slow connection but short
+    # enough that an idle toggle doesn't linger dangerously.
+    BOOTSTRAP_DEFAULT_SECONDS = 15 * 60
+
+    # Command prefixes that are auto-approved during bootstrap mode.
+    # Only dependency-install and inert scaffold commands qualify.
+    # Deliberately excludes execution commands:
+    #   - npx/yarn dlx/pnpm dlx (download + execute arbitrary packages)
+    #   - cargo run/cargo script (execute compiled code)
+    #   - bare yarn/pnpm (match yarn run, pnpm exec, etc.)
+    _BOOTSTRAP_SAFE_PREFIXES = (
+        "npm install", "npm ci",
+        "yarn install", "yarn add",
+        "pnpm install", "pnpm add",
+        "pip install", "pip3 install", "python -m pip",
+        "go mod ",
+        "cargo build", "cargo new", "cargo init", "cargo fetch", "cargo add",
+        "bundle install", "composer install",
+        "mkdir ", "touch ",
+    )
+
+    def enable_bootstrap_mode(self, duration_seconds: int | None = None) -> float:
+        """Relax ``shell_exec`` approval for up to ``duration_seconds``.
+
+        Returns the monotonic deadline. Pass ``None`` for the default
+        (15 minutes). Re-calling while active REPLACES the deadline —
+        it does not stack — so a user click always extends to exactly
+        the requested window.
+        """
+        seconds = (
+            duration_seconds
+            if duration_seconds is not None
+            else self.BOOTSTRAP_DEFAULT_SECONDS
+        )
+        if seconds <= 0:
+            self._bootstrap_deadline = 0.0
+            return 0.0
+        self._bootstrap_deadline = time.monotonic() + float(seconds)
+        logger.info("Bootstrap mode enabled for %ds", seconds)
+        return self._bootstrap_deadline
+
+    def disable_bootstrap_mode(self) -> None:
+        """Immediately end bootstrap mode regardless of remaining time."""
+        if self._bootstrap_deadline:
+            logger.info("Bootstrap mode disabled")
+        self._bootstrap_deadline = 0.0
+
+    def is_bootstrap_active(self) -> bool:
+        """Return True if bootstrap mode is still within its window."""
+        return self._bootstrap_deadline > time.monotonic()
+
+    def bootstrap_seconds_remaining(self) -> int:
+        """Return seconds left on the bootstrap window, 0 if inactive."""
+        remaining = self._bootstrap_deadline - time.monotonic()
+        return int(remaining) if remaining > 0 else 0
 
     def set_mcp_client(self, mcp_client) -> None:
         """Set MCP client for delegating mcp_* tool calls."""
@@ -276,7 +380,8 @@ class ToolRegistry:
             elif tool_name == "k8s_apply":
                 from .k8s_tools import k8s_apply
 
-                return await k8s_apply(args)
+                root = self._sandbox.project_root if self._sandbox else None
+                return await k8s_apply(args, project_root=root)
 
             # Database tools
             elif tool_name == "db_list_connections":
@@ -302,6 +407,12 @@ class ToolRegistry:
                 from .db_tools import db_execute
 
                 return await db_execute(args)
+
+            # Panel state tools
+            elif tool_name == "get_review_findings":
+                from .panel_tools import get_review_findings
+
+                return await get_review_findings(args)
 
             # MCP tools
             elif self._mcp_client and tool_name.startswith("mcp_"):
@@ -339,10 +450,30 @@ class ToolRegistry:
                 return None
         return results if len(results) > 1 else None
 
+    # Max MCP tool output size — truncate to prevent prompt blowout
+    # from unexpectedly large external tool responses.
+    _MAX_MCP_OUTPUT = 50_000
+
     async def _execute_mcp_tool(self, tool_name: str, args: dict) -> str:
-        """Execute a tool via MCP client."""
+        """Execute a tool via MCP client.
+
+        Output is truncated to ``_MAX_MCP_OUTPUT`` characters and error
+        messages are sanitised to avoid leaking connection strings or
+        credentials from external services.
+        """
         try:
             result = await self._mcp_client.call_tool(tool_name, args)
-            return str(result) if result else "Tool returned no output."
+            output = str(result) if result else "Tool returned no output."
+            if len(output) > self._MAX_MCP_OUTPUT:
+                output = (
+                    output[: self._MAX_MCP_OUTPUT]
+                    + f"\n... (truncated, {len(output)} chars total)"
+                )
+            return output
         except Exception as e:
-            return f"MCP tool error: {e}"
+            # Sanitise: MCP errors can contain connection URIs, tokens,
+            # or internal paths from the remote service.
+            msg = str(e)
+            if len(msg) > 200:
+                msg = msg[:200] + "..."
+            return f"MCP tool error: {msg}"

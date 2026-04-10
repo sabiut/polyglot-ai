@@ -204,6 +204,45 @@ LOW / INFO severity:
 )
 
 
+DOCKER_COMPOSE_REVIEW_PROMPT = (
+    """You are a container security expert reviewing Docker Compose files.
+
+Look for these security issues:
+
+CRITICAL / HIGH severity:
+- Hardcoded secrets in environment: passwords, API keys, tokens directly in `environment:` or `env_file:`
+- `privileged: true` on any service
+- Host network mode (`network_mode: host`)
+- Bind mounts of sensitive host paths (/, /var/run/docker.sock, /etc, /root, ~/.ssh, ~/.aws)
+- Exposing the Docker socket to containers (docker-in-docker escape risk)
+- `:latest` image tags (non-reproducible, no pinning)
+- Images from untrusted registries or without digests
+- Ports published to 0.0.0.0 for databases/admin services (should bind to 127.0.0.1)
+- `user: root` or missing `user:` for services that don't need root
+- Capabilities added with `cap_add: [SYS_ADMIN, NET_ADMIN, ALL]`
+
+MEDIUM severity:
+- Missing `read_only: true` on services that don't need a writable rootfs
+- No `cap_drop: [ALL]` baseline before selective `cap_add`
+- Missing `security_opt: [no-new-privileges:true]`
+- Using `env_file:` that points at committed files rather than secrets
+- No resource limits (`mem_limit`, `cpus`, `pids_limit`)
+- Missing `restart:` policy on critical services
+- No healthcheck defined
+- `depends_on` without `condition: service_healthy`
+- Using the default bridge network instead of a user-defined network
+
+LOW / INFO severity:
+- Compose file version pinned to obsolete "2.x" spec
+- Service names that leak internal architecture (e.g. `prod-db`)
+- No explicit `container_name` policy (collisions across environments)
+- Missing labels for traceability
+- Volumes declared inline instead of as named top-level volumes
+"""
+    + _IAC_JSON_INSTRUCTIONS
+)
+
+
 HELM_REVIEW_PROMPT = (
     """You are a Kubernetes security expert reviewing Helm charts.
 
@@ -238,11 +277,72 @@ LOW / INFO severity:
 )
 
 
+FRONTEND_DESIGN_REVIEW_PROMPT = (
+    """You are a senior frontend designer auditing UI source code.
+
+You will receive a set of frontend files (JSX/TSX/Vue/Svelte/HTML
+templates, CSS/SCSS, design tokens, Tailwind config). Audit them
+holistically: what does this UI actually look and feel like, and what
+would a discerning designer fix first?
+
+Be opinionated. Cite specific files and line numbers. Avoid generic
+"consider improving accessibility" statements — name the exact element
+and the exact change.
+
+CRITICAL severity:
+- WCAG 2.1 AA contrast violations: text under 4.5:1, UI elements under 3:1
+- Interactive elements without keyboard access (div onClick with no role/tabindex)
+- Missing alt text on meaningful images, missing labels on inputs
+- Focus traps or focus that disappears (outline:none with no replacement)
+- Forms with no error association (aria-describedby missing)
+- Click targets under 44×44px on mobile breakpoints
+
+HIGH severity:
+- Visual hierarchy collapse: too many sibling sizes/weights, no clear primary
+- Inconsistent spacing (random px values instead of a 4/8 token scale)
+- Color sprawl: more than ~7 distinct grays/blues used inconsistently
+- Typography: more than 2 font families, more than 5 sizes in normal use
+- Hardcoded magic numbers (colors, spacing, radii) instead of design tokens
+- Mixing rem/em/px chaotically across the same component
+- Buttons with no hover/focus/disabled states defined
+- Loading and empty states missing on async UI
+- Generic-AI smell: every card the same shadow, gray-100/200/300 walls,
+  default shadcn with no customization, lorem ipsum, placeholder gradients
+
+MEDIUM severity:
+- Mobile breakpoints missing or only one breakpoint defined
+- Layouts that wrap awkwardly between 600-900px
+- Long line measure (>75ch) on body text
+- Line-height too tight on body copy (<1.5)
+- Misaligned grid: items that don't sit on a shared baseline
+- Inline styles overriding the design system
+- Animation that ignores prefers-reduced-motion
+- Tab order doesn't match visual order
+
+LOW / INFO severity:
+- Naming inconsistencies in tokens / class names / component props
+- CSS specificity wars (!important, deeply nested selectors)
+- Unused / dead CSS classes
+- Duplicate components that could be one (Button vs PrimaryButton vs CTAButton)
+- Copy issues: vague CTAs ("Submit", "Click here"), placeholder error messages
+- Missing favicons / open-graph metadata in document head
+- Hardcoded dark mode colors with no light mode counterpart (or vice versa)
+
+Focus on what an experienced designer would notice in the first 30
+seconds of reviewing the code, not theoretical purity. The user wants
+their UI to feel deliberate and crafted, not generic.
+"""
+    + _IAC_JSON_INSTRUCTIONS
+)
+
+
 _MODE_PROMPTS: dict[str, str] = {
     "terraform": TERRAFORM_REVIEW_PROMPT,
     "kubernetes": KUBERNETES_REVIEW_PROMPT,
     "dockerfile": DOCKERFILE_REVIEW_PROMPT,
+    "docker_compose": DOCKER_COMPOSE_REVIEW_PROMPT,
     "helm": HELM_REVIEW_PROMPT,
+    "frontend_design": FRONTEND_DESIGN_REVIEW_PROMPT,
 }
 
 
@@ -989,6 +1089,38 @@ def collect_dockerfiles(project_root: str | Path) -> dict[str, str]:
     return result
 
 
+def collect_docker_compose_files(project_root: str | Path) -> dict[str, str]:
+    """Collect Docker Compose files from the project.
+
+    Matches the canonical compose filenames: ``docker-compose.yml``,
+    ``docker-compose.yaml``, ``compose.yml``, ``compose.yaml``, and
+    variant overrides like ``docker-compose.override.yml`` or
+    ``docker-compose.prod.yaml``.
+    """
+    root = Path(project_root)
+    if not root.is_dir():
+        return {}
+    files = _walk_iac(
+        root,
+        [
+            "**/docker-compose.yml",
+            "**/docker-compose.yaml",
+            "**/docker-compose.*.yml",
+            "**/docker-compose.*.yaml",
+            "**/compose.yml",
+            "**/compose.yaml",
+            "**/compose.*.yml",
+            "**/compose.*.yaml",
+        ],
+    )
+    result: dict[str, str] = {}
+    for f in files:
+        entry = _read_file_safe(f, root)
+        if entry:
+            result[entry[0]] = entry[1]
+    return result
+
+
 def collect_helm_files(project_root: str | Path) -> dict[str, str]:
     """Collect Helm chart files (Chart.yaml, values.yaml, templates/)."""
     root = Path(project_root)
@@ -1013,13 +1145,90 @@ def collect_helm_files(project_root: str | Path) -> dict[str, str]:
     return result
 
 
+def collect_frontend_files(project_root: str | Path) -> dict[str, str]:
+    """Collect frontend UI source files for design audit.
+
+    Casts a deliberately wide net so the audit sees the whole story —
+    components AND styles AND design tokens AND framework config.
+    The model needs all three to give grounded feedback (e.g. "this
+    component hardcodes #f3f4f6 instead of using your tailwind gray-100
+    token").
+
+    Skips ``node_modules``, build outputs, and Storybook stories. Caps
+    the result at 80 files after filtering to keep prompts under
+    provider limits — larger projects should narrow the audit to a
+    subdirectory by opening it as the project root.
+    """
+    root = Path(project_root)
+    if not root.is_dir():
+        return {}
+    files = _walk_iac(
+        root,
+        [
+            # Components
+            "**/*.tsx",
+            "**/*.jsx",
+            "**/*.vue",
+            "**/*.svelte",
+            "**/*.astro",
+            # Templates / pages
+            "**/*.html",
+            "**/*.htm",
+            # Styles
+            "**/*.css",
+            "**/*.scss",
+            "**/*.sass",
+            "**/*.less",
+            "**/*.styl",
+            # Design tokens / theme config
+            "**/tailwind.config.*",
+            "**/postcss.config.*",
+            "**/theme.ts",
+            "**/theme.js",
+            "**/tokens.json",
+            "**/tokens.js",
+            "**/tokens.ts",
+            "**/design-tokens.*",
+            "**/styles.*",
+            "**/globals.css",
+        ],
+    )
+
+    # Drop noisy build/output dirs and storybook stories that aren't
+    # production UI. _walk_iac already skips node_modules / .git etc.
+    DROP_PATH_PARTS = {"dist", "build", ".next", ".nuxt", ".svelte-kit", "out", "storybook-static"}
+    DROP_SUFFIXES = (".stories.tsx", ".stories.jsx", ".stories.ts", ".stories.js")
+
+    filtered: list[Path] = []
+    for f in files:
+        if any(part in DROP_PATH_PARTS for part in f.parts):
+            continue
+        if f.name.endswith(DROP_SUFFIXES):
+            continue
+        filtered.append(f)
+
+    # Cap to keep prompts manageable. ~80 files * ~2KB = 160KB which
+    # fits comfortably even after the system prompt overhead.
+    MAX_FILES = 80
+    filtered = filtered[:MAX_FILES]
+
+    result: dict[str, str] = {}
+    for f in filtered:
+        entry = _read_file_safe(f, root)
+        if entry:
+            result[entry[0]] = entry[1]
+    return result
+
+
 def collect_iac_files(project_root: str | Path, mode: str) -> dict[str, str]:
     """Collect IaC files for a given mode."""
     collectors = {
         "terraform": collect_terraform_files,
         "kubernetes": collect_k8s_manifests,
         "dockerfile": collect_dockerfiles,
+        "docker_compose": collect_docker_compose_files,
         "helm": collect_helm_files,
+        "frontend_design": collect_frontend_files,
     }
     collector = collectors.get(mode)
     if not collector:

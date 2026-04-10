@@ -103,6 +103,63 @@ class TasksPanel(QWidget):
         event_bus.subscribe(EVT_TASK_LIST_CHANGED, lambda **_: self._refresh_requested.emit())
         event_bus.subscribe(EVT_TASK_CHANGED, lambda **_: self._refresh_requested.emit())
 
+    # ── Public API (command palette) ────────────────────────────────
+    #
+    # These entry points let the command palette drive the Tasks
+    # panel without having to know its internals. Keeping them thin
+    # and tolerant of "project not open yet" means palette actions
+    # never crash; at worst they're no-ops.
+
+    def trigger_new_task(self) -> None:
+        """Open the inline quick-create row and focus the title input."""
+        if self._task_manager is None or self._task_manager.project_root is None:
+            return
+        if not self._quick_create_row.isVisible():
+            self._quick_create_row.setVisible(True)
+        self._quick_create_input.setFocus()
+        self._quick_create_input.selectAll()
+
+    def trigger_new_task_dialog(self) -> None:
+        """Open the full _NewTaskDialog (kind + description) directly."""
+        if self._task_manager is None or self._task_manager.project_root is None:
+            return
+        dlg = _NewTaskDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        kind, title, description = dlg.get_values()
+        if not title:
+            return
+        self._task_manager.create_task(kind, title, description)
+
+    def open_active_task_detail(self) -> None:
+        """Open the detail dialog for the currently active task, if any."""
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        self._on_open_detail(self._task_manager.active.id)
+
+    def mark_active_done(self) -> None:
+        """Transition the active task to DONE."""
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        try:
+            self._task_manager.update_state(TaskState.DONE)
+        except Exception:
+            logger.exception("tasks_panel: could not mark active task done")
+            try:
+                from PyQt6.QtWidgets import QMessageBox
+
+                QMessageBox.warning(
+                    self, "Error", "Could not mark the active task as done."
+                )
+            except Exception:
+                pass
+
+    def block_active_task(self) -> None:
+        """Prompt for a blocker reason and mark the active task BLOCKED."""
+        if self._task_manager is None or self._task_manager.active is None:
+            return
+        self._prompt_block(self._task_manager.active)
+
     # ── UI ──────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
@@ -146,6 +203,51 @@ class TasksPanel(QWidget):
             h.addWidget(expand_btn)
 
         layout.addWidget(header)
+
+        # Inline quick-create row. Hidden by default; toggled by the
+        # + header button. Enter creates a task with default kind
+        # FEATURE; Esc cancels. A small "more…" button opens the full
+        # _NewTaskDialog for users who want to set kind/description.
+        # Replacing the modal-only flow here was the biggest UX friction
+        # point — most tasks are created with just a title.
+        self._quick_create_row = QWidget()
+        self._quick_create_row.setStyleSheet(
+            "background-color: #252526; border-bottom: 1px solid #333;"
+        )
+        self._quick_create_row.setVisible(False)
+        qc_layout = QHBoxLayout(self._quick_create_row)
+        qc_layout.setContentsMargins(12, 8, 6, 8)
+        qc_layout.setSpacing(6)
+
+        self._quick_create_input = QLineEdit()
+        self._quick_create_input.setPlaceholderText(
+            "Task title — Enter to create, Esc to cancel"
+        )
+        self._quick_create_input.setStyleSheet(
+            "QLineEdit { background: #1e1e1e; color: #e0e0e0; "
+            "border: 1px solid #3c3c3c; border-radius: 4px; "
+            "padding: 5px 8px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #0e639c; }"
+        )
+        self._quick_create_input.returnPressed.connect(self._on_quick_create_commit)
+        # Catch Esc at the key-press level so we can close the row
+        # without triggering the QLineEdit's default clear-selection.
+        self._quick_create_input.installEventFilter(self)
+        qc_layout.addWidget(self._quick_create_input, stretch=1)
+
+        more_btn = QPushButton("⋯")
+        more_btn.setFixedSize(22, 22)
+        more_btn.setToolTip("More options (kind, description)")
+        more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        more_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #888; "
+            "border: 1px solid #3c3c3c; border-radius: 3px; font-size: 14px; }"
+            "QPushButton:hover { color: #ddd; border-color: #555; }"
+        )
+        more_btn.clicked.connect(self._on_quick_create_more)
+        qc_layout.addWidget(more_btn)
+
+        layout.addWidget(self._quick_create_row)
 
         # Scrollable list of grouped task cards
         scroll = QScrollArea()
@@ -373,8 +475,24 @@ class TasksPanel(QWidget):
         try:
             from polyglot_ai.ui.dialogs.task_detail_dialog import TaskDetailDialog
 
+            # Non-modal: show() instead of exec() so the user can keep
+            # the detail window open alongside the rest of the app
+            # (chat, review, git). We stash it on ``self`` so Python
+            # doesn't garbage-collect the QDialog the moment this
+            # method returns. Any existing open dialog is replaced.
+            existing = getattr(self, "_detail_dialog", None)
+            if existing is not None:
+                try:
+                    existing.close()
+                except RuntimeError:
+                    pass  # Widget already destroyed by Qt
             dlg = TaskDetailDialog(task, self._task_manager, parent=self.window())
-            dlg.exec()
+            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            dlg.destroyed.connect(lambda _=None: setattr(self, "_detail_dialog", None))
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            self._detail_dialog = dlg
         except Exception:
             logger.exception("tasks_panel: could not open task detail dialog")
 
@@ -440,15 +558,68 @@ class TasksPanel(QWidget):
         self._task_manager.block_task(reason)
 
     def _on_new_task(self) -> None:
+        """Toggle the inline quick-create row.
+
+        Clicking + once shows the row and focuses the title input.
+        Clicking again (or pressing Esc) hides it. This replaces the
+        previous modal-dialog-on-every-click flow, which was the
+        biggest friction point for users creating multiple tasks
+        per day.
+        """
         if self._task_manager is None or self._task_manager.project_root is None:
             return
+        if self._quick_create_row.isVisible():
+            self._quick_create_row.setVisible(False)
+            self._quick_create_input.clear()
+            return
+        self._quick_create_row.setVisible(True)
+        self._quick_create_input.setFocus()
+
+    def _on_quick_create_commit(self) -> None:
+        """Create a task from the inline row. Default kind = FEATURE."""
+        if self._task_manager is None:
+            return
+        title = self._quick_create_input.text().strip()
+        if not title:
+            return
+        self._task_manager.create_task(TaskKind.FEATURE, title, "")
+        self._quick_create_input.clear()
+        self._quick_create_row.setVisible(False)
+
+    def _on_quick_create_more(self) -> None:
+        """Open the full _NewTaskDialog pre-filled with the typed title.
+
+        Lets users who DO want to set a specific kind or description
+        escalate from the inline row without losing what they've typed.
+        """
+        if self._task_manager is None or self._task_manager.project_root is None:
+            return
+        prefill = self._quick_create_input.text().strip()
+        self._quick_create_row.setVisible(False)
+        self._quick_create_input.clear()
         dlg = _NewTaskDialog(self)
+        if prefill:
+            dlg._title_edit.setText(prefill)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         kind, title, description = dlg.get_values()
         if not title:
             return
         self._task_manager.create_task(kind, title, description)
+
+    def eventFilter(self, obj, event):  # type: ignore[override]
+        """Catch Esc on the quick-create input to hide the row."""
+        from PyQt6.QtCore import QEvent
+
+        if (
+            obj is self._quick_create_input
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            self._quick_create_row.setVisible(False)
+            self._quick_create_input.clear()
+            return True
+        return super().eventFilter(obj, event)
 
 
 # ── Task card widget ────────────────────────────────────────────────
@@ -591,8 +762,13 @@ class _NewTaskDialog(QDialog):
         )
         layout.addWidget(kind_label)
 
+        # Reduced set of primary kinds for the dropdown. The full enum
+        # stays intact so old tasks with INCIDENT/EXPLORE/CHORE still
+        # render, but we only offer the three that cover ~95% of real
+        # usage. EXPLORE and CHORE are rare enough that typing a title
+        # is faster than picking from a long list.
         self._kind_combo = QComboBox()
-        for kind in TaskKind:
+        for kind in (TaskKind.FEATURE, TaskKind.BUGFIX, TaskKind.REFACTOR):
             colour = _KIND_COLOURS.get(kind, "#888")
             self._kind_combo.addItem(f"●  {kind.value.capitalize()}", kind)
             self._kind_combo.setItemData(

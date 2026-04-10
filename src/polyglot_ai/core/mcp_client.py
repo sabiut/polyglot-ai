@@ -520,10 +520,17 @@ class MCPClient:
             else:
                 output = str(result)
 
-            # Redact any secrets that may appear in tool output
-            from polyglot_ai.core.security import sanitize_error
+            # Redact secrets from tool output — two passes:
+            # 1. Pattern-based credential redaction (Bearer, api_key, etc.)
+            # 2. Content-based secret scanning (AWS keys, private keys, etc.)
+            from polyglot_ai.core.security import (
+                redact_secrets_in_content,
+                redact_sensitive_output,
+            )
 
-            return sanitize_error(output, max_length=10_000)
+            output = redact_sensitive_output(output)
+            output = redact_secrets_in_content(output)
+            return output
         except Exception as e:
             from polyglot_ai.core.security import sanitize_error
 

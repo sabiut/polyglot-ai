@@ -4,10 +4,33 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 
 logger = logging.getLogger(__name__)
+
+# Environment variable names that likely contain secrets. Values are
+# redacted when returning ``docker inspect`` output to the AI.
+_SECRET_ENV_PATTERNS = re.compile(
+    r"(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY|AUTH|PRIVATE)",
+    re.IGNORECASE,
+)
+
+
+def _redact_env_vars(env_list: list[str]) -> list[str]:
+    """Redact values of environment variables that look like secrets."""
+    result: list[str] = []
+    for entry in env_list:
+        if "=" in entry:
+            name, _, value = entry.partition("=")
+            if _SECRET_ENV_PATTERNS.search(name):
+                result.append(f"{name}=***REDACTED***")
+            else:
+                result.append(entry)
+        else:
+            result.append(entry)
+    return result
 
 
 def _check_docker() -> bool:
@@ -217,7 +240,9 @@ async def docker_inspect(args: dict) -> str:
                     "Ports": item.get("NetworkSettings", {}).get("Ports", {}),
                 },
                 "Mounts": item.get("Mounts", []),
-                "Env": item.get("Config", {}).get("Env", [])[:20],
+                "Env": _redact_env_vars(
+                    item.get("Config", {}).get("Env", [])[:20]
+                ),
                 "Cmd": item.get("Config", {}).get("Cmd", []),
             }
             return json.dumps(summary, indent=2, default=str)

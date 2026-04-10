@@ -140,6 +140,38 @@ tool name, arguments, and a preview. You can:
 
 The policy engine is configurable per project in **Settings → Tool policy**.
 
+### Bootstrap mode
+
+Greenfield projects need a lot of shell commands up front — `npm
+install`, `pip install -r`, `go mod tidy`, `cargo new`, etc. Approving
+each one individually is friction. The **🔓 Bootstrap** button in the
+chat panel header relaxes `shell_exec` approval for **15 minutes** so
+scaffolding commands run without dialogs.
+
+- Click **🔓 Bootstrap** → the button flips to **🔒 Bootstrap · M:SS**
+  with an amber background and a live countdown.
+- Click again (or let it expire) to revert.
+- **Only `shell_exec`** is relaxed. Everything else that normally
+  requires approval (`git_commit`, `db_query`, mutating docker/k8s)
+  still prompts.
+- The window is tracked via monotonic clock so system-clock changes
+  can't extend or shrink it.
+
+### Empty-project directive
+
+When you open a truly empty folder (no `pyproject.toml` / `package.json`
+/ `go.mod` / etc. and no source files), the chat system prompt gains
+this directive:
+
+> *"This project directory is empty or has no recognisable source
+> files. BEFORE calling create_plan or writing any files, you MUST ask
+> the user which stack/framework they want."*
+
+This stops the model from silently scaffolding Next.js or Django when
+you had a specific stack in mind. Pair it with Bootstrap mode for a
+smooth "build me X" experience — answer the stack question, approve
+the plan, click 🔓 Bootstrap, let the scaffolding run.
+
 ### Sandbox
 
 Shell commands run inside a sandbox rooted at the project directory. The
@@ -173,11 +205,27 @@ refresh on the GUI thread so tools become available on the next message.
 
 See **[MCP Servers](MCP-Servers)**.
 
+## Panel awareness (the AI sees what you see)
+
+The chat's system prompt is automatically enriched with two kinds of
+cross-panel context — **neither requires a task to be active**:
+
+1. **`ACTIVE TASK` block** — when a task is active: title, kind, state,
+   branch, description, checklist, files touched.
+2. **`PANEL STATE` block — most recent code review** — after any run in
+   the Review panel the chat's next turn sees mode, file list, finding
+   counts, top 5 most severe findings, and a nudge to call
+   `get_review_findings` for drill-down.
+
+The `get_review_findings` tool is auto-approved and standalone — it
+reads from `core.panel_state` and returns JSON filtered by `severity`
+(including the `high+` shorthand) and/or `file` substring. See
+[Tests and Review](Tests-and-Review.md) for the full contract.
+
 ## Task integration
 
-If a **task** is active, the chat panel:
+If a **task** is active, the chat panel additionally:
 
-- Injects a task block into the system prompt (title, kind, description).
 - On first persist, writes the conversation's ID to the task's
   `chat_session_id` so activating the task again reloads this conversation.
 - Records every assistant reply on the task timeline (a lightweight

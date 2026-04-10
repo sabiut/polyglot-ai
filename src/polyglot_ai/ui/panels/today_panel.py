@@ -37,24 +37,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from polyglot_ai.core.task_manager import (
-    EVT_TASK_CHANGED,
-    EVT_TASK_LIST_CHANGED,
-    TaskManager,
-)
-from polyglot_ai.core.tasks import Task, TaskKind, TaskState
+from polyglot_ai.core.task_manager import TaskManager
 
 logger = logging.getLogger(__name__)
-
-
-_KIND_COLOURS: dict[TaskKind, str] = {
-    TaskKind.FEATURE: "#4ec9b0",
-    TaskKind.BUGFIX: "#f48771",
-    TaskKind.INCIDENT: "#f44747",
-    TaskKind.REFACTOR: "#9cdcfe",
-    TaskKind.EXPLORE: "#e5a00d",
-    TaskKind.CHORE: "#888888",
-}
 
 
 class TodayPanel(QWidget):
@@ -103,12 +88,13 @@ class TodayPanel(QWidget):
 
     def set_task_manager(self, manager: TaskManager) -> None:
         self._task_manager = manager
-        self._refresh_active_tasks()
 
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
-        event_bus.subscribe(EVT_TASK_LIST_CHANGED, lambda **_: self._refresh_active_tasks())
-        event_bus.subscribe(EVT_TASK_CHANGED, lambda **_: self._refresh_active_tasks())
+        # Task lifecycle events used to trigger an inline task list
+        # refresh; that list moved to the Tasks sidebar and this panel
+        # is now alerts-only. We still listen for ``project:opened`` so
+        # the attention fetch kicks in when the user opens a project.
         event_bus.subscribe("project:opened", self._on_project_opened)
         event_bus.subscribe("project_refreshed", self._on_project_opened)
 
@@ -119,13 +105,11 @@ class TodayPanel(QWidget):
                 self._project_root = Path(path)
             except Exception:
                 logger.debug("today_panel: bad project path", exc_info=True)
-        self._refresh_active_tasks()
         self._refresh_attention_async()
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt override
         super().showEvent(event)
         # First time the panel becomes visible, kick off attention fetch.
-        self._refresh_active_tasks()
         if not self._attention_items:
             self._refresh_attention_async()
 
@@ -182,14 +166,10 @@ class TodayPanel(QWidget):
         body_layout.setContentsMargins(12, 12, 12, 12)
         body_layout.setSpacing(14)
 
-        # ── Active Tasks card ──
-        body_layout.addWidget(self._make_section_label("Active tasks"))
-        self._active_tasks_container = QWidget()
-        self._active_tasks_container.setStyleSheet("background: transparent;")
-        self._active_tasks_layout = QVBoxLayout(self._active_tasks_container)
-        self._active_tasks_layout.setContentsMargins(0, 0, 0, 0)
-        self._active_tasks_layout.setSpacing(6)
-        body_layout.addWidget(self._wrap_card(self._active_tasks_container))
+        # This panel used to duplicate the Tasks sidebar with an
+        # "Active tasks" section. Today is now alerts-only — the
+        # Tasks sidebar (clipboard icon / Ctrl+Shift+T) is the one
+        # place to see and manage tasks.
 
         # ── Attention card ──
         body_layout.addWidget(self._make_section_label("Attention"))
@@ -209,11 +189,11 @@ class TodayPanel(QWidget):
         actions_grid.setSpacing(6)
         # Build the action buttons in two rows of three.
         actions = [
-            ("▶  Run all tests", self._action_run_tests),
             ("✨  New task", self._action_new_task),
+            ("🗂  View all tasks", self._action_show_tasks),
+            ("▶  Run all tests", self._action_run_tests),
             ("⟳  Refresh CI", self._action_refresh_ci),
             ("⎇  Source control", self._action_open_git),
-            ("📊  Database", self._action_open_database),
             ("💬  Chat", self._action_open_chat),
         ]
         row = QHBoxLayout()
@@ -373,50 +353,6 @@ class TodayPanel(QWidget):
         self._standalone_window = win
         win.destroyed.connect(lambda _=None: setattr(self, "_standalone_window", None))
 
-    # ── Active Tasks rendering ──────────────────────────────────────
-
-    def _refresh_active_tasks(self) -> None:
-        # Clear
-        while self._active_tasks_layout.count():
-            item = self._active_tasks_layout.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
-
-        if self._task_manager is None or self._task_manager.project_root is None:
-            self._active_tasks_layout.addWidget(
-                self._empty_label("Open a project to see your tasks here.")
-            )
-            return
-
-        tasks = self._task_manager.list_tasks(
-            state_filter=[TaskState.ACTIVE, TaskState.PLANNING, TaskState.REVIEW]
-        )
-        if not tasks:
-            empty = self._empty_label(
-                "No active tasks yet. Use the Tasks sidebar (clipboard icon) to create one."
-            )
-            self._active_tasks_layout.addWidget(empty)
-            return
-
-        # Show up to 5; the user can open the Tasks sidebar for the rest.
-        for task in tasks[:5]:
-            self._active_tasks_layout.addWidget(self._make_task_row(task))
-        if len(tasks) > 5:
-            more = self._empty_label(f"+{len(tasks) - 5} more — see Tasks sidebar")
-            self._active_tasks_layout.addWidget(more)
-
-    def _make_task_row(self, task: Task) -> QWidget:
-        return _TaskRow(
-            task,
-            on_click=self._activate_task,
-            on_double_click=self._open_task_detail,
-        )
-
-    def _activate_task(self, task_id: str) -> None:
-        if self._task_manager is None:
-            return
-        self._task_manager.set_active(task_id)
-
     def _open_task_detail(self, task_id: str) -> None:
         if self._task_manager is None:
             return
@@ -426,9 +362,25 @@ class TodayPanel(QWidget):
             return
         try:
             from polyglot_ai.ui.dialogs.task_detail_dialog import TaskDetailDialog
+            from PyQt6.QtCore import Qt as _Qt
 
+            # Non-modal show so the dialog feels like a window the
+            # user can keep open. Stash the reference on ``self`` so
+            # the QDialog isn't garbage-collected the moment this
+            # method returns. Any existing open dialog is closed.
+            existing = getattr(self, "_detail_dialog", None)
+            if existing is not None:
+                try:
+                    existing.close()
+                except RuntimeError:
+                    pass  # Widget already destroyed by Qt
             dlg = TaskDetailDialog(task, self._task_manager, parent=self.window())
-            dlg.exec()
+            dlg.setAttribute(_Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            dlg.destroyed.connect(lambda _=None: setattr(self, "_detail_dialog", None))
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            self._detail_dialog = dlg
         except Exception:
             logger.exception("today_panel: could not open task detail dialog")
 
@@ -660,7 +612,6 @@ class TodayPanel(QWidget):
     # ── Action handlers ─────────────────────────────────────────────
 
     def _refresh_all(self) -> None:
-        self._refresh_active_tasks()
         self._refresh_attention_async()
 
     def _action_run_tests(self) -> None:
@@ -681,9 +632,25 @@ class TodayPanel(QWidget):
             return
         try:
             self._switch_sidebar(tasks_panel)
-            tasks_panel._on_new_task()
+            # Prefer the public API — it opens the inline quick-create
+            # row instead of forcing the old modal dialog.
+            if hasattr(tasks_panel, "trigger_new_task"):
+                tasks_panel.trigger_new_task()
+            else:
+                tasks_panel._on_new_task()
         except Exception:
             logger.exception("today_panel: new task action failed")
+
+    def _action_show_tasks(self) -> None:
+        """Reveal the Tasks sidebar — replaces the deleted inline list."""
+        win = self.window()
+        tasks_panel = getattr(win, "tasks_panel", None)
+        if tasks_panel is None:
+            return
+        try:
+            self._switch_sidebar(tasks_panel)
+        except Exception:
+            logger.exception("today_panel: show tasks action failed")
 
     def _action_refresh_ci(self) -> None:
         win = self.window()
@@ -701,12 +668,6 @@ class TodayPanel(QWidget):
         git_panel = getattr(win, "git_panel", None)
         if git_panel is not None:
             self._switch_sidebar(git_panel)
-
-    def _action_open_database(self) -> None:
-        win = self.window()
-        db_panel = getattr(win, "database_panel", None)
-        if db_panel is not None:
-            self._switch_sidebar(db_panel)
 
     def _action_open_chat(self) -> None:
         win = self.window()
@@ -849,63 +810,3 @@ class _AttentionRow(QWidget):
             logger.exception("today_panel: could not open url")
 
 
-# ── Active task row ────────────────────────────────────────────────
-
-
-class _TaskRow(QWidget):
-    """A compact one-line task row for the Today dashboard."""
-
-    def __init__(self, task: Task, on_click, on_double_click=None) -> None:
-        super().__init__()
-        self._task = task
-        self._on_click = on_click
-        self._on_double_click = on_double_click
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Click to activate · double-click to open details")
-        self.setStyleSheet(
-            "_TaskRow { background: transparent; border-radius: 4px; }"
-            "_TaskRow:hover { background: #2a2d2e; }"
-        )
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 5, 6, 5)
-        layout.setSpacing(8)
-
-        # Kind dot
-        dot = QLabel("●")
-        dot.setStyleSheet(
-            f"color: {_KIND_COLOURS.get(task.kind, '#888')}; font-size: 11px; "
-            "background: transparent;"
-        )
-        layout.addWidget(dot)
-
-        # Title
-        title = QLabel(task.title)
-        title.setStyleSheet("color: #e0e0e0; font-size: 12px; background: transparent;")
-        layout.addWidget(title, stretch=1)
-
-        # Status meta
-        meta_parts: list[str] = [task.kind.value]
-        if task.last_test_run and task.last_test_run.total > 0:
-            tr = task.last_test_run
-            meta_parts.append(f"{tr.passed}/{tr.total}")
-        if task.last_ci_run and task.last_ci_run.status:
-            symbol = {
-                "success": "✓",
-                "failure": "✗",
-                "in_progress": "…",
-            }.get(task.last_ci_run.status, "·")
-            meta_parts.append(f"CI {symbol}")
-        meta = QLabel("  ·  ".join(meta_parts))
-        meta.setStyleSheet("color: #888; font-size: 10px; background: transparent;")
-        layout.addWidget(meta)
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt override
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._on_click(self._task.id)
-        super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 — Qt override
-        if self._on_double_click and event.button() == Qt.MouseButton.LeftButton:
-            self._on_double_click(self._task.id)
-        super().mouseDoubleClickEvent(event)

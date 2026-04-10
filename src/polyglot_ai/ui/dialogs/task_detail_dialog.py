@@ -108,7 +108,14 @@ class TaskDetailDialog(QDialog):
         self._plan_busy = False
 
         self.setWindowTitle(f"Task — {task.title}")
+        # Non-modal, top-level window: feels like a panel you can leave
+        # open alongside the main app instead of a blocking modal.
+        # Users asked for "expand into a window" and the cleanest way
+        # is to stop being a modal in the first place.
+        self.setModal(False)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
         self.setMinimumSize(720, 600)
+        self.resize(900, 720)
         self.setStyleSheet("QDialog { background: #1e1e1e; }")
 
         self._plan_ready.connect(self._on_plan_ready)
@@ -138,6 +145,22 @@ class TaskDetailDialog(QDialog):
         )
         title_lbl.setWordWrap(True)
         title_row.addWidget(title_lbl, stretch=1)
+
+        # Maximize/restore toggle — the user asked for an "expand into
+        # window" affordance. Since the dialog is already top-level
+        # and non-modal, "expand" maps cleanly to showMaximized().
+        self._max_btn = QPushButton("⛶")
+        self._max_btn.setFixedSize(26, 26)
+        self._max_btn.setToolTip("Maximize / restore window")
+        self._max_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._max_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #888; "
+            "border: 1px solid #3c3c3c; border-radius: 3px; font-size: 14px; }"
+            "QPushButton:hover { color: #ddd; border-color: #555; }"
+        )
+        self._max_btn.clicked.connect(self._toggle_maximize)
+        title_row.addWidget(self._max_btn)
+
         header.addLayout(title_row)
 
         # Meta line: kind • state • branch • PR
@@ -171,11 +194,18 @@ class TaskDetailDialog(QDialog):
             )
             layout.addWidget(desc)
 
-        # ── Plan checklist (read-only) ──
+        # ── Checklist (either populated or an empty-state call-to-
+        # action). Always render something here so a brand-new task
+        # doesn't look empty: if there's no checklist yet we show a
+        # prominent "Generate checklist" primary action instead of
+        # hiding the section. This is the single most valuable thing
+        # the user can do on a new task.
         if self._task.plan:
             plan_card = self._build_plan_card()
             if plan_card is not None:
                 layout.addWidget(plan_card)
+        elif self._manager.plan_generator is not None:
+            layout.addWidget(self._build_empty_checklist_card())
 
         # ── Stats card (test/CI snapshots, modified files count) ──
         stats_card = self._build_stats_card()
@@ -236,16 +266,16 @@ class TaskDetailDialog(QDialog):
         copy_btn.clicked.connect(self._copy_as_standup)
         actions.addWidget(copy_btn)
 
-        # AI plan generator button — only shown when a generator is
-        # available (set in app.py once a provider manager exists).
-        # The button label flips between "Generate plan" and
-        # "Regenerate plan" depending on whether the task already
-        # has steps, so the user knows what's about to happen.
-        if self._manager.plan_generator is not None:
-            label = "Regenerate plan" if self._task.plan else "Generate plan"
-            self._plan_btn = self._mk_button(label)
+        # AI checklist generator button — only shown in the bottom
+        # action row when the task ALREADY has a checklist (as a
+        # "Regenerate" affordance). For brand-new tasks we surface
+        # the primary Generate action as a prominent card higher up
+        # via ``_build_empty_checklist_card``, so it's the first
+        # thing the user sees instead of being buried in the footer.
+        if self._manager.plan_generator is not None and self._task.plan:
+            self._plan_btn = self._mk_button("Regenerate checklist")
             self._plan_btn.setToolTip(
-                "Ask the configured AI provider to draft an ordered checklist for this task."
+                "Ask the configured AI provider to redraft this task's checklist."
             )
             self._plan_btn.clicked.connect(self._on_generate_plan)
             actions.addWidget(self._plan_btn)
@@ -301,7 +331,7 @@ class TaskDetailDialog(QDialog):
         v.setContentsMargins(14, 10, 14, 10)
         v.setSpacing(4)
 
-        header = QLabel("PLAN")
+        header = QLabel("CHECKLIST")
         header.setStyleSheet(
             "color: #777; font-size: 9px; font-weight: 700; "
             "letter-spacing: 0.6px; background: transparent;"
@@ -329,6 +359,75 @@ class TaskDetailDialog(QDialog):
             row.addWidget(text, stretch=1)
             v.addLayout(row)
         return card
+
+    def _build_empty_checklist_card(self) -> QFrame:
+        """Prominent primary action shown on tasks without a checklist.
+
+        Replaces the tiny "Generate plan" button at the bottom of the
+        action row — that was the biggest thing the user should do
+        first, but it was buried below the timeline. Here it's the
+        second thing in the dialog after the title/description, with
+        a clear explanation and a big primary button.
+        """
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #1a3a5c; border: 1px solid #0e639c; "
+            "border-radius: 6px; }"
+        )
+        v = QVBoxLayout(card)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(8)
+
+        header_lbl = QLabel("CHECKLIST")
+        header_lbl.setStyleSheet(
+            "color: #9fc5e8; font-size: 9px; font-weight: 700; "
+            "letter-spacing: 0.6px; background: transparent;"
+        )
+        v.addWidget(header_lbl)
+
+        blurb = QLabel(
+            "No checklist yet. Let the AI break this task into ordered "
+            "steps so you can track progress and scope."
+        )
+        blurb.setStyleSheet(
+            "color: #d8e8f5; font-size: 12px; background: transparent;"
+        )
+        blurb.setWordWrap(True)
+        v.addWidget(blurb)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+
+        self._plan_btn = QPushButton("✨ Generate checklist with AI")
+        self._plan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._plan_btn.setToolTip(
+            "Ask the configured AI provider to draft an ordered checklist for this task."
+        )
+        self._plan_btn.setStyleSheet(
+            "QPushButton { background: #0e639c; color: white; "
+            "border: none; border-radius: 4px; "
+            "padding: 8px 18px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #1a8ae8; }"
+            "QPushButton:disabled { background: #3c3c3c; color: #777; }"
+        )
+        self._plan_btn.clicked.connect(self._on_generate_plan)
+        btn_row.addWidget(self._plan_btn)
+        v.addLayout(btn_row)
+
+        return card
+
+    def _toggle_maximize(self) -> None:
+        """Toggle between maximized and normal window size.
+
+        The dialog is a top-level non-modal window (see ``__init__``)
+        so ``showMaximized`` / ``showNormal`` behave exactly as they
+        would on any QMainWindow.
+        """
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _build_stats_card(self) -> QFrame | None:
         """A horizontal row with test / CI / files / PR snapshots.
@@ -546,12 +645,16 @@ class TaskDetailDialog(QDialog):
             error = getattr(result, "error", "Unknown error")
             QMessageBox.warning(
                 self,
-                "Plan generation failed",
-                f"Could not generate a plan:\n\n{error}",
+                "Checklist generation failed",
+                f"Could not generate a checklist:\n\n{error}",
             )
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
-                self._plan_btn.setText("Regenerate plan" if self._task.plan else "Generate plan")
+                self._plan_btn.setText(
+                    "Regenerate checklist"
+                    if self._task.plan
+                    else "✨ Generate checklist with AI"
+                )
             return
         # Activate this task so set_plan() writes to the right one,
         # then persist the new steps. The dialog closes on success
@@ -560,12 +663,16 @@ class TaskDetailDialog(QDialog):
         if not self._manager.set_plan(result.steps):
             QMessageBox.warning(
                 self,
-                "Plan generation failed",
+                "Checklist generation failed",
                 "The generator produced steps but they could not be saved.",
             )
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
-                self._plan_btn.setText("Regenerate plan" if self._task.plan else "Generate plan")
+                self._plan_btn.setText(
+                    "Regenerate checklist"
+                    if self._task.plan
+                    else "✨ Generate checklist with AI"
+                )
             return
         self.accept()
 

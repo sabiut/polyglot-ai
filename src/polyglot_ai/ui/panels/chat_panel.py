@@ -196,9 +196,47 @@ class ChatPanel(QWidget):
         header_layout.addWidget(header_label)
         header_layout.addStretch()
 
-        self._new_chat_btn = QPushButton("+ New")
-        self._new_chat_btn.setFixedHeight(24)
-        self._new_chat_btn.setStyleSheet(f"font-size: {tc.FONT_SM}px; padding: 2px 8px;")
+        # Bootstrap-mode toggle. When enabled, shell_exec is auto-
+        # approved for 15 minutes so `npm install` / `pip install` /
+        # `go mod tidy` / etc. during project scaffolding don't need a
+        # per-command approval dialog. The button label reflects the
+        # active state; a QTimer refreshes it once a second so the
+        # countdown stays honest and the button auto-reverts when the
+        # deadline passes.
+        _btn_base = (
+            f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
+            f"background: {tc.get('bg_input')}; color: #fff; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+            f"border-color: {tc.get('accent_primary')}; }}"
+        )
+
+        self._bootstrap_btn = QPushButton("  Bootstrap")
+        self._bootstrap_btn.setFixedHeight(26)
+        self._bootstrap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bootstrap_btn.setToolTip(
+            "Bootstrap mode: auto-approve shell_exec for 15 minutes so "
+            "scaffolding commands (npm/pip/go/cargo install) don't prompt. "
+            "Click again to end early."
+        )
+        self._bootstrap_btn.setIcon(self._make_unlock_icon())
+        self._bootstrap_btn.setStyleSheet(_btn_base)
+        self._bootstrap_btn.clicked.connect(self._toggle_bootstrap_mode)
+        header_layout.addWidget(self._bootstrap_btn)
+
+        from PyQt6.QtCore import QTimer
+
+        self._bootstrap_timer = QTimer(self)
+        self._bootstrap_timer.setInterval(1000)
+        self._bootstrap_timer.timeout.connect(self._refresh_bootstrap_label)
+
+        header_layout.addSpacing(6)
+
+        self._new_chat_btn = QPushButton("  New")
+        self._new_chat_btn.setFixedHeight(26)
+        self._new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_chat_btn.setIcon(self._make_plus_icon())
+        self._new_chat_btn.setStyleSheet(_btn_base)
         self._new_chat_btn.clicked.connect(self._new_conversation)
         header_layout.addWidget(self._new_chat_btn)
         layout.addLayout(header_layout)
@@ -3052,6 +3090,112 @@ class ChatPanel(QWidget):
     def set_tools(self, tools: list[dict], registry) -> None:
         self._tools = tools
         self._tool_registry = registry
+        # Make sure the bootstrap button reflects the registry state
+        # the moment wiring completes (e.g. if the registry was re-
+        # created on project open and was already active elsewhere).
+        self._refresh_bootstrap_label()
+
+    def _toggle_bootstrap_mode(self) -> None:
+        """Turn the 15-minute bootstrap window on or off.
+
+        No-op when no tool registry has been wired yet — the button
+        should never be clickable before a project is open, but be
+        defensive so a stray click doesn't crash the UI.
+        """
+        if self._tool_registry is None:
+            return
+        if self._tool_registry.is_bootstrap_active():
+            self._tool_registry.disable_bootstrap_mode()
+        else:
+            self._tool_registry.enable_bootstrap_mode()
+            self._bootstrap_timer.start()
+        self._refresh_bootstrap_label()
+
+    def _refresh_bootstrap_label(self) -> None:
+        """Update button text/state. Stops its own timer on expiry."""
+        if self._tool_registry is None or not self._tool_registry.is_bootstrap_active():
+            self._bootstrap_btn.setText("  Bootstrap")
+            self._bootstrap_btn.setIcon(self._make_unlock_icon())
+            self._bootstrap_btn.setStyleSheet(
+                f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
+                f"background: {tc.get('bg_input')}; color: #fff; "
+                f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; }}"
+                f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+                f"border-color: {tc.get('accent_primary')}; }}"
+            )
+            if self._bootstrap_timer.isActive():
+                self._bootstrap_timer.stop()
+            return
+        remaining = self._tool_registry.bootstrap_seconds_remaining()
+        mins, secs = divmod(remaining, 60)
+        self._bootstrap_btn.setText(f"  Bootstrap · {mins}:{secs:02d}")
+        self._bootstrap_btn.setIcon(self._make_lock_icon())
+        self._bootstrap_btn.setStyleSheet(
+            f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
+            f"background: {tc.get('accent_warning')}; color: #fff; "
+            "border: none; border-radius: 4px; font-weight: 600; }"
+        )
+
+    # ── Icon helpers for header buttons ──────────────────────────────
+
+    @staticmethod
+    def _make_unlock_icon():
+        """White open-padlock icon for the inactive bootstrap button."""
+        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
+        pm = QPixmap(14, 14)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#ffffff"))
+        pen.setWidthF(1.5)
+        p.setPen(pen)
+        p.setBrush(QColor(0, 0, 0, 0))
+        # Lock body
+        p.drawRoundedRect(2, 7, 10, 6, 1.5, 1.5)
+        # Open shackle
+        p.drawArc(4, 1, 6, 8, 0, 180 * 16)
+        p.end()
+        return QIcon(pm)
+
+    @staticmethod
+    def _make_lock_icon():
+        """White closed-padlock icon for the active bootstrap button."""
+        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
+        pm = QPixmap(14, 14)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#ffffff"))
+        pen.setWidthF(1.5)
+        p.setPen(pen)
+        p.setBrush(QColor(0, 0, 0, 0))
+        # Lock body
+        p.drawRoundedRect(2, 7, 10, 6, 1.5, 1.5)
+        # Closed shackle
+        p.drawArc(4, 2, 6, 8, 0, 180 * 16)
+        p.end()
+        return QIcon(pm)
+
+    @staticmethod
+    def _make_plus_icon():
+        """White plus icon for the new-conversation button."""
+        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
+        pm = QPixmap(14, 14)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#ffffff"))
+        pen.setWidthF(1.8)
+        p.setPen(pen)
+        # Horizontal line
+        p.drawLine(3, 7, 11, 7)
+        # Vertical line
+        p.drawLine(7, 3, 7, 11)
+        p.end()
+        return QIcon(pm)
 
     def prefill_input(self, text: str) -> None:
         """Public API: load text into the chat input box and focus it.

@@ -10,6 +10,31 @@ from polyglot_ai.core.db_explorer import get_global_db_manager
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_db_error(err: Exception) -> str:
+    """Strip connection strings, credentials, and internal paths from DB errors.
+
+    Database drivers often embed DSN strings, usernames, passwords, or
+    host:port in their exception messages. We scrub known patterns and
+    truncate the message to prevent leaking internals to the AI.
+    """
+    msg = str(err)
+    # Strip anything that looks like a connection URI
+    msg = re.sub(
+        r"(mysql|postgres|postgresql|sqlite|mssql|mongodb)(\+\w+)?://[^\s'\"]+",
+        r"\1://***",
+        msg,
+        flags=re.IGNORECASE,
+    )
+    # Strip host:port patterns after @ (user:pass@host:port)
+    msg = re.sub(r"@[\w.\-]+:\d+", "@***:***", msg)
+    # Strip password= fragments
+    msg = re.sub(r"password\s*=\s*\S+", "password=***", msg, flags=re.IGNORECASE)
+    # Truncate to avoid dumping multi-line driver tracebacks
+    if len(msg) > 300:
+        msg = msg[:300] + "... (truncated)"
+    return msg
+
 # SQL statements that are read-only and safe to auto-approve.
 # Note: WITH is intentionally NOT in this list because Postgres supports
 # data-modifying CTEs (WITH x AS (DELETE FROM t RETURNING *) SELECT ...).
@@ -147,12 +172,12 @@ async def db_get_schema(args: dict) -> str:
             if not ok:
                 return f"Error connecting to '{conn_name}': {msg}"
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize_db_error(e)}"
 
     try:
         tables = await conn.get_schema()
     except Exception as e:
-        return f"Error getting schema: {e}"
+        return f"Error getting schema: {_sanitize_db_error(e)}"
 
     if not tables:
         return f"Database '{conn_name}' has no tables."
@@ -204,12 +229,12 @@ async def db_query(args: dict) -> str:
             if not ok:
                 return f"Error connecting: {msg}"
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize_db_error(e)}"
 
     try:
         result = await conn.execute_query(sql, max_rows=max_rows)
     except Exception as e:
-        return f"Query error: {e}"
+        return f"Query error: {_sanitize_db_error(e)}"
 
     if result.error:
         return f"Query error: {result.error}"
@@ -259,6 +284,12 @@ async def db_execute(args: dict) -> str:
     if not conn:
         return f"Error: Connection '{conn_name}' not found. Available: {', '.join(mgr.connection_names) or '(none)'}"
 
+    if conn.read_only:
+        return (
+            f"Error: Connection '{conn_name}' is read-only. "
+            "Enable write access in the Database panel to run write statements."
+        )
+
     # Ensure connected
     try:
         if conn.db_type == "sqlite" and not conn._sqlite_conn:
@@ -274,12 +305,12 @@ async def db_execute(args: dict) -> str:
             if not ok:
                 return f"Error connecting: {msg}"
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize_db_error(e)}"
 
     try:
         result = await conn.execute_query(sql)
     except Exception as e:
-        return f"Statement error: {e}"
+        return f"Statement error: {_sanitize_db_error(e)}"
 
     if result.error:
         return f"Statement error: {result.error}"

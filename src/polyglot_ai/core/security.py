@@ -89,13 +89,17 @@ _REDACT_PATTERNS = [
     re.compile(r"(Bearer\s+)\S+", re.IGNORECASE),
     re.compile(r"(Authorization:\s*)\S+", re.IGNORECASE),
     re.compile(r"(api[_-]?key[=:\s]+)\S+", re.IGNORECASE),
-    re.compile(r"(token[=:\s]+)\S+", re.IGNORECASE),
-    re.compile(r"(sk-[a-zA-Z0-9]{20,})"),
-    re.compile(r"(key-[a-zA-Z0-9]{20,})"),
-    re.compile(r"(ghp_[a-zA-Z0-9]{36,})"),
-    re.compile(r"(gho_[a-zA-Z0-9]{36,})"),
-    re.compile(r"(glpat-[a-zA-Z0-9\-]{20,})"),
-    re.compile(r"(xai-[a-zA-Z0-9]{20,})"),
+    re.compile(
+        r"((?:access_token|refresh_token|auth_token|bearer_token|"
+        r"api_token|session_token)[=:\s]+)\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(sk-)[a-zA-Z0-9]{20,}"),
+    re.compile(r"(key-)[a-zA-Z0-9]{20,}"),
+    re.compile(r"(ghp_)[a-zA-Z0-9]{36,}"),
+    re.compile(r"(gho_)[a-zA-Z0-9]{36,}"),
+    re.compile(r"(glpat-)[a-zA-Z0-9\-]{20,}"),
+    re.compile(r"(xai-)[a-zA-Z0-9]{20,}"),
 ]
 
 # ── Allowed MCP server commands ───────────────────────────────────
@@ -171,6 +175,37 @@ def sanitize_error(message: str, max_length: int = 200) -> str:
     if len(result) > max_length:
         result = result[:max_length] + "..."
     return result
+
+
+def redact_sensitive_output(text: str, max_length: int = 10_000) -> str:
+    """Redact secrets from tool output (MCP, shell, etc.).
+
+    Uses the same credential patterns as :func:`sanitize_error` but with
+    a larger default ``max_length`` suitable for tool output rather than
+    short error messages.
+    """
+    result = text
+    for pattern in _REDACT_PATTERNS:
+        result = pattern.sub(r"\1[REDACTED]", result)
+    if len(result) > max_length:
+        result = result[:max_length] + "..."
+    return result
+
+
+def redact_secrets_in_content(text: str, max_scan: int = 50_000) -> str:
+    """Scan text for embedded secrets and redact them in-place.
+
+    Applies the same patterns used by :func:`scan_content_for_secrets`
+    but as substitutions rather than detection-only. Intended as a
+    second pass after :func:`redact_sensitive_output` to catch secrets
+    that don't match the credential-header patterns (e.g. bare API keys,
+    AWS access keys, private key blocks).
+    """
+    result = text[:max_scan]
+    remainder = text[max_scan:]
+    for pattern in _CONTENT_SECRET_PATTERNS:
+        result = pattern.sub("[SECRET_REDACTED]", result)
+    return result + remainder
 
 
 def check_secure_file(path: Path) -> tuple[bool, str]:

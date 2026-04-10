@@ -581,9 +581,144 @@ class MainWindow(QMainWindow):
         reg.register("edit.undo", "Undo", self._forward_undo, "Edit", "Ctrl+Z")
         reg.register("edit.redo", "Redo", self._forward_redo, "Edit", "Ctrl+Shift+Z")
 
+        # Task commands — palette-driven entry points so users can
+        # create/open/block tasks without touching the sidebar. Each
+        # action delegates to the TasksPanel public API so the same
+        # behaviour runs whether it's triggered by a click or a
+        # palette selection.
+        reg.register(
+            "task.new",
+            "Task: New",
+            self._task_cmd_new,
+            "Tasks",
+            # No keybinding on purpose — Ctrl+Shift+T is already the
+            # Tests panel shortcut. Users reach Task: New via the
+            # command palette (Ctrl+Shift+P → "Task: New") or by
+            # clicking the + button in the Tasks sidebar.
+        )
+        reg.register(
+            "task.new_with_details",
+            "Task: New (with kind/description)",
+            self._task_cmd_new_with_details,
+            "Tasks",
+        )
+        reg.register(
+            "task.switch",
+            "Task: Switch Active…",
+            self._task_cmd_switch,
+            "Tasks",
+        )
+        reg.register(
+            "task.open_active",
+            "Task: Open Active Task Detail",
+            self._task_cmd_open_active,
+            "Tasks",
+        )
+        reg.register(
+            "task.mark_done",
+            "Task: Mark Active as Done",
+            self._task_cmd_mark_done,
+            "Tasks",
+        )
+        reg.register(
+            "task.block",
+            "Task: Block Active Task…",
+            self._task_cmd_block,
+            "Tasks",
+        )
+        reg.register(
+            "task.show_panel",
+            "Task: Show Tasks Panel",
+            lambda: self._on_activity_changed("tasks"),
+            "Tasks",
+        )
+        reg.register(
+            "task.show_today",
+            "Task: Show Today Panel",
+            lambda: self._on_activity_changed("today"),
+            "Tasks",
+        )
+
     @property
     def action_registry(self) -> ActionRegistry:
         return self._action_registry
+
+    # ── Task command callbacks ──────────────────────────────────────
+    #
+    # Each of these is the thin bridge between an action registry
+    # entry and the TasksPanel public API. The "show panel first,
+    # then do the thing" pattern means the user's eye lands on the
+    # panel that's about to change — important when the command
+    # palette triggers an action whose UI lives somewhere off-screen.
+
+    def _task_cmd_new(self) -> None:
+        if self._tasks_panel is None:
+            return
+        self._on_activity_changed("tasks")
+        self._tasks_panel.trigger_new_task()
+
+    def _task_cmd_new_with_details(self) -> None:
+        if self._tasks_panel is None:
+            return
+        self._on_activity_changed("tasks")
+        self._tasks_panel.trigger_new_task_dialog()
+
+    def _task_cmd_switch(self) -> None:
+        """Pop a tiny task picker for switching the active task.
+
+        Uses QInputDialog for zero-dependency simplicity — the full
+        palette already provides fuzzy search, and a dedicated task
+        switcher would be a v2 nicety.
+        """
+        import logging as _logging
+
+        from PyQt6.QtWidgets import QInputDialog
+
+        if self._tasks_panel is None:
+            return
+        tm = getattr(self._tasks_panel, "_task_manager", None)
+        if tm is None or tm.project_root is None:
+            return
+        try:
+            tasks = [t for t in tm.list_tasks() if str(t.state.value) != "archived"]
+        except Exception:
+            _logging.getLogger(__name__).exception("main_window: task switch failed")
+            return
+        if not tasks:
+            return
+        labels = [f"{t.title}  ·  {t.state.value}" for t in tasks]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Switch active task",
+            "Task:",
+            labels,
+            current=0,
+            editable=False,
+        )
+        if not ok or not choice:
+            return
+        try:
+            idx = labels.index(choice)
+        except ValueError:
+            return
+        tm.set_active(tasks[idx].id)
+        self._on_activity_changed("tasks")
+
+    def _task_cmd_open_active(self) -> None:
+        if self._tasks_panel is None:
+            return
+        self._on_activity_changed("tasks")
+        self._tasks_panel.open_active_task_detail()
+
+    def _task_cmd_mark_done(self) -> None:
+        if self._tasks_panel is None:
+            return
+        self._tasks_panel.mark_active_done()
+
+    def _task_cmd_block(self) -> None:
+        if self._tasks_panel is None:
+            return
+        self._tasks_panel.block_active_task()
 
     # ── Shutdown ────────────────────────────────────────────────────
 

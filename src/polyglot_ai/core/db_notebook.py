@@ -56,6 +56,14 @@ class DBNotebookStore:
         self._path = path or _default_db_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        # Harden file permissions — notebook may contain SQL with
+        # embedded credentials or sensitive query patterns.
+        try:
+            import os
+
+            os.chmod(self._path, 0o600)
+        except OSError:
+            pass
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -109,6 +117,14 @@ class DBNotebookStore:
         sql = sql.strip()
         if not sql:
             return
+        # Redact SQL that contains embedded secrets before persisting
+        try:
+            from polyglot_ai.core.security import scan_content_for_secrets
+
+            if scan_content_for_secrets(sql):
+                sql = f"[REDACTED: SQL contained potential secrets] {sql[:40]}..."
+        except Exception:
+            pass
         try:
             with self._conn() as c:
                 c.execute(

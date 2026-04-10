@@ -15,19 +15,50 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) PolyglotAI/0.2"}
 
 
 def _is_safe_url(url: str) -> bool:
-    """Check that a URL is safe to fetch (no localhost/private IPs)."""
+    """Check that a URL is safe to fetch (no localhost/private/reserved IPs).
+
+    Resolves hostnames via DNS before checking to prevent SSRF via
+    DNS rebinding or private-hostname aliases.
+    """
+    import socket
+
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
     host = parsed.hostname or ""
+    if not host:
+        return False
+
+    # Quick reject for well-known local names
     if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
         return False
+
+    # If host is already an IP literal, check directly
     try:
         ip = ipaddress.ip_address(host)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             return False
+        return True
     except ValueError:
-        pass  # hostname, not IP — fine
+        pass  # hostname, not IP — resolve it below
+
+    # Resolve hostname and check all returned addresses
+    try:
+        addrinfos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (socket.gaierror, OSError):
+        return False  # unresolvable hostnames are rejected
+    if not addrinfos:
+        return False
+
+    for family, _, _, _, sockaddr in addrinfos:
+        addr = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+        except ValueError:
+            return False  # unparseable resolved address — reject
+
     return True
 
 

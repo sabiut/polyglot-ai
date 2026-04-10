@@ -184,9 +184,13 @@ def test_new_tools_are_auto_approved():
     """
     from polyglot_ai.core.ai.tools.definitions import AUTO_APPROVE, REQUIRES_APPROVAL
 
-    for name in ("file_write", "file_patch", "file_delete", "dir_create", "dir_delete"):
-        assert name in AUTO_APPROVE, f"{name} must be auto-approved"
-        assert name not in REQUIRES_APPROVAL, f"{name} must NOT require approval"
+    # dir_create is low-risk and stays auto-approved
+    assert "dir_create" in AUTO_APPROVE
+    assert "dir_create" not in REQUIRES_APPROVAL
+    # File mutations require explicit UI approval (security hardening)
+    for name in ("file_write", "file_patch", "file_delete", "dir_delete"):
+        assert name in REQUIRES_APPROVAL, f"{name} must require approval"
+        assert name not in AUTO_APPROVE, f"{name} must NOT be auto-approved"
     # Sensitive tools that stay on approval — pinned so they don't
     # silently get auto-approved by the same kind of refactor.
     for name in ("shell_exec", "git_commit"):

@@ -79,11 +79,14 @@ class DatabaseConnection:
         db_type: str,
         connection_string: str,
         mcp_client=None,
+        *,
+        read_only: bool = True,
     ) -> None:
         self.name = name
         self.db_type = db_type  # "sqlite" | "postgresql" | "mysql"
         self._connection_string = connection_string
         self._mcp_client = mcp_client
+        self.read_only = read_only
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._pg_pool = None  # asyncpg connection pool
         self._mysql_pool = None  # aiomysql connection pool
@@ -135,6 +138,15 @@ class DatabaseConnection:
             return []
 
     async def execute_query(self, sql: str, max_rows: int = 10_000) -> QueryResult:
+        # Enforce read-only policy at the connection level (defense-in-depth).
+        if self.read_only:
+            from polyglot_ai.core.ai.tools.db_tools import is_readonly_query
+
+            if not is_readonly_query(sql):
+                return QueryResult.from_error(
+                    f"Connection '{self.name}' is read-only. "
+                    "Enable write access in the Database panel to run this statement."
+                )
         async with self._lock:
             if self.db_type == "sqlite":
                 return await self._execute_sqlite(sql, max_rows)
@@ -671,6 +683,8 @@ class DatabaseManager:
         db_type: str,
         connection_string: str,
         mcp_client=None,
+        *,
+        read_only: bool = True,
     ) -> DatabaseConnection:
         # Disconnect existing connection with same name if present
         if name in self._connections:
@@ -678,7 +692,9 @@ class DatabaseManager:
                 await self._connections[name].disconnect()
             except Exception:
                 pass
-        conn = DatabaseConnection(name, db_type, connection_string, mcp_client)
+        conn = DatabaseConnection(
+            name, db_type, connection_string, mcp_client, read_only=read_only
+        )
         self._connections[name] = conn
         return conn
 
@@ -688,9 +704,13 @@ class DatabaseManager:
         db_type: str,
         connection_string: str,
         mcp_client=None,
+        *,
+        read_only: bool = True,
     ) -> DatabaseConnection:
         """Synchronous add — for use during config loading (no active connections)."""
-        conn = DatabaseConnection(name, db_type, connection_string, mcp_client)
+        conn = DatabaseConnection(
+            name, db_type, connection_string, mcp_client, read_only=read_only
+        )
         self._connections[name] = conn
         return conn
 

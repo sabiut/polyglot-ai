@@ -117,8 +117,40 @@ provider, per model. Backed by the usage table in the main app DB.
 
 | Shortcut | Action |
 |---|---|
-| Double-click a card | Open Task Detail dialog |
+| `Ctrl+Shift+J` | Open Tasks sidebar |
+| `Ctrl+Shift+H` | Open Today panel |
+| Click `+` in sidebar | Toggle inline quick-create row |
+| `Enter` (in quick-create) | Create task with default kind |
+| `Esc` (in quick-create) | Cancel quick-create |
+| Double-click a card | Open Task Detail window (non-modal) |
 | Right-click a card | Context menu |
+| `⛶` in detail title row | Toggle maximize of the detail window |
+
+### Command palette task entries
+
+`Ctrl+Shift+P` → type `Task:` to see all of these:
+
+| Entry | What it does |
+|---|---|
+| **Task: New** | Show Tasks sidebar, focus the inline quick-create row |
+| **Task: New (with kind/description)** | Open the full new-task dialog |
+| **Task: Switch Active…** | Pick a task to make active from a list |
+| **Task: Open Active Task Detail** | Open the detail window for the active task |
+| **Task: Mark Active as Done** | Transition the active task → DONE |
+| **Task: Block Active Task…** | Prompt for a blocker reason and mark BLOCKED |
+| **Task: Show Tasks Panel** | Reveal the Tasks sidebar |
+| **Task: Show Today Panel** | Reveal the Today panel |
+
+> There's no direct shortcut for *Task: New* because `Ctrl+Shift+T`
+> is the Tests panel. Bind one in your own config if you want, or use
+> the palette.
+
+### Chat panel header
+
+| Button | Action |
+|---|---|
+| **🔓 Bootstrap** | Relax `shell_exec` approval for 15 min (scaffolding) — see [Chat › Bootstrap mode](Chat.md#bootstrap-mode) |
+| **+ New** | New conversation |
 
 ## Tips
 

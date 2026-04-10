@@ -697,6 +697,48 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_review_findings",
+            "description": (
+                "Return findings from the most recent code review run in the "
+                "Code Review panel (diff review or IaC security scan — "
+                "Terraform, Kubernetes, Dockerfile, Docker Compose, Helm). "
+                "The PANEL STATE block in the system prompt advertises when "
+                "a review is available. Use this tool to drill into specific "
+                "issues by severity or file. If no review has been run this "
+                "session, the tool returns available=false and you should "
+                "ask the user to run a review from the panel."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "severity": {
+                        "type": "string",
+                        "description": (
+                            "Filter by severity. One of 'critical', 'high', "
+                            "'medium', 'low', 'info', or the shorthand 'high+' "
+                            "which matches both critical and high. Omit to "
+                            "return all severities."
+                        ),
+                    },
+                    "file": {
+                        "type": "string",
+                        "description": (
+                            "Substring match on the finding's file path "
+                            "(case-sensitive). e.g. 'docker-compose.prod.yml'."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max findings to return. Default 20, max 100.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # Tool approval policy — explicit categorization.
@@ -720,18 +762,9 @@ AUTO_APPROVE = {
     "git_show_file",
     "create_plan",
     "web_search",  # read-only external fetch; auto-approved for UX
-    # File / directory mutations are auto-approved because the chat
-    # contract (enforced via the system prompt) is that the model
-    # MUST ask the user in plain text before calling any of these,
-    # and only call them after the user replies "yes"/"go ahead"/etc.
-    # This trades a single UI click for a Claude-style conversational
-    # flow — the user grants permission once in the chat, the tool
-    # runs, and the transcript records what happened.
-    "file_write",
-    "file_patch",
-    "file_delete",
+    # dir_create is low-risk and auto-approved. All other file/dir
+    # mutations require explicit UI approval (see REQUIRES_APPROVAL).
     "dir_create",
-    "dir_delete",
     # Docker read-only tools
     "docker_list_containers",
     "docker_list_images",
@@ -749,6 +782,8 @@ AUTO_APPROVE = {
     # can be bypassed by creatively-crafted queries).
     "db_list_connections",
     "db_get_schema",
+    # Panel state (read-only snapshot of UI state)
+    "get_review_findings",
 }
 REQUIRES_APPROVAL = {
     # ``shell_exec`` and ``git_commit`` stay on approval because they
@@ -757,6 +792,13 @@ REQUIRES_APPROVAL = {
     # explicit click for a shell command is worth the friction.
     "shell_exec",
     "git_commit",
+    # File / directory mutations — require explicit UI approval so a
+    # prompt-injected or mistaken model can't modify/delete files
+    # without a real confirmation dialog.
+    "file_write",
+    "file_patch",
+    "file_delete",
+    "dir_delete",
     # Mutating Docker tools
     "docker_restart",
     "docker_stop",
