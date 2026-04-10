@@ -17,7 +17,7 @@ Pins the phase 1 changes to the detail dialog:
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import QFrame, QLabel
+from PyQt6.QtWidgets import QLabel
 
 from polyglot_ai.core.tasks import PlanStep, TaskKind
 from polyglot_ai.ui.dialogs.task_detail_dialog import TaskDetailDialog

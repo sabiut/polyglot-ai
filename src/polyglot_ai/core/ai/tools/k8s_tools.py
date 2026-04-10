@@ -239,7 +239,7 @@ async def k8s_scale_deployment(args: dict) -> str:
     return f"Deployment '{deployment}' scaled to {replicas} replicas. {output}"
 
 
-async def k8s_apply(args: dict, *, project_root: "Path | None" = None) -> str:
+async def k8s_apply(args: dict, *, project_root: "Path | None" = None) -> str:  # noqa: F821
     """Apply a Kubernetes manifest from YAML content or a file path.
 
     File paths are sandboxed: URLs are rejected, the path must resolve
