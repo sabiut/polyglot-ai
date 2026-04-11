@@ -75,11 +75,13 @@ async def shell_exec(sandbox, args: dict) -> str:
     command = args.get("command", "")
     workdir = args.get("workdir")
 
-    allowed, reason = sandbox.validate_command(command)
-    if not allowed:
-        return f"Command blocked: {reason}"
-
-    output, returncode = await sandbox.exec_command(command, workdir)
+    # shell_exec is in REQUIRES_APPROVAL — by the time we get here,
+    # the user has explicitly approved this command (or bootstrap mode
+    # auto-approved it for safelisted install commands). Pass
+    # user_approved=True so the sandbox skips the command allowlist
+    # while still enforcing shell-operator and blocked-pattern checks.
+    # exec_command validates internally — no separate validate call needed.
+    output, returncode = await sandbox.exec_command(command, workdir, user_approved=True)
     result = output if output else "(no output)"
     if returncode != 0:
         result += f"\n[exit code: {returncode}]"

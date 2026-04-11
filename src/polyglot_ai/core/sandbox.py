@@ -74,16 +74,23 @@ class Sandbox:
         }
     )
 
-    def validate_command(self, command: str) -> tuple[bool, str]:
-        """Check if a command is allowed. Returns (allowed, reason)."""
-        # Check blocked patterns
+    def validate_command(self, command: str, *, user_approved: bool = False) -> tuple[bool, str]:
+        """Check if a command is allowed. Returns (allowed, reason).
+
+        When ``user_approved`` is True, the command allowlist is skipped
+        — the user has explicitly clicked "Approve" in the UI. Shell
+        composition operators and blocked patterns are ALWAYS enforced
+        regardless of approval.
+        """
+        # Check blocked patterns — always enforced
         cmd_lower = command.lower()
         for pattern in BLOCKED_PATTERNS:
             if pattern in cmd_lower:
                 return False, f"Blocked pattern: {pattern}"
 
         # Block shell composition operators — must check BEFORE shlex.split
-        # so we catch raw shell syntax even if quoting is odd
+        # so we catch raw shell syntax even if quoting is odd.
+        # Always enforced even for approved commands.
         dangerous_chars = [";", "&&", "||", "`", "$(", "${", "|", ">>", ">", "<"]
         for char in dangerous_chars:
             if char in command:
@@ -100,13 +107,17 @@ class Sandbox:
 
         base_cmd = Path(parts[0]).name  # Strip path, get just command name
 
-        # Reject absolute/relative paths to bypass the allowlist
-        if "/" in parts[0] and base_cmd not in ALLOWED_COMMANDS:
-            return False, f"Path-based command '{parts[0]}' is not allowed"
+        # When user has explicitly approved, skip the allowlist check.
+        # The blocked-patterns and shell-operator checks above still
+        # protect against injection even for approved commands.
+        if not user_approved:
+            # Reject absolute/relative paths to bypass the allowlist
+            if "/" in parts[0] and base_cmd not in ALLOWED_COMMANDS:
+                return False, f"Path-based command '{parts[0]}' is not allowed"
 
-        # Check allowlist
-        if base_cmd not in ALLOWED_COMMANDS:
-            return False, f"Command '{base_cmd}' is not in the allowlist"
+            # Check allowlist
+            if base_cmd not in ALLOWED_COMMANDS:
+                return False, f"Command '{base_cmd}' is not in the allowlist"
 
         # Block interpreter inline-execution flags that allow arbitrary code
         _INTERPRETER_EXEC_FLAGS = {
@@ -230,20 +241,30 @@ class Sandbox:
         argv: list[str],
         workdir: str | None = None,
         timeout: int = COMMAND_TIMEOUT,
+        *,
+        user_approved: bool = False,
     ) -> tuple[str, int]:
         """Execute a pre-split command as argv list.
 
         Bypasses shlex parsing — caller provides the exact argv.
-        Still enforces the command allowlist and path confinement for workdir.
+        Still enforces the command allowlist and path confinement for
+        workdir unless ``user_approved`` is True, in which case only
+        blocked patterns are checked.
         Returns (output, returncode).
         """
         if not argv:
             return "Empty command", 1
 
-        # Enforce allowlist even for pre-split argv
-        base_cmd = Path(argv[0]).name
-        if base_cmd not in ALLOWED_COMMANDS:
-            return f"Command blocked: '{base_cmd}' is not in the allowlist", 1
+        # Reconstruct the command string for full validation (blocked
+        # patterns, shell operators, interpreter flags) — not just the
+        # allowlist check. This ensures exec_argv has the same safety
+        # guarantees as exec_command.
+        import shlex as _shlex
+
+        reconstructed = " ".join(_shlex.quote(a) for a in argv)
+        allowed, reason = self.validate_command(reconstructed, user_approved=user_approved)
+        if not allowed:
+            return f"Command blocked: {reason}", 1
 
         cwd = self._root
         if workdir:
@@ -277,16 +298,22 @@ class Sandbox:
         command: str,
         workdir: str | None = None,
         timeout: int = COMMAND_TIMEOUT,
+        *,
+        user_approved: bool = False,
     ) -> tuple[str, int]:
         """Execute a command in the sandbox with timeout.
 
         Enforces command validation at the execution boundary —
         callers do NOT need to call validate_command() separately.
         Uses create_subprocess_exec (not shell) to prevent shell injection.
+
+        When ``user_approved`` is True, the command allowlist is
+        bypassed (the user clicked "Approve" in the UI). Blocked
+        patterns and shell operators are still enforced.
         Returns (output, returncode).
         """
         # Enforce policy at execution boundary
-        allowed, reason = self.validate_command(command)
+        allowed, reason = self.validate_command(command, user_approved=user_approved)
         if not allowed:
             return f"Command blocked: {reason}", 1
 

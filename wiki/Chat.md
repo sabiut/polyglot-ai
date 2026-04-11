@@ -184,6 +184,87 @@ sandbox enforces:
 
 See `src/polyglot_ai/core/sandbox.py` for the exact policy.
 
+## Workflows
+
+Workflows are **repeatable multi-step AI investigations** defined in YAML.
+Instead of typing a sequence of prompts manually, you define them once and
+run them with a single command. Each step is injected into the chat as a
+user message — the AI responds using tools (Playwright, shell, K8s,
+Docker, DB, Git) as needed, then the engine advances to the next step.
+
+### Running a workflow
+
+| Command | Description |
+|---------|-------------|
+| `/workflow` | List all available workflows |
+| `/workflow seed` | Copy bundled defaults into `.polyglot/workflows/` |
+| `/workflow verify-deploy --url https://staging.example.com` | Run a workflow with inputs |
+
+### Bundled workflows
+
+Three workflows ship out of the box:
+
+- **verify-deploy** — Navigate to a URL, take a screenshot, check for
+  console/network errors, and summarize pass/fail. Requires Playwright MCP.
+- **investigate-failure** — Check CI status, inspect K8s pods and logs,
+  review recent commits, and correlate into a root-cause report.
+- **reproduce-bug** — Plan reproduction steps, execute them in the browser,
+  capture evidence, and write a structured bug report.
+
+### Writing your own
+
+Create a `.yml` file in `.polyglot/workflows/` inside your project:
+
+```yaml
+# .polyglot/workflows/hello-test.yml
+name: Hello Test
+description: Simple test workflow
+inputs:
+  - name: greeting
+    description: What to say
+    default: "Hello World"
+steps:
+  - name: Greet
+    prompt: "Say this greeting to the user: {{greeting}}"
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Display name shown in `/workflow` listing |
+| `description` | no | Short summary shown in the listing |
+| `inputs` | no | List of input parameters |
+| `inputs[].name` | yes | Variable name (used in `{{name}}` placeholders) |
+| `inputs[].description` | no | Shown when prompting for missing inputs |
+| `inputs[].required` | no | Default `true`. If true and not provided, workflow won't start |
+| `inputs[].default` | no | Fallback value when the user doesn't pass `--name value` |
+| `steps` | yes | Ordered list of steps |
+| `steps[].name` | yes | Step label shown in the chat |
+| `steps[].prompt` | yes | Template string — `{{variable}}` placeholders are replaced with input values |
+
+### How it works under the hood
+
+1. `/workflow name --key value` parses the command and loads the YAML
+2. Input validation fills defaults and checks required fields
+3. For each step: the prompt template is rendered → injected as a user
+   message → `_stream_response()` runs the full tool-calling loop → the
+   AI responds with tool calls as needed
+4. On completion a `workflow_run` note is attached to the active task
+5. The chat input is locked during execution (a guard prevents double-send)
+
+Project-local workflows in `.polyglot/workflows/` **override** bundled
+defaults with the same filename.
+
+### Tips
+
+- **Playwright workflows** (verify-deploy, reproduce-bug) need the
+  Playwright MCP server connected in the MCP panel.
+- **Keep steps focused.** Each step is a single AI turn — don't try to
+  pack too much into one prompt.
+- **Use defaults** for optional inputs so workflows are quick to run
+  without flags.
+
 ## Plans
 
 For complex asks, the AI can emit a **plan** — a checklist of steps the

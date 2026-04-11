@@ -1,0 +1,66 @@
+name: Investigate Failure
+description: Cross-check CI, infrastructure, logs, and recent changes to find the root cause of a service failure.
+
+inputs:
+  - name: service
+    description: The service or app name to investigate
+    required: true
+  - name: environment
+    description: Environment where the failure is happening
+    required: false
+    default: production
+
+steps:
+  - name: Check CI and recent deployments
+    prompt: |
+      Investigate the CI/CD status for {{service}} in {{environment}}:
+      1. Check recent git commits on the current branch — what changed recently?
+      2. Run `git log --oneline -10` to see the last 10 commits
+      3. If possible, check CI run status using `gh run list --limit 5` or similar
+
+      Report what was deployed recently and whether CI passed or failed.
+
+  - name: Check infrastructure health
+    prompt: |
+      Check the infrastructure for {{service}} in {{environment}}:
+      1. If Kubernetes is available, check pod status with kubectl — are any pods crashlooping, pending, or in error state?
+      2. If Docker is available, check container status — are containers running or stopped?
+      3. Check resource usage if possible — CPU, memory, disk
+
+      Report any unhealthy pods, containers, or resource issues.
+
+  - name: Check logs for errors
+    prompt: |
+      Check the logs for {{service}}:
+      1. If Kubernetes, get recent pod logs — look for errors, exceptions, stack traces
+      2. If Docker, get container logs — same
+      3. If neither is available, check if there are log files in the project
+
+      Extract the most relevant error messages. Focus on errors that started recently
+      (correlate with the deployment timeline from step 1).
+
+  - name: Correlate and report root cause
+    prompt: |
+      Based on everything you found in the previous steps, write a root cause analysis:
+
+      ## Incident Investigation: {{service}} ({{environment}})
+
+      ### Timeline
+      - [When did the problem likely start?]
+      - [What deployment or change correlates?]
+
+      ### Evidence
+      - [CI status]
+      - [Infrastructure health]
+      - [Key error messages from logs]
+
+      ### Probable Root Cause
+      [Your best assessment of what went wrong and why]
+
+      ### Recommended Actions
+      1. [Immediate fix]
+      2. [Follow-up investigation if needed]
+      3. [Preventive measures]
+
+      ### Confidence
+      [How confident are you in this diagnosis? What additional information would help?]

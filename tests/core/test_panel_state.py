@@ -53,3 +53,25 @@ def test_last_write_wins():
     panel_state.set_last_review({"mode": "dockerfile"})
     got = panel_state.get_last_review()
     assert got == {"mode": "dockerfile"}
+
+
+# ── Workflow run state ─────────────────────────────────────────────────
+
+
+def test_workflow_run_fresh_is_none():
+    assert panel_state.get_last_workflow_run() is None
+
+
+def test_workflow_run_set_and_get():
+    snap = {"workflow": "verify-deploy", "status": "completed", "steps_completed": 3}
+    panel_state.set_last_workflow_run(snap)
+    got = panel_state.get_last_workflow_run()
+    assert got == snap
+    assert got is not snap  # shallow copy
+
+
+def test_workflow_run_clear():
+    panel_state.set_last_workflow_run({"workflow": "test"})
+    panel_state.clear()
+    assert panel_state.get_last_workflow_run() is None
+    assert panel_state.get_last_review() is None

@@ -1,0 +1,65 @@
+name: Reproduce Bug
+description: Take a bug description, plan reproduction steps, execute them in the browser, and capture evidence.
+
+inputs:
+  - name: description
+    description: The bug report or description of the problem
+    required: true
+  - name: url
+    description: The URL where the bug occurs
+    required: true
+
+steps:
+  - name: Plan reproduction steps
+    prompt: |
+      A user reported this bug:
+
+      ---
+      {{description}}
+      ---
+
+      The bug occurs at: {{url}}
+
+      Plan a step-by-step reproduction:
+      1. List the exact steps to reproduce the bug
+      2. Note what you expect to happen vs what the bug report says happens
+      3. Identify what evidence to capture (screenshots, console errors, network requests)
+
+      Do NOT execute anything yet — just plan the steps.
+
+  - name: Execute reproduction
+    prompt: |
+      Now execute the reproduction plan from the previous step using browser automation:
+      1. Navigate to {{url}}
+      2. Follow each step you planned
+      3. At each step, take a screenshot
+      4. Check the console for errors after each interaction
+      5. Check network requests for failures
+
+      Report what happened at each step. Did the bug reproduce?
+
+  - name: Capture evidence and write report
+    prompt: |
+      Based on the reproduction attempt, write a bug report:
+
+      ## Bug Reproduction Report
+
+      **Original Report:** {{description}}
+      **URL:** {{url}}
+      **Reproduced:** YES or NO or PARTIAL
+
+      ### Steps Taken
+      1. [step and result]
+      2. [step and result]
+      ...
+
+      ### Evidence
+      - Screenshots: [describe what was captured]
+      - Console errors: [list any JS errors]
+      - Network failures: [list any failed requests]
+
+      ### Analysis
+      [What is likely causing this bug? Is it a frontend issue, backend issue, or data issue?]
+
+      ### Suggested Fix
+      [If you can identify the likely code path, suggest what to investigate or fix]

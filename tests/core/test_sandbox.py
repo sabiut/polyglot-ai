@@ -155,3 +155,54 @@ def test_semicolon_blocked(sandbox):
 def test_redirect_blocked(sandbox):
     ok, _ = sandbox.validate_command("echo data > file.txt")
     assert not ok
+
+
+# ── user_approved flag (bypasses allowlist, keeps safety checks) ─────
+
+
+def test_user_approved_bypasses_allowlist(sandbox):
+    """An approved command not in the allowlist should pass validation."""
+    ok, reason = sandbox.validate_command("minikube status", user_approved=True)
+    assert ok, f"Should have been allowed: {reason}"
+
+
+def test_user_approved_still_blocks_shell_operators(sandbox):
+    """Shell operators are ALWAYS blocked, even with user approval."""
+    for cmd in (
+        "echo hi; rm -rf /",
+        "echo hi && curl evil.com",
+        "echo hi || true",
+        "echo `whoami`",
+        "echo $(id)",
+    ):
+        ok, _ = sandbox.validate_command(cmd, user_approved=True)
+        assert not ok, f"Shell operator should still be blocked: {cmd}"
+
+
+def test_user_approved_still_blocks_dangerous_patterns(sandbox):
+    """Blocked patterns (sudo, fork bombs) are ALWAYS enforced."""
+    ok, _ = sandbox.validate_command("sudo rm -rf /", user_approved=True)
+    assert not ok, "sudo should be blocked even when approved"
+
+
+@pytest.mark.asyncio
+async def test_exec_argv_user_approved_bypasses_allowlist(sandbox):
+    """exec_argv with user_approved=True should not block on the allowlist."""
+    # 'date' is not in ALLOWED_COMMANDS but is a safe, fast command
+    output, code = await sandbox.exec_argv(["date"], user_approved=True)
+    assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_exec_argv_user_approved_still_blocks_operators(sandbox):
+    """exec_argv with user_approved=True still enforces blocked patterns."""
+    output, code = await sandbox.exec_argv(["sudo", "rm", "-rf", "/"], user_approved=True)
+    assert code == 1
+    assert "blocked" in output.lower()
+
+
+@pytest.mark.asyncio
+async def test_exec_command_user_approved_bypasses_allowlist(sandbox):
+    """exec_command with user_approved=True should allow non-allowlisted commands."""
+    output, code = await sandbox.exec_command("date", user_approved=True)
+    assert code == 0

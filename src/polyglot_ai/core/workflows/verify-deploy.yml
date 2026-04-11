@@ -1,0 +1,53 @@
+name: Verify Deployment
+description: Smoke test a URL after deploy — checks page load, console errors, network failures, and produces a pass/fail report.
+
+inputs:
+  - name: url
+    description: The URL to test (e.g. https://staging.example.com)
+    required: true
+  - name: environment
+    description: Environment name for the report header
+    required: false
+    default: staging
+
+steps:
+  - name: Load page and screenshot
+    prompt: |
+      Navigate to {{url}} using the browser automation tools.
+      Take a screenshot of the page after it fully loads.
+      Report:
+      - The page title
+      - Whether the page loaded successfully (HTTP status)
+      - How long it took to become interactive
+      - Any immediately visible errors or broken elements
+
+  - name: Check for errors
+    prompt: |
+      Now check the browser for problems:
+      1. Read the browser console — list any JavaScript errors or warnings
+      2. Check network requests — list any failed requests (4xx or 5xx status codes)
+      3. Check for mixed content warnings (HTTP resources on HTTPS page)
+
+      For each issue found, note the exact error message and the source URL or file.
+
+  - name: Summarize verification
+    prompt: |
+      Based on the previous steps, write a deployment verification report for the {{environment}} environment.
+
+      Format it as:
+
+      ## Deployment Verification: {{environment}}
+      **URL:** {{url}}
+      **Status:** PASS or FAIL
+
+      ### Page Load
+      - [result]
+
+      ### Console Errors
+      - [list or "None found"]
+
+      ### Network Failures
+      - [list or "None found"]
+
+      ### Verdict
+      [One paragraph: is this deployment healthy? Any issues that need immediate attention?]

@@ -74,6 +74,8 @@ _NOTE_GLYPHS: dict[str, tuple[str, str]] = {
     "review_failed": ("✗", "#f48771"),
     "ci_run": ("●", "#9cdcfe"),
     "ci_failure_imported": ("⚠", "#f48771"),
+    "workflow_started": ("⚡", "#9cdcfe"),
+    "workflow_run": ("⚡", "#4ec9b0"),
     "chat_started": ("✎", "#888888"),
     "ai_response": ("✎", "#888888"),
     "user_message": ("✎", "#aaaaaa"),

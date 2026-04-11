@@ -334,10 +334,28 @@ class ContextBuilder:
         from polyglot_ai.core import panel_state
 
         review = panel_state.get_last_review()
-        if not review:
+        workflow = panel_state.get_last_workflow_run()
+        if not review and not workflow:
             return ""
 
         lines: list[str] = ["--- PANEL STATE ---", ""]
+
+        # Workflow run (if any)
+        if workflow:
+            wf_name = workflow.get("name") or workflow.get("workflow") or "unknown"
+            wf_status = workflow.get("status") or "unknown"
+            steps_done = workflow.get("steps_completed", 0)
+            steps_total = workflow.get("steps_total", 0)
+            lines.append(
+                f"Last workflow: {wf_name} ({wf_status}, {steps_done}/{steps_total} steps)"
+            )
+            wf_inputs = workflow.get("inputs") or {}
+            if wf_inputs:
+                lines.append(f"Inputs: {', '.join(f'{k}={v}' for k, v in wf_inputs.items())}")
+            lines.append("")
+
+        if not review:
+            return "\n".join(lines)
 
         mode = review.get("mode") or "unknown"
         status = review.get("status") or "ok"

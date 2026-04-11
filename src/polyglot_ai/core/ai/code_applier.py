@@ -167,21 +167,21 @@ async def run_command_safe(
     project_root: Path,
     command: str,
     timeout: int = 60,
+    *,
+    user_approved: bool = False,
 ) -> tuple[str, int]:
-    """Run a command ONLY if it passes Sandbox validation.
+    """Run a command after Sandbox validation.
 
-    Uses Sandbox.validate_command() to check allowlist/blocklist,
-    then Sandbox.exec_command() for safe execution.
+    Uses Sandbox.validate_command() to check blocklist and shell
+    operators. When ``user_approved`` is True the command allowlist
+    is skipped (the user clicked "Run" in the UI).
     """
     from polyglot_ai.core.sandbox import Sandbox
 
     sandbox = Sandbox(project_root)
 
-    # Validate through sandbox
-    allowed, reason = sandbox.validate_command(command)
-    if not allowed:
-        return f"Command blocked: {reason}", 1
-
-    # Execute through sandbox (with timeout, output truncation)
-    output, returncode = await sandbox.exec_command(command, timeout=timeout)
+    # Execute through sandbox — exec_command validates internally
+    output, returncode = await sandbox.exec_command(
+        command, timeout=timeout, user_approved=user_approved
+    )
     return output, returncode

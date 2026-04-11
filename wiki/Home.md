@@ -31,6 +31,7 @@ This wiki is the full user guide. Pick a section below.
 - **[Database](Database)** — multi-engine explorer, query runner, schema browser
 
 ### Workflow
+- **[Workflows](Chat#workflows)** — repeatable multi-step AI investigations from YAML
 - **[Tasks and Today](Tasks-and-Today)** — the workflow layer that ties everything together
 - **[Settings and Keyboard Shortcuts](Settings-and-Shortcuts)**
 - **[Troubleshooting and FAQ](Troubleshooting-FAQ)**
@@ -57,6 +58,11 @@ This wiki is the full user guide. Pick a section below.
 
 ## Recent additions
 
+- **⚡ Workflows** — repeatable multi-step AI investigations defined in
+  YAML. Run `/workflow verify-deploy --url https://staging.example.com` to
+  execute a 3-step deployment check with Playwright screenshots, console
+  error analysis, and a pass/fail summary. Three workflows ship built-in;
+  create your own in `.polyglot/workflows/`. See **[Chat → Workflows](Chat#workflows)**.
 - **🔍 Docker Compose Security** review mode — scans `docker-compose*.yml`
   for hardcoded secrets, privileged containers, docker.sock mounts, DB
   ports on `0.0.0.0`, missing `cap_drop`, and more.

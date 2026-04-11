@@ -158,6 +158,7 @@ class ChatPanel(QWidget):
         self._current_conversation: Conversation | None = None
         self._streaming = False
         self._stream_task: asyncio.Task | None = None
+        self._workflow_running = False
         self._current_assistant_msg: ChatMessage | None = None
         self._tools: list[dict] | None = None
         self._tool_registry = None
@@ -1362,6 +1363,10 @@ class ChatPanel(QWidget):
                 )
             return True
 
+        if cmd == "/workflow":
+            self._handle_workflow_command(arg)
+            return True
+
         if cmd == "/help":
             self._add_system_message(
                 "**Available commands:**\n"
@@ -1374,6 +1379,7 @@ class ChatPanel(QWidget):
                 "• `/explain [target]` — Explain code or project\n"
                 "• `/commit [message]` — Stage and commit changes\n"
                 "• `/git [command]` — Run a git command\n"
+                "• `/workflow [name] [--key value]` — Run a multi-step workflow\n"
                 "• `/status` — Show session info\n"
                 "• `/help` — Show this help"
             )
@@ -1484,6 +1490,11 @@ class ChatPanel(QWidget):
         if not text and not self._pending_attachments:
             return
         if self._streaming:
+            return
+        if self._workflow_running:
+            self._add_system_message(
+                "A workflow is running. Wait for it to finish, or click Stop to cancel."
+            )
             return
 
         # Handle slash commands
@@ -2579,7 +2590,7 @@ class ChatPanel(QWidget):
         async def do_run():
             from polyglot_ai.core.ai.code_applier import run_command_safe
 
-            output, code = await run_command_safe(project_root, command)
+            output, code = await run_command_safe(project_root, command, user_approved=True)
             status = "✓" if code == 0 else f"✗ Exit {code}"
             self._add_system_message(f"**{status}**\n```\n{output}\n```")
 
@@ -2624,7 +2635,9 @@ class ChatPanel(QWidget):
         self._add_system_message(f"Running: `{command}`...")
 
         async def do_run():
-            output, code = await run_command_safe(project_root, command)
+            # user_approved=True — the user clicked the "Run" button,
+            # which is explicit approval. Skip the command allowlist.
+            output, code = await run_command_safe(project_root, command, user_approved=True)
             status = "✓" if code == 0 else f"✗ Exit {code}"
             self._add_system_message(f"**{status}**\n```\n{output}\n```")
 
@@ -3155,6 +3168,213 @@ class ChatPanel(QWidget):
             f"background: {tc.get('accent_warning')}; color: #fff; "
             "border: none; border-radius: 4px; font-weight: 600; }"
         )
+
+    # ── Workflow execution ──────────────────────────────────────────
+
+    def _handle_workflow_command(self, arg: str) -> None:
+        """Handle ``/workflow [name] [--key value ...]``."""
+        from polyglot_ai.core.workflow_engine import (
+            WorkflowLoader,
+            parse_workflow_args,
+            validate_inputs,
+        )
+
+        project_root = self._get_project_root()
+
+        if not arg.strip():
+            # List available workflows
+            workflows = WorkflowLoader.list_workflows(project_root)
+            if not workflows:
+                self._add_system_message(
+                    "No workflows found. Add YAML files to "
+                    "`.polyglot/workflows/` or run `/workflow seed` to "
+                    "create the built-in defaults."
+                )
+                return
+            lines = ["**Available workflows:**"]
+            for wf in workflows:
+                inputs_hint = ""
+                required = [i for i in wf.inputs if i.required]
+                if required:
+                    inputs_hint = " " + " ".join(f"--{i.name} <value>" for i in required)
+                lines.append(f"• `/workflow {wf.slug}{inputs_hint}` — {wf.description}")
+            self._add_system_message("\n".join(lines))
+            return
+
+        if arg.strip() == "seed":
+            if not project_root:
+                self._add_system_message("Open a project first to seed workflows.")
+                return
+            count = WorkflowLoader.seed_defaults(project_root)
+            self._add_system_message(
+                f"Seeded {count} workflow(s) to `.polyglot/workflows/`. "
+                "Run `/workflow` to see the list."
+            )
+            return
+
+        name, inputs = parse_workflow_args(arg)
+        definition, load_error = WorkflowLoader.load(name, project_root)
+        if not definition:
+            msg = f"Workflow '{name}' not found. Run `/workflow` to see available workflows."
+            if load_error:
+                msg = f"Workflow '{name}' could not be loaded: {load_error}"
+            self._add_system_message(msg)
+            return
+
+        ok, filled_inputs, missing = validate_inputs(definition, inputs)
+        if not ok:
+            missing_hints = ", ".join(f"`--{m}`" for m in missing)
+            self._add_system_message(
+                f"Missing required inputs for **{definition.name}**: {missing_hints}\n\n"
+                f"Usage: `/workflow {name} {' '.join(f'--{m} <value>' for m in missing)}`"
+            )
+            return
+
+        self._start_workflow(definition, filled_inputs)
+
+    def _start_workflow(self, definition, inputs: dict[str, str]) -> None:
+        """Kick off a workflow — creates conversation if needed, then runs steps."""
+        if self._workflow_running:
+            self._add_system_message("A workflow is already running.")
+            return
+        if not self._provider_manager or not self._provider_manager.has_providers:
+            self._add_system_message("Please sign in or add an API key first.")
+            return
+
+        full_id, display_model = self._get_selected_model()
+        if not full_id:
+            self._add_system_message("Please select a model from the dropdown.")
+            return
+
+        # Ensure a conversation exists
+        if self._current_conversation is None:
+            self._current_conversation = Conversation(model=full_id or display_model)
+            self._persisted_message_count = 0
+
+        self._welcome.hide()
+        self._workflow_running = True
+
+        # Show workflow start banner
+        input_summary = ", ".join(f"{k}={v}" for k, v in inputs.items())
+        self._add_system_message(
+            f"**⚡ Starting workflow: {definition.name}**\n"
+            f"{definition.description}\n"
+            f"Inputs: {input_summary}\n"
+            f"Steps: {len(definition.steps)}"
+        )
+
+        # Record on active task
+        if hasattr(self, "_task_manager") and self._task_manager:
+            try:
+                self._task_manager.add_note(
+                    "workflow_started",
+                    f"Workflow started: {definition.name}",
+                    data={
+                        "workflow": definition.slug,
+                        "inputs": inputs,
+                        "steps": len(definition.steps),
+                    },
+                    category="workflow",
+                )
+            except Exception:
+                logger.debug("Failed to record workflow_started note", exc_info=True)
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        try:
+            safe_task(
+                self._run_workflow_steps(definition, inputs),
+                name=f"workflow_{definition.slug}",
+                on_error=lambda e: self._on_workflow_error(definition, inputs, e),
+            )
+        except Exception:
+            self._workflow_running = False
+            self._add_system_message("Failed to start workflow.")
+
+    async def _run_workflow_steps(self, definition, inputs: dict[str, str]) -> None:
+        """Execute each workflow step by injecting its prompt and streaming."""
+        from polyglot_ai.core.ai.models import Message
+        from polyglot_ai.core.workflow_engine import render_step_prompt
+
+        completed = 0
+        try:
+            for i, step in enumerate(definition.steps):
+                if not self._workflow_running:
+                    break  # cancelled
+                if self._current_conversation is None:
+                    self._add_system_message("Conversation closed during workflow.")
+                    break
+
+                # Show step header
+                self._add_system_message(f"**Step {i + 1}/{len(definition.steps)}: {step.name}**")
+
+                # Render and inject the step prompt as a user message
+                prompt = render_step_prompt(step, inputs)
+                self._current_conversation.messages.append(Message(role="user", content=prompt))
+                self._add_message_widget("user", prompt)
+
+                # Stream the AI response (reuses full tool-calling loop)
+                await self._stream_response()
+                completed += 1
+
+        except asyncio.CancelledError:
+            self._add_system_message("Workflow cancelled.")
+        except Exception as e:
+            logger.exception("Workflow step failed")
+            self._add_system_message(f"Workflow error at step {completed + 1}: {e}")
+        finally:
+            self._finish_workflow(definition, inputs, completed)
+
+    def _finish_workflow(self, definition, inputs: dict[str, str], steps_completed: int) -> None:
+        """Clean up after workflow completes or fails."""
+        self._workflow_running = False
+        total = len(definition.steps)
+        status = "completed" if steps_completed == total else "partial"
+
+        self._add_system_message(
+            f"**⚡ Workflow finished: {definition.name}** — "
+            f"{steps_completed}/{total} steps {status}"
+        )
+
+        # Record on active task
+        if hasattr(self, "_task_manager") and self._task_manager:
+            try:
+                self._task_manager.add_note(
+                    "workflow_run",
+                    f"Workflow {status}: {definition.name} ({steps_completed}/{total} steps)",
+                    data={
+                        "workflow": definition.slug,
+                        "inputs": inputs,
+                        "steps_completed": steps_completed,
+                        "steps_total": total,
+                        "status": status,
+                    },
+                    category="workflow",
+                )
+            except Exception:
+                logger.debug("Failed to record workflow_run note", exc_info=True)
+
+        # Publish to panel state for AI visibility
+        try:
+            from polyglot_ai.core import panel_state
+
+            panel_state.set_last_workflow_run(
+                {
+                    "workflow": definition.slug,
+                    "name": definition.name,
+                    "status": status,
+                    "steps_completed": steps_completed,
+                    "steps_total": total,
+                    "inputs": inputs,
+                }
+            )
+        except Exception:
+            logger.debug("Failed to publish workflow state", exc_info=True)
+
+    def _on_workflow_error(self, definition, inputs: dict, error: Exception) -> None:
+        """Callback for workflow task failures — ensures cleanup happens."""
+        self._add_system_message(f"Workflow failed: {error}")
+        self._finish_workflow(definition, inputs, 0)
 
     # ── Icon helpers for header buttons ──────────────────────────────
 
