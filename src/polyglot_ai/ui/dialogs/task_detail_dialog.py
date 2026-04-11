@@ -371,8 +371,7 @@ class TaskDetailDialog(QDialog):
         """
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background: #1a3a5c; border: 1px solid #0e639c; "
-            "border-radius: 6px; }"
+            "QFrame { background: #1a3a5c; border: 1px solid #0e639c; border-radius: 6px; }"
         )
         v = QVBoxLayout(card)
         v.setContentsMargins(16, 14, 16, 14)
@@ -389,9 +388,7 @@ class TaskDetailDialog(QDialog):
             "No checklist yet. Let the AI break this task into ordered "
             "steps so you can track progress and scope."
         )
-        blurb.setStyleSheet(
-            "color: #d8e8f5; font-size: 12px; background: transparent;"
-        )
+        blurb.setStyleSheet("color: #d8e8f5; font-size: 12px; background: transparent;")
         blurb.setWordWrap(True)
         v.addWidget(blurb)
 
@@ -651,9 +648,7 @@ class TaskDetailDialog(QDialog):
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
                 self._plan_btn.setText(
-                    "Regenerate checklist"
-                    if self._task.plan
-                    else "✨ Generate checklist with AI"
+                    "Regenerate checklist" if self._task.plan else "✨ Generate checklist with AI"
                 )
             return
         # Activate this task so set_plan() writes to the right one,
@@ -669,9 +664,7 @@ class TaskDetailDialog(QDialog):
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
                 self._plan_btn.setText(
-                    "Regenerate checklist"
-                    if self._task.plan
-                    else "✨ Generate checklist with AI"
+                    "Regenerate checklist" if self._task.plan else "✨ Generate checklist with AI"
                 )
             return
         self.accept()

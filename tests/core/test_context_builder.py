@@ -336,9 +336,7 @@ def test_panel_state_block_clean_review_shows_zero():
 
 
 def test_panel_state_block_renders_before_boilerplate():
-    panel_state.set_last_review(
-        _review_snapshot([_finding("a.yml", 1, "high", "issue")])
-    )
+    panel_state.set_last_review(_review_snapshot([_finding("a.yml", 1, "high", "issue")]))
     cb = ContextBuilder()
     prompt = cb.build_system_prompt()
     assert prompt.index("PANEL STATE") < prompt.index("IMPORTANT RULES")
@@ -396,9 +394,7 @@ def test_empty_project_directive_absent_when_no_project_root():
 
 def test_panel_state_block_coexists_with_active_task():
     """Task block and panel state both render; task first, then panel."""
-    panel_state.set_last_review(
-        _review_snapshot([_finding("a.yml", 1, "high", "issue")])
-    )
+    panel_state.set_last_review(_review_snapshot([_finding("a.yml", 1, "high", "issue")]))
     cb = ContextBuilder()
     cb.set_active_task(_task())
     prompt = cb.build_system_prompt()

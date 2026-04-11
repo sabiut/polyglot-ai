@@ -808,5 +808,3 @@ class _AttentionRow(QWidget):
             QDesktopServices.openUrl(QUrl(url))
         except Exception:
             logger.exception("today_panel: could not open url")
-
-

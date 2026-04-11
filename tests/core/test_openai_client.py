@@ -84,9 +84,7 @@ def _chunk(*, content=None, tool_calls=None, finish_reason=None):
 
 
 def _usage_chunk(prompt=1, completion=2, total=3):
-    usage = SimpleNamespace(
-        prompt_tokens=prompt, completion_tokens=completion, total_tokens=total
-    )
+    usage = SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total)
     return SimpleNamespace(choices=[], usage=usage)
 
 
@@ -167,9 +165,7 @@ async def test_single_tool_call_split_across_deltas_preserves_index_and_args():
         assert tc.tool_calls[0]["id"] is None
         assert tc.tool_calls[0]["function"]["name"] is None
 
-    reconstructed = "".join(
-        tc.tool_calls[0]["function"]["arguments"] for tc in tool_chunks
-    )
+    reconstructed = "".join(tc.tool_calls[0]["function"]["arguments"] for tc in tool_chunks)
     assert reconstructed == '{"path": "a.py", "content": "x"}'
 
     finishes = [c.finish_reason for c in out if c.finish_reason]

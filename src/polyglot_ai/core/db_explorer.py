@@ -692,9 +692,7 @@ class DatabaseManager:
                 await self._connections[name].disconnect()
             except Exception:
                 pass
-        conn = DatabaseConnection(
-            name, db_type, connection_string, mcp_client, read_only=read_only
-        )
+        conn = DatabaseConnection(name, db_type, connection_string, mcp_client, read_only=read_only)
         self._connections[name] = conn
         return conn
 
@@ -708,9 +706,7 @@ class DatabaseManager:
         read_only: bool = True,
     ) -> DatabaseConnection:
         """Synchronous add — for use during config loading (no active connections)."""
-        conn = DatabaseConnection(
-            name, db_type, connection_string, mcp_client, read_only=read_only
-        )
+        conn = DatabaseConnection(name, db_type, connection_string, mcp_client, read_only=read_only)
         self._connections[name] = conn
         return conn
 

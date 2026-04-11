@@ -156,9 +156,7 @@ async def test_combined_severity_and_file_filters():
         )
     )
 
-    out = json.loads(
-        await get_review_findings({"severity": "critical", "file": "prod"})
-    )
+    out = json.loads(await get_review_findings({"severity": "critical", "file": "prod"}))
     assert out["returned"] == 1
     f = out["findings"][0]
     assert f["severity"] == "critical"

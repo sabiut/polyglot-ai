@@ -69,9 +69,7 @@ def build_review_snapshot(
 
     # Stable ordering: most severe first, then by file/line so tests
     # and the rendered prompt don't flap on re-runs.
-    findings.sort(
-        key=lambda x: (_SEV_ORDER.get(x["severity"], 99), x["file"], x["line"])
-    )
+    findings.sort(key=lambda x: (_SEV_ORDER.get(x["severity"], 99), x["file"], x["line"]))
 
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for f in findings:

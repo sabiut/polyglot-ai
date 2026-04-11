@@ -43,9 +43,7 @@ def test_plus_button_toggles_quick_create_row(panel):
     assert panel._quick_create_row.isVisible() is False
 
 
-def test_quick_create_enter_creates_task_with_default_feature_kind(
-    panel, task_manager, qtbot
-):
+def test_quick_create_enter_creates_task_with_default_feature_kind(panel, task_manager, qtbot):
     panel._on_new_task()
     panel._quick_create_input.setText("Add CSV export")
     panel._on_quick_create_commit()

@@ -167,9 +167,7 @@ async def test_single_tool_call_split_across_deltas_assembles_cleanly():
         assert tc.tool_calls[0]["id"] is None
         assert tc.tool_calls[0]["function"]["name"] is None
 
-    reconstructed = "".join(
-        tc.tool_calls[0]["function"]["arguments"] for tc in tool_chunks
-    )
+    reconstructed = "".join(tc.tool_calls[0]["function"]["arguments"] for tc in tool_chunks)
     assert reconstructed == '{"path": "a.py", "content": "x"}'
 
 

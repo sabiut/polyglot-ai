@@ -35,6 +35,7 @@ def _sanitize_db_error(err: Exception) -> str:
         msg = msg[:300] + "... (truncated)"
     return msg
 
+
 # SQL statements that are read-only and safe to auto-approve.
 # Note: WITH is intentionally NOT in this list because Postgres supports
 # data-modifying CTEs (WITH x AS (DELETE FROM t RETURNING *) SELECT ...).

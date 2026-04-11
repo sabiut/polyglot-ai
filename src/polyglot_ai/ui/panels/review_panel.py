@@ -314,9 +314,7 @@ class ReviewPanel(QWidget):
             files = collect_iac_files(self._project_root, iac_mode)
             if not files:
                 self._clear_results()
-                self._show_message(
-                    f"No {mode_pretty} files found in this project.", "#cca700"
-                )
+                self._show_message(f"No {mode_pretty} files found in this project.", "#cca700")
                 self._run_btn.setEnabled(True)
                 self._run_btn.setText("▶ Run Review")
                 return
@@ -354,8 +352,7 @@ class ReviewPanel(QWidget):
         except Exception:
             logger.exception("review_panel: failed to publish review snapshot")
             self._show_message(
-                "Review complete, but AI integration failed. "
-                "The chat may not see these findings.",
+                "Review complete, but AI integration failed. The chat may not see these findings.",
                 "#cca700",
             )
 

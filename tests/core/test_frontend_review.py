@@ -140,7 +140,12 @@ def test_collector_skips_build_output_dirs(tmp_path):
     )
     out = collect_frontend_files(tmp_path)
     assert "src/App.tsx" in out
-    for bad in ("dist/App.tsx", "build/index.html", "out/static.html", "storybook-static/iframe.html"):
+    for bad in (
+        "dist/App.tsx",
+        "build/index.html",
+        "out/static.html",
+        "storybook-static/iframe.html",
+    ):
         assert bad not in out
 
 

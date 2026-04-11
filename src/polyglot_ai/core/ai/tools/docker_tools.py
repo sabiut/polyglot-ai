@@ -240,9 +240,7 @@ async def docker_inspect(args: dict) -> str:
                     "Ports": item.get("NetworkSettings", {}).get("Ports", {}),
                 },
                 "Mounts": item.get("Mounts", []),
-                "Env": _redact_env_vars(
-                    item.get("Config", {}).get("Env", [])[:20]
-                ),
+                "Env": _redact_env_vars(item.get("Config", {}).get("Env", [])[:20]),
                 "Cmd": item.get("Config", {}).get("Cmd", []),
             }
             return json.dumps(summary, indent=2, default=str)

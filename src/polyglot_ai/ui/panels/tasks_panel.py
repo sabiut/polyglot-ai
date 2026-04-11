@@ -148,9 +148,7 @@ class TasksPanel(QWidget):
             try:
                 from PyQt6.QtWidgets import QMessageBox
 
-                QMessageBox.warning(
-                    self, "Error", "Could not mark the active task as done."
-                )
+                QMessageBox.warning(self, "Error", "Could not mark the active task as done.")
             except Exception:
                 pass
 
@@ -220,9 +218,7 @@ class TasksPanel(QWidget):
         qc_layout.setSpacing(6)
 
         self._quick_create_input = QLineEdit()
-        self._quick_create_input.setPlaceholderText(
-            "Task title — Enter to create, Esc to cancel"
-        )
+        self._quick_create_input.setPlaceholderText("Task title — Enter to create, Esc to cancel")
         self._quick_create_input.setStyleSheet(
             "QLineEdit { background: #1e1e1e; color: #e0e0e0; "
             "border: 1px solid #3c3c3c; border-radius: 4px; "

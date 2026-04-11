@@ -258,7 +258,10 @@ class DatabasePanel(QWidget):
             name, db_type, conn_str, read_only = dialog.get_values()
             if name and conn_str:
                 self._db_manager.add_connection_sync(
-                    name, db_type, conn_str, mcp_client=self._mcp_client,
+                    name,
+                    db_type,
+                    conn_str,
+                    mcp_client=self._mcp_client,
                     read_only=read_only,
                 )
                 self._conn_combo.addItem(f"{name} ({db_type})")
@@ -275,11 +278,13 @@ class DatabasePanel(QWidget):
         for name, conn in self._db_manager.connections.items():
             # Store connection string in keyring (may contain passwords)
             keyring.set_password("polyglot-ai-db", name, conn._connection_string)
-            data.append({
-                "name": name,
-                "db_type": conn.db_type,
-                "read_only": conn.read_only,
-            })
+            data.append(
+                {
+                    "name": name,
+                    "db_type": conn.db_type,
+                    "read_only": conn.read_only,
+                }
+            )
 
         from polyglot_ai.core.security import secure_write
 
@@ -302,7 +307,10 @@ class DatabasePanel(QWidget):
                 conn_str = keyring.get_password("polyglot-ai-db", name) or ""
                 if name and conn_str:
                     self._db_manager.add_connection_sync(
-                        name, db_type, conn_str, mcp_client=self._mcp_client,
+                        name,
+                        db_type,
+                        conn_str,
+                        mcp_client=self._mcp_client,
                         read_only=read_only,
                     )
                     self._conn_combo.addItem(f"{name} ({db_type})")

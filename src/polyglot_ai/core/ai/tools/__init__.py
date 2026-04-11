@@ -147,14 +147,25 @@ class ToolRegistry:
     #   - cargo run/cargo script (execute compiled code)
     #   - bare yarn/pnpm (match yarn run, pnpm exec, etc.)
     _BOOTSTRAP_SAFE_PREFIXES = (
-        "npm install", "npm ci",
-        "yarn install", "yarn add",
-        "pnpm install", "pnpm add",
-        "pip install", "pip3 install", "python -m pip",
+        "npm install",
+        "npm ci",
+        "yarn install",
+        "yarn add",
+        "pnpm install",
+        "pnpm add",
+        "pip install",
+        "pip3 install",
+        "python -m pip",
         "go mod ",
-        "cargo build", "cargo new", "cargo init", "cargo fetch", "cargo add",
-        "bundle install", "composer install",
-        "mkdir ", "touch ",
+        "cargo build",
+        "cargo new",
+        "cargo init",
+        "cargo fetch",
+        "cargo add",
+        "bundle install",
+        "composer install",
+        "mkdir ",
+        "touch ",
     )
 
     def enable_bootstrap_mode(self, duration_seconds: int | None = None) -> float:
@@ -166,9 +177,7 @@ class ToolRegistry:
         the requested window.
         """
         seconds = (
-            duration_seconds
-            if duration_seconds is not None
-            else self.BOOTSTRAP_DEFAULT_SECONDS
+            duration_seconds if duration_seconds is not None else self.BOOTSTRAP_DEFAULT_SECONDS
         )
         if seconds <= 0:
             self._bootstrap_deadline = 0.0
@@ -466,8 +475,7 @@ class ToolRegistry:
             output = str(result) if result else "Tool returned no output."
             if len(output) > self._MAX_MCP_OUTPUT:
                 output = (
-                    output[: self._MAX_MCP_OUTPUT]
-                    + f"\n... (truncated, {len(output)} chars total)"
+                    output[: self._MAX_MCP_OUTPUT] + f"\n... (truncated, {len(output)} chars total)"
                 )
             return output
         except Exception as e:

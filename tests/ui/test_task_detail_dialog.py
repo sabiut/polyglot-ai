@@ -77,9 +77,7 @@ def test_toggle_maximize_flips_window_state(qtbot, task_with_no_plan, task_manag
 # ── Empty-state primary action (#6/#7) ──────────────────────────────
 
 
-def test_no_plan_no_generator_shows_no_empty_card(
-    qtbot, task_with_no_plan, task_manager
-):
+def test_no_plan_no_generator_shows_no_empty_card(qtbot, task_with_no_plan, task_manager):
     """Without a plan_generator the empty-state card should NOT render.
     Users without a configured AI provider wouldn't get anything to
     click, so we hide the affordance entirely."""
@@ -91,9 +89,7 @@ def test_no_plan_no_generator_shows_no_empty_card(
     assert not any("No checklist yet" in t for t in texts)
 
 
-def test_no_plan_with_generator_shows_prominent_empty_card(
-    qtbot, task_with_no_plan, task_manager
-):
+def test_no_plan_with_generator_shows_prominent_empty_card(qtbot, task_with_no_plan, task_manager):
     task_manager.set_plan_generator(_FakePlanGenerator())
     dlg = TaskDetailDialog(task_with_no_plan, task_manager)
     qtbot.addWidget(dlg)
@@ -108,9 +104,7 @@ def test_no_plan_with_generator_shows_prominent_empty_card(
     assert "Generate checklist" in dlg._plan_btn.text()
 
 
-def test_with_plan_shows_populated_card_and_regenerate_button(
-    qtbot, task_manager
-):
+def test_with_plan_shows_populated_card_and_regenerate_button(qtbot, task_manager):
     task = task_manager.create_task(TaskKind.FEATURE, "Wire up auth")
     task_manager.set_active(task.id)
     task_manager.set_plan(
@@ -141,9 +135,7 @@ def test_with_plan_shows_populated_card_and_regenerate_button(
 # ── Rename audit: no "PLAN" leaking into UI text ────────────────────
 
 
-def test_no_plan_leaks_into_dialog_labels(
-    qtbot, task_with_no_plan, task_manager
-):
+def test_no_plan_leaks_into_dialog_labels(qtbot, task_with_no_plan, task_manager):
     task_manager.set_plan_generator(_FakePlanGenerator())
     dlg = TaskDetailDialog(task_with_no_plan, task_manager)
     qtbot.addWidget(dlg)
