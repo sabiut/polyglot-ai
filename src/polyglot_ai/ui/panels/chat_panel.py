@@ -1125,7 +1125,9 @@ class ChatPanel(QWidget):
                 self._context_builder.set_available_tools(
                     [t.get("name", "") for t in self._tools if isinstance(t, dict)]
                 )
-            system_prompt = self._context_builder.build_system_prompt()
+            from polyglot_ai.core.async_utils import run_blocking
+
+            system_prompt = await run_blocking(self._context_builder.build_system_prompt)
 
         # Create executor
         from polyglot_ai.core.bridge import EventBus
@@ -1410,12 +1412,22 @@ class ChatPanel(QWidget):
             )
             return
 
-        # Fallback: run in chat if Review panel isn't available
+        # Fallback: run in chat if Review panel isn't available.
+        # Offload to async task so subprocess.run doesn't block the
+        # Qt event loop (git diff can take seconds on large repos).
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_code_review_fallback(project_root, branch), name="code_review_fallback")
+
+    async def _run_code_review_fallback(self, project_root: str, branch: str) -> None:
+        """Run git diff in a thread and feed it to the AI as a review prompt."""
         import subprocess
 
-        try:
+        from polyglot_ai.core.async_utils import run_blocking
+
+        def _get_diff() -> str:
             if branch:
-                result = subprocess.run(
+                r = subprocess.run(
                     ["git", "diff", branch],
                     capture_output=True,
                     text=True,
@@ -1423,23 +1435,25 @@ class ChatPanel(QWidget):
                     timeout=15,
                 )
             else:
-                result = subprocess.run(
+                r = subprocess.run(
                     ["git", "diff", "HEAD"],
                     capture_output=True,
                     text=True,
                     cwd=project_root,
                     timeout=15,
                 )
-                if not result.stdout.strip():
-                    result = subprocess.run(
+                if not r.stdout.strip():
+                    r = subprocess.run(
                         ["git", "diff"],
                         capture_output=True,
                         text=True,
                         cwd=project_root,
                         timeout=15,
                     )
+            return r.stdout.strip()
 
-            diff = result.stdout.strip()
+        try:
+            diff = await run_blocking(_get_diff)
             if not diff:
                 self._add_system_message("No changes found to review.")
                 return
@@ -1618,7 +1632,13 @@ class ChatPanel(QWidget):
 
         system_prompt = None
         if self._context_builder and self._context_builder._project_root:
-            system_prompt = self._context_builder.build_system_prompt()
+            # Offload to thread pool — build_system_prompt walks the
+            # filesystem and reads every source file, which can block
+            # the Qt event loop for 1-5s on large projects and trigger
+            # the OS "not responding" dialog.
+            from polyglot_ai.core.async_utils import run_blocking
+
+            system_prompt = await run_blocking(self._context_builder.build_system_prompt)
         if not system_prompt:
             system_prompt = (
                 "You are Polyglot AI, a helpful general-purpose assistant. "
