@@ -140,22 +140,156 @@ Builds a markdown summary of the task (title, branch, PR, recent events,
 tests, CI) and copies it to the clipboard. Paste straight into your
 daily standup.
 
-## Typical lifecycle
+## Walkthrough: adding a login page from scratch
 
-1. Open project.
-2. `Ctrl+Shift+J` → click **+** → type title → Enter. Done.
-3. Double-click the new card to open the detail window. Click
-   **✨ Generate checklist with AI** to break the task into ordered
-   steps.
-4. Chat with the AI — the conversation is now bound to the task and
-   the AI sees the checklist in its system prompt.
-5. Create a branch in the Git panel. Commits get logged automatically.
-6. Run tests. Snapshot is recorded on the task timeline.
-7. Run a review. Findings are logged AND the AI can query them via
-   `get_review_findings`.
-8. Generate PR description, open PR. State → **REVIEW**.
-9. `Ctrl+Shift+P` → *Task: Mark Active as Done*.
-10. Archive (optional).
+This example shows the full task lifecycle for a real feature. Follow
+along with your own project, or just read it to understand the flow.
+
+### 1. Create the task
+
+Open the Tasks sidebar with `Ctrl+Shift+J` and click the **+** button.
+Type "Add login page" and press Enter. A new task card appears under
+**ACTIVE** — you're already working on it.
+
+> **Tip:** If you want to set the kind (bugfix, refactor) or add a
+> description, click the **⋯** button on the quick-create row instead
+> of pressing Enter. That opens the full dialog.
+
+### 2. Generate a checklist
+
+Double-click the task card to open the **Task Detail** window. You'll
+see a prominent card that says **"✨ Generate checklist with AI"** —
+click it. The AI breaks "Add login page" into ordered steps:
+
+```
+1. [ ] Create LoginPage component with email/password fields
+2. [ ] Add form validation (required, email format, min length)
+3. [ ] Create auth API route POST /api/login
+4. [ ] Wire form submission to API with loading/error states
+5. [ ] Add protected route redirect for unauthenticated users
+6. [ ] Write tests for LoginPage and auth route
+```
+
+This checklist is now visible in the AI's system prompt, so when you
+chat it knows exactly what step you're on.
+
+### 3. Chat with task context
+
+Switch to the Chat panel. Notice the AI's first message now references
+your task. Ask it something like:
+
+> "Let's start with step 1. I'm using React + Tailwind. Create the
+> LoginPage component."
+
+The AI sees the task title, checklist, and state in its system prompt.
+It stays scoped — if you ask something off-topic, it'll answer briefly
+and offer to create a separate task for it.
+
+### 4. Work through the steps
+
+As you implement each step:
+
+- **Commits** are logged on the task timeline automatically when you
+  use the Git panel.
+- **Test runs** are recorded — the task card shows `4/6 tests` so you
+  can see progress at a glance.
+- **Code reviews** (from the Review panel) are logged too. Ask the AI
+  "what did the review find?" and it can answer without you pasting
+  anything.
+
+The task card in the sidebar updates its meta line in real time:
+
+```
+feature · ⎇ feat/login-page · 4/6 tests · CI ✓ · 3m ago
+```
+
+### 5. Open a PR
+
+When you're done, use the Chat or Git panel to create a PR. The task
+state moves to **REVIEW** automatically. The Today panel shows your
+open PR under **Attention** so you don't forget about it.
+
+### 6. Mark done
+
+Once the PR is merged: `Ctrl+Shift+P` → type "Task: Mark Active as
+Done" → Enter. The task moves to the **DONE** group. Archive it later
+if you want a cleaner sidebar.
+
+### What the AI sees (behind the scenes)
+
+When a task is active, the AI's system prompt includes a block like
+this at the very top:
+
+```
+ACTIVE TASK
+Title: Add login page
+Kind:  feature
+State: active
+Branch: feat/login-page
+
+Plan checklist:
+1. [ ] Create LoginPage component with email/password fields
+2. [x] Add form validation
+3. [~] Create auth API route POST /api/login
+4. [ ] Wire form submission to API
+5. [ ] Add protected route redirect
+6. [ ] Write tests
+
+Files touched so far on this task:
+- src/pages/LoginPage.tsx
+- src/api/auth.ts
+
+Stay scoped to this task.
+```
+
+This is why the AI's answers feel focused — it knows the goal, the
+plan, and what you've already done.
+
+---
+
+## More examples
+
+### Quick bugfix (no checklist needed)
+
+1. `Ctrl+Shift+J` → **+** → "Fix navbar overflow on mobile" → Enter.
+2. Chat: "The navbar items wrap to a second line on screens under 375px.
+   Here's the CSS..." — the AI proposes a fix.
+3. Approve the file change. Commit. Run tests.
+4. `Ctrl+Shift+P` → "Task: Mark Active as Done".
+
+Total overhead: ~10 seconds to create and close the task. You get a
+record of what you did and when.
+
+### Switching between tasks
+
+Working on two things? `Ctrl+Shift+P` → "Task: Switch Active..." →
+pick from the list. The chat loads that task's conversation, the AI
+re-scopes to the new task's checklist, and your git branch context
+updates.
+
+### Blocking a task
+
+Waiting on an API key from the backend team?
+
+1. `Ctrl+Shift+P` → "Task: Block Active Task..."
+2. Type the reason: "Waiting on Stripe API key from @alex"
+3. The task moves to **BLOCKED**. The Today panel shows it as a red
+   attention row so you remember to follow up.
+
+---
+
+## Typical lifecycle (summary)
+
+| Step | What you do | What happens |
+|------|-------------|--------------|
+| **Create** | `+` button or palette | Task card appears, becomes active |
+| **Plan** | Click "Generate checklist" | AI creates ordered steps |
+| **Build** | Chat + edit + commit | AI stays scoped, timeline logs commits |
+| **Test** | Run tests | Pass/fail recorded on task |
+| **Review** | Run AI review | Findings logged, AI can query them |
+| **PR** | Open PR | State → REVIEW, Today shows PR |
+| **Done** | Palette → Mark Done | State → DONE |
+| **Archive** | Right-click → Archive | Hidden from sidebar |
 
 ## Storage
 
