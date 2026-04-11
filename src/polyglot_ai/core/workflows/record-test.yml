@@ -1,0 +1,155 @@
+name: Record and Generate Test
+description: Execute a test scenario in the browser, then generate reusable Playwright test code and save it to your project.
+
+inputs:
+  - name: url
+    description: The starting URL (e.g. https://staging.example.com)
+    required: true
+  - name: scenario
+    description: Describe the test scenario in plain English (e.g. "login with admin/password123, add a product to cart, complete checkout")
+    required: true
+  - name: language
+    description: Output language for the generated test code (python or typescript)
+    required: false
+    default: python
+
+steps:
+  - name: Analyze page and plan
+    prompt: |
+      I need you to test the following scenario on {{url}}:
+
+      **Scenario:** {{scenario}}
+
+      First, navigate to {{url}} and analyze the page:
+      1. Take a screenshot to see the current state
+      2. Inspect the page structure — identify key elements: navigation,
+         forms, buttons, links, inputs, dropdowns
+      3. Read the page content to understand the layout and available actions
+
+      Based on what you see on the ACTUAL page, break the scenario down into
+      a numbered list of concrete browser actions. For each step, note:
+      - The action (navigate, click, type, select, wait, assert)
+      - The ACTUAL target element you found on the page (use what you see,
+        not guesses)
+      - The expected outcome after the action
+
+      Important: Adapt the plan to what the website ACTUALLY looks like.
+      If the scenario mentions "login" but you see a "Sign in" button,
+      use "Sign in". If there's a search icon instead of a search bar,
+      click the icon first. Work with the real page, not assumptions.
+
+  - name: Execute scenario
+    prompt: |
+      Now execute the test plan step by step using the browser automation tools.
+
+      For EACH step:
+      1. Before acting, take a screenshot or inspect the page to confirm
+         the target element exists and is visible
+      2. Perform the action (click, type, navigate, etc.)
+      3. Wait for the page to settle (navigation complete, content loaded,
+         animations finished)
+      4. Take a screenshot AFTER the action completes
+      5. Note the exact selector you used and WHY you chose it
+      6. Record the current URL
+
+      **Adaptive execution:**
+      - If an element isn't found, screenshot the page and look for
+        alternatives (different button text, different layout, mobile menu)
+      - If a page looks different than expected, analyze it and adapt
+      - If an action triggers a modal/popup/overlay, handle it
+      - If there's a CAPTCHA or rate limit, report it and continue with
+        remaining steps
+      - If you need to scroll to find an element, do so
+
+      Keep a detailed log of every action, selector, wait condition, and
+      URL change — this will be used to generate test code.
+
+  - name: Capture evidence and action log
+    prompt: |
+      Take a final screenshot of the current page state.
+
+      Now compile a complete, structured action log from everything you
+      executed. This log will be used to generate test code, so be precise:
+
+      For each action performed, list:
+      - **Step N**: brief description
+      - **Action**: navigate / click / fill / select / submit / wait / assert
+      - **Locator**: the Playwright locator strategy that would work best:
+        - `page.get_by_role("button", name="Submit")` (preferred)
+        - `page.get_by_label("Email")` (for form fields)
+        - `page.get_by_text("Welcome")` (for text content)
+        - `page.get_by_placeholder("Search...")` (for inputs)
+        - `page.locator("css=...")` (last resort)
+      - **Value**: any text typed, option selected, or file uploaded
+      - **Wait**: what to wait for after this action (URL change, element
+        appears, network idle, specific text visible)
+      - **Assertion**: what should be verified (element visible, text
+        content, URL matches, element count)
+
+      Also summarize:
+      - Starting URL → final URL
+      - Total steps: planned vs executed vs passed vs failed
+      - Any steps that needed adaptation (different selectors, retries)
+      - Credentials or test data used (note these should be configurable)
+
+  - name: Generate test code
+    prompt: |
+      Based on the action log from the previous steps, generate a complete,
+      production-ready Playwright test file in **{{language}}**.
+
+      Requirements:
+      1. Use the **Playwright test framework** (pytest-playwright for Python,
+         @playwright/test for TypeScript/JavaScript)
+      2. Include all necessary imports and proper test structure
+      3. Use **robust locators** in this priority order:
+         - `get_by_role()` with accessible name
+         - `get_by_label()` for form fields
+         - `get_by_text()` for clickable text
+         - `get_by_placeholder()` for inputs
+         - CSS selectors only as last resort
+      4. Add **explicit waits** — `expect(locator).to_be_visible()`,
+         `page.wait_for_url()`, `page.wait_for_load_state()`
+      5. Add **assertions** after each major action
+      6. Extract **credentials and test data** into variables/fixtures at the
+         top (not hardcoded in test steps)
+      7. Extract the **base URL** into a configurable variable
+      8. Add **clear comments** explaining each step
+      9. Use **meaningful test and function names** derived from the scenario
+      10. Handle **setup and teardown** properly (login fixtures, cleanup)
+
+      Output the code in a single code block with a filename path:
+
+      ```{{language}} tests/test_scenario.py
+      # complete test code here
+      ```
+
+      After the code block, provide:
+      - **Install command**: `pip install pytest-playwright && playwright install` or
+        `npm init playwright@latest`
+      - **Run command**: `pytest tests/test_scenario.py --headed` or
+        `npx playwright test`
+      - **Environment variables** needed (if any)
+      - **Tips** for making the test more robust
+
+  - name: Save test to project
+    prompt: |
+      Save the generated Playwright test code to the project.
+
+      Use the file_write tool to write the test file. Choose an appropriate
+      path based on the project structure:
+      - If a `tests/` directory exists, save there
+      - If an `e2e/` or `test/` directory exists, save there
+      - Otherwise create `tests/` and save there
+
+      Name the file based on the scenario (e.g. `test_login_checkout.py` or
+      `login-checkout.spec.ts`).
+
+      After saving, tell the user:
+      1. Where the file was saved
+      2. The exact command to run the test
+      3. Any dependencies they need to install first
+
+      If this is a Python project, also check if `pytest-playwright` is in
+      the project's requirements/dependencies. If not, suggest adding it.
+      If this is a Node.js project, check for `@playwright/test` in
+      package.json.

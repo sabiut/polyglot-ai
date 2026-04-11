@@ -202,7 +202,7 @@ Docker, DB, Git) as needed, then the engine advances to the next step.
 
 ### Bundled workflows
 
-Three workflows ship out of the box:
+Four workflows ship out of the box:
 
 - **verify-deploy** — Navigate to a URL, take a screenshot, check for
   console/network errors, and summarize pass/fail. Requires Playwright MCP.
@@ -210,6 +210,11 @@ Three workflows ship out of the box:
   review recent commits, and correlate into a root-cause report.
 - **reproduce-bug** — Plan reproduction steps, execute them in the browser,
   capture evidence, and write a structured bug report.
+- **record-test** — Describe a test scenario in plain English, the AI
+  analyzes the website, executes the scenario in the browser step by step,
+  generates production-ready Playwright test code (Python or TypeScript),
+  and saves it to your project. See [Record Test](#record-test-workflow)
+  below for details.
 
 ### Writing your own
 
@@ -256,14 +261,53 @@ steps:
 Project-local workflows in `.polyglot/workflows/` **override** bundled
 defaults with the same filename.
 
+### Record Test workflow
+
+The `record-test` workflow turns plain-English test descriptions into
+production-ready Playwright code. The AI autonomously analyzes the target
+website, executes the scenario, and saves the test file to your project.
+
+**Example:**
+```
+/workflow record-test --url https://myapp.com --scenario "login with admin/pass, search for laptop, add cheapest to cart, go to checkout"
+```
+
+For TypeScript output:
+```
+/workflow record-test --url https://myapp.com --scenario "sign up flow" --language typescript
+```
+
+**What happens (5 steps):**
+
+| Step | What the AI does |
+|------|-----------------|
+| 1. Analyze page and plan | Navigates to the URL, screenshots it, inspects the DOM, and adapts the plan to the **actual page** — if the scenario says "login" but the button says "Sign in", it uses "Sign in" |
+| 2. Execute scenario | Runs each action with Playwright, taking screenshots. Adapts on the fly — handles modals/popups, scrolls to find elements, tries alternative selectors if needed |
+| 3. Capture evidence | Compiles a structured action log with Playwright locators (`get_by_role`, `get_by_label`), wait conditions, and assertions |
+| 4. Generate test code | Produces a complete Playwright test file with configurable credentials, base URL, proper fixtures, and robust locators |
+| 5. Save to project | Writes the file to your `tests/` directory and tells you how to install dependencies and run it |
+
+**Key feature — adaptive execution:** The AI doesn't follow a script
+blindly. It analyzes the actual website, adapts to what it sees, handles
+unexpected popups, and retries with alternative selectors when elements
+aren't found.
+
+**Provider compatibility:** All providers (OpenAI, Anthropic, Google)
+support workflows. For best results with browser automation workflows,
+use a strong model — GPT-4o, GPT-4.1, Claude Sonnet 4, or Gemini 2.5
+Pro handle multi-step tool calling most reliably.
+
 ### Tips
 
-- **Playwright workflows** (verify-deploy, reproduce-bug) need the
-  Playwright MCP server connected in the MCP panel.
+- **Playwright workflows** (verify-deploy, reproduce-bug, record-test)
+  need the Playwright MCP server connected in the MCP panel.
 - **Keep steps focused.** Each step is a single AI turn — don't try to
   pack too much into one prompt.
 - **Use defaults** for optional inputs so workflows are quick to run
   without flags.
+- **Stronger models = better automation.** For complex multi-page
+  browser scenarios, use GPT-4o/4.1, Claude Sonnet/Opus, or Gemini 2.5
+  Pro. Smaller models may struggle with long tool-calling sequences.
 
 ## Plans
 
