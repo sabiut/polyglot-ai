@@ -633,10 +633,7 @@ class ReviewPanel(QWidget):
             f"**Findings:** {len(result.findings)}"
         )
         if result.critical_count or result.high_count:
-            lines.append(
-                f"**Critical:** {result.critical_count} | "
-                f"**High:** {result.high_count}"
-            )
+            lines.append(f"**Critical:** {result.critical_count} | **High:** {result.high_count}")
         if result.model:
             lines.append(f"**Model:** {result.model}")
         lines.append("")

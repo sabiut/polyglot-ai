@@ -163,9 +163,7 @@ class TerminalWidget(QWidget):
                     bg, fg = fg, bg
 
                 if selected:
-                    painter.fillRect(
-                        x, y, self._char_width, self._char_height, sel_bg
-                    )
+                    painter.fillRect(x, y, self._char_width, self._char_height, sel_bg)
                 elif bg != DEFAULT_BG:
                     painter.fillRect(
                         x,
@@ -249,9 +247,7 @@ class TerminalWidget(QWidget):
         if r1 == r2:
             # Single line selection
             line = self._lines[r1] if r1 < len(self._lines) else []
-            chars = "".join(
-                line[c].char for c in range(c1, min(c2, len(line)))
-            )
+            chars = "".join(line[c].char for c in range(c1, min(c2, len(line))))
             return chars
         # Multi-line selection
         result = []
