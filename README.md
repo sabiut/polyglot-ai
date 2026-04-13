@@ -41,6 +41,10 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **MCP sidebar** — Live connection status, tool counts, inline connect/disconnect, search filter
 - **Sequential-thinking integration** — When the tool is available, the AI is prompted to reason step-by-step on complex tasks
 
+## Documentation
+
+Full documentation is available on the **[Polyglot AI Wiki](https://github.com/sabiut/polyglot-ai/wiki)** — getting started, chat, workflows, MCP servers, review, DevOps panels, settings, and more.
+
 ## Install
 
 ### From release (recommended)
