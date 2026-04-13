@@ -9,7 +9,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 ### Core
 - **Multi-provider AI chat** — OpenAI, Anthropic (Claude), Google (Gemini), xAI (Grok) with streaming responses
 - **Integrated code editor** — Syntax highlighting via QScintilla, multi-tab editing
-- **Built-in terminal** — Full PTY terminal emulator
+- **Built-in terminal** — Full PTY terminal with mouse text selection, copy/paste, and right-click context menu
 - **AI tool calling** — File read/write/search, shell execution, git operations
 - **Command palette** — Quick actions with Ctrl+Shift+P
 - **Plan mode** — Structured step-by-step development plans
@@ -19,14 +19,26 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **Token usage dashboard** — Track costs across providers
 - **Session restore & branching** — Save workspace state, fork conversations
 
+### Workflows
+- **12 built-in workflows** — Repeatable multi-step AI automations in YAML
+- **QA & Testing** — verify-deploy, reproduce-bug, record-test, record-test-interactive
+- **Record Test Interactive** — Click through a site while Playwright records, AI hardens the code with 10 rules (resilient selectors, smart waits, assertions), auto-validates and fixes failures up to 3x
+- **DevOps** — infra-health-check, incident-response, pre-deploy-check, resource-optimization
+- **Security & Database** — security-audit, db-migration-check
+- **Build Infrastructure** — Architecture-first infra copilot: analyze project → propose architecture → generate Terraform → CI/CD → validate → plan → deploy
+- **Custom workflows** — Create your own in `.polyglot/workflows/` with YAML
+- **Autonomous execution** — Workflows run without asking permission; the user approved by launching
+
 ### Code review
 - **Diff review** — AI-powered review of working changes, staged changes, or branch-vs-main
 - **IaC security scans** — One-click security reviews for:
   - 🔍 Terraform (`.tf`, `.tfvars`, `.hcl`)
   - 🔍 Kubernetes manifests (real YAML parsing, not substring matching)
-  - 🔍 Dockerfiles
+  - 🔍 Dockerfiles and Docker Compose
   - 🔍 Helm charts (Chart.yaml, values.yaml, templates)
+  - 🎨 Frontend Design Audit
 - **Structured findings** — Severity, category, file:line, suggested fix
+- **Copy results** — 📋 Export full review as formatted Markdown
 
 ### DevOps panels
 - **Git panel** — Branch view, staging, commits
