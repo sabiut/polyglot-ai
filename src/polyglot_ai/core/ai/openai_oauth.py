@@ -95,7 +95,7 @@ class OpenAIOAuthClient(AIProvider):
                 return
 
         try:
-            data = json.loads(CODEX_AUTH_FILE.read_text())
+            data = json.loads(CODEX_AUTH_FILE.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 tokens = data.get("tokens", {})
                 if isinstance(tokens, dict):
@@ -138,7 +138,7 @@ class OpenAIOAuthClient(AIProvider):
         try:
             from polyglot_ai.core.security import secure_write
 
-            data = json.loads(CODEX_AUTH_FILE.read_text())
+            data = json.loads(CODEX_AUTH_FILE.read_text(encoding="utf-8"))
             if "tokens" in data and isinstance(data["tokens"], dict):
                 data["tokens"]["access_token"] = self._access_token
                 if self._refresh_token:
@@ -618,7 +618,7 @@ class OpenAIOAuthClient(AIProvider):
             try:
                 from polyglot_ai.core.security import secure_write
 
-                data = json.loads(CODEX_AUTH_FILE.read_text())
+                data = json.loads(CODEX_AUTH_FILE.read_text(encoding="utf-8"))
                 if "tokens" in data and isinstance(data["tokens"], dict):
                     data["tokens"]["access_token"] = None
                     data["tokens"]["refresh_token"] = None

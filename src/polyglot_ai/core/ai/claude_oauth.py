@@ -99,7 +99,7 @@ class ClaudeOAuthClient(AIProvider):
                 return
 
         try:
-            data = json.loads(CLAUDE_CREDENTIALS_FILE.read_text())
+            data = json.loads(CLAUDE_CREDENTIALS_FILE.read_text(encoding="utf-8"))
             oauth = data.get("claudeAiOauth", {})
             if isinstance(oauth, dict):
                 self._access_token = oauth.get("accessToken")
@@ -382,7 +382,7 @@ class ClaudeOAuthClient(AIProvider):
             try:
                 from polyglot_ai.core.security import secure_write
 
-                data = json.loads(CLAUDE_CREDENTIALS_FILE.read_text())
+                data = json.loads(CLAUDE_CREDENTIALS_FILE.read_text(encoding="utf-8"))
                 if "claudeAiOauth" in data and isinstance(data["claudeAiOauth"], dict):
                     data["claudeAiOauth"]["accessToken"] = None
                     data["claudeAiOauth"]["refreshToken"] = None

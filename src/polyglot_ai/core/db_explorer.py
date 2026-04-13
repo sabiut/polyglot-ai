@@ -511,17 +511,36 @@ class DatabaseConnection:
             logger.exception("Failed to get MCP schema")
             return []
 
+    # MCP tool names known to be read-only (query/select only).
+    # These are checked first; write-capable names like "execute" and
+    # "run" are only used as a fallback when the SQL has already passed
+    # the read-only validation in execute_query().
+    _MCP_READ_ONLY_KEYWORDS = ("read_query", "query", "select")
+    _MCP_WRITE_KEYWORDS = ("execute", "run", "write_query", "run_query")
+
     async def _execute_mcp(self, sql: str) -> QueryResult:
         if not self._mcp_client:
             return QueryResult.from_error("MCP client not available")
         try:
             server_name = "postgres" if self.db_type == "postgresql" else "mysql"
-            query_tools = [
-                name
-                for name, tool in self._mcp_client.available_tools.items()
-                if tool.server_name == server_name
-                and any(k in tool.name.lower() for k in ("query", "execute", "run"))
-            ]
+
+            # Separate read-only tools from write-capable tools so we
+            # always prefer the read-only tool for SELECT queries.
+            read_tools: list[str] = []
+            write_tools: list[str] = []
+            for name, tool in self._mcp_client.available_tools.items():
+                if tool.server_name != server_name:
+                    continue
+                lower = tool.name.lower()
+                if any(k in lower for k in self._MCP_READ_ONLY_KEYWORDS):
+                    read_tools.append(name)
+                elif any(k in lower for k in self._MCP_WRITE_KEYWORDS):
+                    write_tools.append(name)
+
+            # Prefer read-only tool; fall back to write tool only if no
+            # read-only tool exists (the SQL has already been validated
+            # as read-only by execute_query before reaching here).
+            query_tools = read_tools or write_tools
             if not query_tools:
                 return QueryResult.from_error(f"No query tool found for {server_name}")
 

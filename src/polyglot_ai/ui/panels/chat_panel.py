@@ -1599,6 +1599,28 @@ class ChatPanel(QWidget):
                         file_content = Path(att["path"]).read_text(
                             encoding="utf-8", errors="replace"
                         )
+                        # Scan for secrets before sending to AI provider
+                        from polyglot_ai.core.security import (
+                            scan_content_for_secrets,
+                            is_secret_file,
+                        )
+
+                        if is_secret_file(Path(att["filename"])):
+                            content += (
+                                f"\n\n⚠️ Skipped attachment **{att['filename']}** "
+                                "— file name matches a known secret pattern "
+                                "(e.g. .env, credentials). Remove secrets before attaching."
+                            )
+                            continue
+                        secret_hits = scan_content_for_secrets(file_content)
+                        if secret_hits:
+                            content += (
+                                f"\n\n⚠️ Skipped attachment **{att['filename']}** "
+                                f"— detected {len(secret_hits)} secret pattern(s). "
+                                "Remove secrets before attaching."
+                            )
+                            continue
+
                         content += f"\n\n--- {att['filename']} ---\n```\n{file_content}\n```"
                     except Exception:
                         content += f"\n\n[Attached: {att['filename']}]"
