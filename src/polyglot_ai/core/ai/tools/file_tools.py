@@ -1,7 +1,13 @@
-"""File operation tools: read, write, patch, search, list directory."""
+"""File operation tools: read, write, patch, search, list directory.
+
+Every public function is ``async`` but the underlying ``file_ops`` calls
+are synchronous disk I/O.  We offload them to a thread via
+``asyncio.to_thread`` so they never block the Qt/asyncio event loop.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,7 +29,7 @@ async def file_read(file_ops, args: dict) -> str:
     if is_secret_file(p):
         return f"Error: Cannot read {p.name} — file appears to contain secrets"
 
-    return file_ops.read(path)
+    return await asyncio.to_thread(file_ops.read, path)
 
 
 async def file_write(sandbox, file_ops, args: dict) -> str:
@@ -47,9 +53,9 @@ async def file_write(sandbox, file_ops, args: dict) -> str:
     if resolved.is_file():
         from polyglot_ai.core.ai.code_applier import _create_backup
 
-        _create_backup(resolved)
+        await asyncio.to_thread(_create_backup, resolved)
 
-    file_ops.write(path, content)
+    await asyncio.to_thread(file_ops.write, path, content)
     return f"Successfully wrote to {path}"
 
 
@@ -78,7 +84,7 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         return f"Error: File not found: {path}"
 
     try:
-        content = resolved.read_text(encoding="utf-8", errors="replace")
+        content = await asyncio.to_thread(resolved.read_text, encoding="utf-8", errors="replace")
         count = content.count(old_text)
         if count == 0:
             return f"Error: old_text not found in {path}"
@@ -89,9 +95,9 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
 
         from polyglot_ai.core.ai.code_applier import _create_backup
 
-        _create_backup(resolved)
+        await asyncio.to_thread(_create_backup, resolved)
 
-        file_ops.write(path, new_content)
+        await asyncio.to_thread(file_ops.write, path, new_content)
         return f"Patched {path}: replaced {len(old_text)} chars with {len(new_text)} chars"
     except Exception as e:
         return f"Error patching {path}: {e}"
@@ -115,7 +121,7 @@ async def file_delete(file_ops, args: dict) -> str:
         return f"Error: '{path}' is a directory. Use dir_delete to remove it recursively."
 
     try:
-        file_ops.delete(path)
+        await asyncio.to_thread(file_ops.delete, path)
     except (PermissionError, FileNotFoundError) as exc:
         return f"Error: {exc}"
     return f"Deleted file: {path}"
@@ -127,7 +133,7 @@ async def dir_create(file_ops, args: dict) -> str:
     if not path:
         return "Error: No directory path provided"
     try:
-        file_ops.make_directory(path)
+        await asyncio.to_thread(file_ops.make_directory, path)
     except (PermissionError, FileExistsError, ValueError) as exc:
         return f"Error: {exc}"
     return f"Created directory: {path}"
@@ -160,7 +166,7 @@ async def dir_delete(file_ops, args: dict) -> str:
         return f"Error: '{path}' is not a directory. Use file_delete instead."
 
     try:
-        file_ops.delete(path, force_directory=True)
+        await asyncio.to_thread(file_ops.delete, path, force_directory=True)
     except (PermissionError, FileNotFoundError) as exc:
         return f"Error: {exc}"
     return f"Deleted directory (recursive): {path}"
@@ -169,7 +175,7 @@ async def dir_delete(file_ops, args: dict) -> str:
 async def file_search(file_ops, args: dict) -> str:
     pattern = args.get("pattern", "")
     search_path = args.get("path", ".")
-    results = file_ops.search(pattern, path=search_path)
+    results = await asyncio.to_thread(file_ops.search, pattern, path=search_path)
     if not results:
         return "No matches found."
     return "\n".join(r["file"] for r in results)
@@ -178,4 +184,4 @@ async def file_search(file_ops, args: dict) -> str:
 async def list_directory(file_ops, args: dict) -> str:
     path = args.get("path", ".")
     depth = args.get("depth", 3)
-    return file_ops.list_dir(path, depth)
+    return await asyncio.to_thread(file_ops.list_dir, path, depth)

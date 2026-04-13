@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -14,7 +15,8 @@ def _check_kubectl() -> bool:
     return shutil.which("kubectl") is not None
 
 
-def _run_kubectl(args: list[str], context: str = "", timeout: int = 10) -> tuple[str, int]:
+def _run_kubectl_sync(args: list[str], context: str = "", timeout: int = 10) -> tuple[str, int]:
+    """Synchronous kubectl execution — called via ``asyncio.to_thread``."""
     if not _check_kubectl():
         return "Error: kubectl is not installed on this machine.", 1
     try:
@@ -31,6 +33,11 @@ def _run_kubectl(args: list[str], context: str = "", timeout: int = 10) -> tuple
         return f"Error: {exc}", 1
 
 
+async def _run_kubectl(args: list[str], context: str = "", timeout: int = 10) -> tuple[str, int]:
+    """Run kubectl without blocking the event loop."""
+    return await asyncio.to_thread(_run_kubectl_sync, args, context, timeout)
+
+
 def _ns_args(args: dict) -> list[str]:
     namespace = args.get("namespace", "")
     if namespace:
@@ -40,7 +47,7 @@ def _ns_args(args: dict) -> list[str]:
 
 async def k8s_current_context(args: dict) -> str:
     """Get the current kubectl context (active cluster)."""
-    output, code = _run_kubectl(["config", "current-context"])
+    output, code = await _run_kubectl(["config", "current-context"])
     if code != 0:
         return f"Failed to get context: {output}"
     return f"Current context: {output}"
@@ -49,7 +56,9 @@ async def k8s_current_context(args: dict) -> str:
 async def k8s_list_pods(args: dict) -> str:
     """List Kubernetes pods. Optional namespace filter."""
     context = args.get("context", "")
-    output, code = _run_kubectl(["get", "pods", *_ns_args(args), "-o", "json"], context=context)
+    output, code = await _run_kubectl(
+        ["get", "pods", *_ns_args(args), "-o", "json"], context=context
+    )
     if code != 0:
         return f"Failed to list pods: {output}"
 
@@ -89,7 +98,7 @@ async def k8s_list_pods(args: dict) -> str:
 async def k8s_list_deployments(args: dict) -> str:
     """List Kubernetes deployments with ready/desired replicas."""
     context = args.get("context", "")
-    output, code = _run_kubectl(
+    output, code = await _run_kubectl(
         ["get", "deployments", *_ns_args(args), "-o", "json"], context=context
     )
     if code != 0:
@@ -120,7 +129,9 @@ async def k8s_list_deployments(args: dict) -> str:
 async def k8s_list_services(args: dict) -> str:
     """List Kubernetes services with type and ports."""
     context = args.get("context", "")
-    output, code = _run_kubectl(["get", "services", *_ns_args(args), "-o", "json"], context=context)
+    output, code = await _run_kubectl(
+        ["get", "services", *_ns_args(args), "-o", "json"], context=context
+    )
     if code != 0:
         return f"Failed to list services: {output}"
 
@@ -173,7 +184,7 @@ async def k8s_pod_logs(args: dict) -> str:
     else:
         cmd.append("--all-containers")
 
-    output, code = _run_kubectl(cmd, context=context, timeout=15)
+    output, code = await _run_kubectl(cmd, context=context, timeout=15)
     if code != 0:
         return f"Failed to get logs: {output}"
     if not output.strip():
@@ -191,7 +202,7 @@ async def k8s_delete_pod(args: dict) -> str:
     context = args.get("context", "")
     if not pod or not namespace:
         return "Error: 'pod' and 'namespace' are required."
-    output, code = _run_kubectl(
+    output, code = await _run_kubectl(
         ["delete", "pod", pod, "-n", namespace], context=context, timeout=30
     )
     if code != 0:
@@ -206,7 +217,7 @@ async def k8s_restart_deployment(args: dict) -> str:
     context = args.get("context", "")
     if not deployment or not namespace:
         return "Error: 'deployment' and 'namespace' are required."
-    output, code = _run_kubectl(
+    output, code = await _run_kubectl(
         ["rollout", "restart", f"deployment/{deployment}", "-n", namespace],
         context=context,
         timeout=30,
@@ -229,7 +240,7 @@ async def k8s_scale_deployment(args: dict) -> str:
             replicas = int(replicas)
         except (ValueError, TypeError):
             return "Error: 'replicas' must be an integer."
-    output, code = _run_kubectl(
+    output, code = await _run_kubectl(
         ["scale", f"deployment/{deployment}", f"--replicas={replicas}", "-n", namespace],
         context=context,
         timeout=30,
@@ -288,7 +299,9 @@ async def k8s_apply(args: dict, *, project_root: "Path | None" = None) -> str:  
         if not resolved.is_file():
             return f"Error: manifest file not found: {resolved}"
 
-        output, code = _run_kubectl(["apply", "-f", str(resolved)], context=context, timeout=30)
+        output, code = await _run_kubectl(
+            ["apply", "-f", str(resolved)], context=context, timeout=30
+        )
         if code != 0:
             return f"Failed to apply manifest: {output}"
         return f"Applied manifest from {resolved}:\n{output}"
@@ -325,7 +338,7 @@ async def k8s_describe(args: dict) -> str:
     if not namespace:
         return "Error: 'namespace' is required."
 
-    output, code = _run_kubectl(
+    output, code = await _run_kubectl(
         ["describe", resource_type, name, "-n", namespace],
         context=context,
         timeout=15,

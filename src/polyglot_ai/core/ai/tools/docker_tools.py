@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -37,7 +38,8 @@ def _check_docker() -> bool:
     return shutil.which("docker") is not None
 
 
-def _run_docker(args: list[str], timeout: int = 15) -> tuple[str, int]:
+def _run_docker_sync(args: list[str], timeout: int = 15) -> tuple[str, int]:
+    """Synchronous docker execution — called via ``asyncio.to_thread``."""
     if not _check_docker():
         return "Error: Docker is not installed on this machine.", 1
     try:
@@ -55,6 +57,11 @@ def _run_docker(args: list[str], timeout: int = 15) -> tuple[str, int]:
         return f"Error: {exc}", 1
 
 
+async def _run_docker(args: list[str], timeout: int = 15) -> tuple[str, int]:
+    """Run docker without blocking the event loop."""
+    return await asyncio.to_thread(_run_docker_sync, args, timeout)
+
+
 async def docker_list_containers(args: dict) -> str:
     """List Docker containers — running, stopped, or all."""
     show_all = args.get("all", True)
@@ -64,7 +71,7 @@ async def docker_list_containers(args: dict) -> str:
     if show_all:
         cmd.insert(1, "-a")
 
-    output, code = _run_docker(cmd)
+    output, code = await _run_docker(cmd)
     if code != 0:
         return f"Failed to list containers: {output}"
 
@@ -98,7 +105,7 @@ async def docker_list_containers(args: dict) -> str:
 
 async def docker_list_images(args: dict) -> str:
     """List Docker images on the local machine."""
-    output, code = _run_docker(["images", "--format", "{{json .}}"])
+    output, code = await _run_docker(["images", "--format", "{{json .}}"])
     if code != 0:
         return f"Failed to list images: {output}"
 
@@ -170,7 +177,7 @@ async def docker_restart(args: dict) -> str:
     name = args.get("container", "") or args.get("name", "")
     if not name:
         return "Error: 'container' name is required."
-    output, code = _run_docker(["restart", name], timeout=30)
+    output, code = await _run_docker(["restart", name], timeout=30)
     if code != 0:
         return f"Failed to restart '{name}': {output}"
     return f"Container '{name}' restarted successfully."
@@ -181,7 +188,7 @@ async def docker_stop(args: dict) -> str:
     name = args.get("container", "") or args.get("name", "")
     if not name:
         return "Error: 'container' name is required."
-    output, code = _run_docker(["stop", name], timeout=30)
+    output, code = await _run_docker(["stop", name], timeout=30)
     if code != 0:
         return f"Failed to stop '{name}': {output}"
     return f"Container '{name}' stopped successfully."
@@ -192,7 +199,7 @@ async def docker_start(args: dict) -> str:
     name = args.get("container", "") or args.get("name", "")
     if not name:
         return "Error: 'container' name is required."
-    output, code = _run_docker(["start", name], timeout=30)
+    output, code = await _run_docker(["start", name], timeout=30)
     if code != 0:
         return f"Failed to start '{name}': {output}"
     return f"Container '{name}' started successfully."
@@ -209,7 +216,7 @@ async def docker_remove(args: dict) -> str:
     if force:
         cmd.append("-f")
     cmd.append(name)
-    output, code = _run_docker(cmd)
+    output, code = await _run_docker(cmd)
     if code != 0:
         return f"Failed to remove '{name}': {output}"
     return f"{'Image' if is_image else 'Container'} '{name}' removed successfully."
@@ -221,7 +228,7 @@ async def docker_inspect(args: dict) -> str:
     if not name:
         return "Error: 'name' is required."
 
-    output, code = _run_docker(["inspect", name])
+    output, code = await _run_docker(["inspect", name])
     if code != 0:
         return f"Failed to inspect '{name}': {output}"
 
