@@ -140,6 +140,14 @@ def test_list_workflows_includes_bundled():
     assert "investigate-failure" in slugs
     assert "reproduce-bug" in slugs
     assert "record-test" in slugs
+    assert "build-infra" in slugs
+    assert "infra-health-check" in slugs
+    assert "incident-response" in slugs
+    assert "security-audit" in slugs
+    assert "resource-optimization" in slugs
+    assert "pre-deploy-check" in slugs
+    assert "db-migration-check" in slugs
+    assert "record-test-interactive" in slugs
 
 
 def test_list_workflows_project_overrides_bundled(tmp_path: Path):
@@ -195,12 +203,20 @@ def test_load_returns_error_for_broken_yaml(tmp_path: Path, workflows_dir: Path)
 
 def test_seed_defaults_copies_bundled(tmp_path: Path):
     count = WorkflowLoader.seed_defaults(tmp_path)
-    assert count >= 4
+    assert count >= 12
     target = tmp_path / ".polyglot" / "workflows"
     assert (target / "verify-deploy.yml").is_file()
     assert (target / "investigate-failure.yml").is_file()
     assert (target / "reproduce-bug.yml").is_file()
     assert (target / "record-test.yml").is_file()
+    assert (target / "build-infra.yml").is_file()
+    assert (target / "infra-health-check.yml").is_file()
+    assert (target / "incident-response.yml").is_file()
+    assert (target / "security-audit.yml").is_file()
+    assert (target / "resource-optimization.yml").is_file()
+    assert (target / "pre-deploy-check.yml").is_file()
+    assert (target / "db-migration-check.yml").is_file()
+    assert (target / "record-test-interactive.yml").is_file()
 
 
 def test_seed_defaults_does_not_overwrite(tmp_path: Path):

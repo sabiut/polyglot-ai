@@ -1,0 +1,143 @@
+name: Database Migration Check
+description: Validate database state before or after a schema migration — check current schema, review migration files, verify data integrity, and produce a migration checklist.
+
+inputs:
+  - name: connection
+    description: Database connection name (from configured connections)
+    required: true
+  - name: phase
+    description: '"pre" (before migration) or "post" (after migration) check'
+    required: false
+    default: pre
+  - name: migration_path
+    description: Path to migration files or directory (e.g. migrations/, alembic/versions/) — leave empty to auto-detect
+    required: false
+    default: ""
+
+steps:
+  - name: Capture current database state
+    prompt: |
+      Capture the current state of the "{{connection}}" database.
+
+      1. Use db_list_connections to verify the connection is available.
+      2. Use db_get_schema for the "{{connection}}" connection to capture:
+         - All tables and their columns (name, type, nullable, defaults)
+         - Primary keys and unique constraints
+         - Foreign key relationships
+         - Indexes
+
+      Document the current schema as a reference baseline.
+      If this is a "{{phase}}" = "post" check, this represents the schema AFTER migration.
+      If "pre", this is the schema BEFORE migration.
+
+      Note any existing issues you see:
+      - Tables without primary keys
+      - Missing indexes on foreign key columns
+      - Columns that look like they store sensitive data without encryption indication
+      - Very wide tables (many columns) that might benefit from normalization
+
+  - name: Review migration files
+    prompt: |
+      "{{migration_path}}" — if this is empty, use file_search to find common migration directories:
+      - migrations/, alembic/versions/, db/migrate/, flyway/sql/, liquibase/changelog/
+      - Look for files with .sql, .py (Alembic/Django), .rb (Rails) extensions
+
+      If migration files are found:
+      1. Use file_read to read each migration file (focus on the most recent ones).
+      2. For each migration, analyze:
+         - What schema changes does it make? (CREATE, ALTER, DROP, ADD COLUMN, etc.)
+         - Is there a rollback/downgrade path defined?
+         - Are there any data migrations (UPDATE, INSERT) mixed with schema changes?
+         - Could any operation lock tables for a long time? Flag:
+           * Adding a column with a default value on a large table
+           * Creating indexes without CONCURRENTLY (PostgreSQL)
+           * ALTER TABLE on large tables
+           * Any operation that does a full table scan or rewrite
+      3. Check for safety issues:
+         - Dropping columns or tables — is data backed up?
+         - Renaming columns — will application code break during rollout?
+         - NOT NULL constraints added without defaults — will existing rows fail?
+         - Type changes that could lose data (e.g., varchar shortening, int to smallint)
+
+      If no migration files are found, report this and suggest the user provide the path.
+
+  - name: Run validation queries
+    prompt: |
+      Run validation queries against "{{connection}}" to check data integrity.
+
+      These are READ-ONLY queries — use db_query (not db_execute).
+
+      1. **Row counts for key tables**: Run SELECT COUNT(*) for the main tables
+         to establish a baseline. This helps verify no data was lost during
+         migration (compare pre vs post).
+
+      2. **Null checks**: For any columns that a migration added a NOT NULL constraint to,
+         verify there are no nulls:
+         SELECT COUNT(*) FROM table WHERE column IS NULL
+
+      3. **Foreign key integrity**: For key relationships, check for orphaned records:
+         SELECT COUNT(*) FROM child_table c
+         LEFT JOIN parent_table p ON c.fk = p.id
+         WHERE p.id IS NULL
+
+      4. **Index verification**: If the migration added indexes, verify they exist:
+         - PostgreSQL: SELECT indexname FROM pg_indexes WHERE tablename = 'table_name'
+         - MySQL: SHOW INDEX FROM table_name
+         - SQLite: SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='table_name'
+
+      Adapt the queries to the database type. If a query fails, note the error and move on.
+      Report results for each validation check as PASS or FAIL.
+
+  - name: Generate migration report
+    prompt: |
+      Compile a migration {{phase}} report.
+
+      ## Database Migration Report ({{phase}})
+      **Connection:** {{connection}}
+      **Phase:** {{phase}}
+      **Date:** [current date]
+
+      ### Current Schema Summary
+      - Tables: [count]
+      - Key tables: [list the main ones]
+
+      ### Migration Analysis
+      If migration files were reviewed:
+      - Migrations found: [count]
+      - Schema changes: [summary of CREATE/ALTER/DROP operations]
+      - Data migrations: [yes/no — describe if yes]
+      - Rollback path: [available/not available]
+      - Risky operations: [list any that could cause downtime or data loss]
+
+      ### Data Integrity Checks
+      | Check | Status | Details |
+      |-------|--------|---------|
+      | Row counts | PASS/FAIL | [summary] |
+      | Null checks | PASS/FAIL | [summary] |
+      | FK integrity | PASS/FAIL | [summary] |
+      | Index verification | PASS/FAIL | [summary] |
+
+      ### Risk Assessment
+      - **Downtime risk:** [none/low/medium/high — based on table sizes and operation types]
+      - **Data loss risk:** [none/low/medium/high — based on DROP/ALTER operations]
+      - **Rollback complexity:** [simple/moderate/complex]
+
+      ### Recommendations
+      If "{{phase}}" is "pre":
+      1. [What to do before running the migration]
+      2. [Backup recommendation]
+      3. [Any migration files that need changes]
+      4. [Order of operations if there are multiple migrations]
+
+      If "{{phase}}" is "post":
+      1. [Whether the migration succeeded cleanly]
+      2. [Any data integrity issues to fix]
+      3. [Whether rollback is still possible if issues arise later]
+
+      ### Checklist
+      - [ ] Database backed up before migration
+      - [ ] Migration tested on staging/dev first
+      - [ ] Rollback path verified
+      - [ ] Application code compatible with new schema
+      - [ ] No long-running locks expected
+      - [ ] Data integrity verified

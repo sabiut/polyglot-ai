@@ -1,0 +1,103 @@
+name: Infrastructure Health Check
+description: Comprehensive health assessment of Kubernetes clusters and Docker containers — pod status, resource pressure, error rates, and actionable recommendations.
+
+inputs:
+  - name: namespace
+    description: Kubernetes namespace to check (use "all" for all namespaces)
+    required: false
+    default: default
+  - name: include_docker
+    description: Also check local Docker containers (yes/no)
+    required: false
+    default: "yes"
+
+steps:
+  - name: Check Kubernetes cluster state
+    prompt: |
+      Perform a Kubernetes cluster health assessment for namespace "{{namespace}}".
+
+      1. Check the current context with k8s_current_context to confirm which cluster we're connected to.
+      2. List all pods in the {{namespace}} namespace (or all namespaces if "{{namespace}}" is "all"). For each pod, note:
+         - Name, namespace, status (Running, Pending, CrashLoopBackOff, Error, etc.)
+         - Restart count — flag any pod with more than 3 restarts
+         - Age — flag any pod less than 10 minutes old (possible recent restart)
+      3. List all deployments. For each, note:
+         - Desired vs ready replica count — flag any mismatch
+         - Whether the rollout is up to date
+      4. List all services and note their type (ClusterIP, LoadBalancer, NodePort).
+
+      Categorize each resource as:
+      - HEALTHY: running normally, replicas match, no restarts
+      - WARNING: minor issues (high restart count, replica mismatch being resolved)
+      - CRITICAL: pods in CrashLoopBackOff, Error, or stuck Pending; deployments with 0 ready replicas
+
+  - name: Check Docker containers
+    prompt: |
+      {{include_docker}} — if this value is "no", skip this step and report "Docker check skipped by user."
+
+      If yes, check local Docker container health:
+      1. List all containers (running and stopped) using docker_list_containers.
+      2. For each container, note:
+         - Name, image, status, uptime
+         - Flag any container that is stopped/exited unexpectedly
+         - Flag any container restarting repeatedly
+      3. List Docker images and flag:
+         - Images with "latest" tag (no version pinning)
+         - Very old images (if creation date is visible)
+      4. For any unhealthy or exited containers, use docker_inspect to check:
+         - Exit code and error message
+         - Resource limits (memory, CPU) — are they set?
+         - Health check status if configured
+
+      Categorize each container as HEALTHY, WARNING, or CRITICAL.
+
+  - name: Check logs for active errors
+    prompt: |
+      For every resource marked WARNING or CRITICAL in the previous steps, pull recent logs to identify the root cause:
+
+      1. For unhealthy Kubernetes pods: use k8s_pod_logs to get the last 50 lines. Look for:
+         - Exception stack traces
+         - OOMKilled messages
+         - Connection refused / timeout errors
+         - Permission denied errors
+         - Missing config or secret references
+      2. For unhealthy pods, also use k8s_describe to check:
+         - Events section for scheduling failures, image pull errors, probe failures
+         - Resource requests vs limits
+         - Liveness/readiness probe configuration
+      3. For unhealthy Docker containers: use docker_container_logs to get recent output.
+
+      For each unhealthy resource, extract the single most relevant error message.
+
+  - name: Generate health report
+    prompt: |
+      Based on all previous steps, produce a structured infrastructure health report.
+
+      Format it as:
+
+      ## Infrastructure Health Report
+      **Cluster:** [context name from step 1]
+      **Namespace:** {{namespace}}
+      **Timestamp:** [current assessment time]
+      **Overall Status:** HEALTHY / DEGRADED / CRITICAL
+
+      ### Kubernetes Summary
+      | Resource | Status | Issue |
+      |----------|--------|-------|
+      | [pod/deployment name] | OK / WARN / CRIT | [brief description or "—"] |
+
+      ### Docker Summary
+      | Container | Status | Issue |
+      |-----------|--------|-------|
+      | [container name] | OK / WARN / CRIT | [brief description or "—"] |
+
+      ### Critical Issues (immediate action needed)
+      1. [issue + recommended fix]
+
+      ### Warnings (investigate soon)
+      1. [issue + recommended fix]
+
+      ### Recommendations
+      1. [proactive improvements — missing health checks, resource limits, etc.]
+
+      If everything is healthy, say so clearly and still list any proactive recommendations.

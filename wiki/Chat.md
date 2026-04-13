@@ -202,19 +202,49 @@ Docker, DB, Git) as needed, then the engine advances to the next step.
 
 ### Bundled workflows
 
-Four workflows ship out of the box:
+12 workflows ship out of the box, organized by category:
 
+#### QA & Testing
 - **verify-deploy** — Navigate to a URL, take a screenshot, check for
   console/network errors, and summarize pass/fail. Requires Playwright MCP.
-- **investigate-failure** — Check CI status, inspect K8s pods and logs,
-  review recent commits, and correlate into a root-cause report.
 - **reproduce-bug** — Plan reproduction steps, execute them in the browser,
   capture evidence, and write a structured bug report.
 - **record-test** — Describe a test scenario in plain English, the AI
-  analyzes the website, executes the scenario in the browser step by step,
-  generates production-ready Playwright test code (Python or TypeScript),
-  and saves it to your project. See [Record Test](#record-test-workflow)
-  below for details.
+  analyzes the website, executes the scenario, generates Playwright test
+  code, and saves it to your project. See [Record Test](#record-test-workflow).
+- **record-test-interactive** — Launch a real browser, click through your
+  test scenario while Playwright records every action, then the AI
+  enhances the raw recording into production-quality test code with robust
+  selectors, assertions, and fixtures — and validates by running the test.
+  See [Record Test Interactive](#record-test-interactive-workflow).
+
+#### DevOps & Operations
+- **infra-health-check** — Comprehensive K8s cluster and Docker container
+  health assessment with traffic-light status (HEALTHY/WARNING/CRITICAL).
+- **incident-response** — Structured incident investigation: triage,
+  collect error evidence, check recent changes, assess mitigation options,
+  generate an incident report with comms template.
+- **investigate-failure** — Check CI status, inspect K8s pods and logs,
+  review recent commits, and correlate into a root-cause report.
+- **pre-deploy-check** — Validate manifests, dry-run against the cluster,
+  check current health, produce a go/no-go deployment decision.
+- **resource-optimization** — Find waste: oversized requests, idle pods,
+  unused images, right-sizing recommendations, cleanup opportunities.
+
+#### Security & Database
+- **security-audit** — Scan IaC files and live cluster for security
+  vulnerabilities. Checks Terraform, K8s manifests, Dockerfiles, Helm
+  charts, and running container configs. Produces a severity-ranked report
+  with remediation code.
+- **db-migration-check** — Validate database state before or after a
+  schema migration. Reviews migration files, runs data integrity queries,
+  assesses downtime and rollback risk.
+
+#### Infrastructure as Code
+- **build-infra** — The flagship workflow. Analyze your project, propose
+  cloud architecture with tradeoffs, generate modular Terraform, create
+  CI/CD pipelines, validate, plan, and deploy — with approval gates at
+  every stage. See [Build Infrastructure](#build-infrastructure-workflow).
 
 ### Writing your own
 
@@ -297,17 +327,132 @@ support workflows. For best results with browser automation workflows,
 use a strong model — GPT-4o, GPT-4.1, Claude Sonnet 4, or Gemini 2.5
 Pro handle multi-step tool calling most reliably.
 
+### Record Test Interactive workflow
+
+The `record-test-interactive` workflow is the **hybrid approach** — you
+click through the site while Playwright records, then the AI transforms
+the raw recording into hardened, production-ready test code.
+
+**Example:**
+```
+/workflow record-test-interactive --url https://myapp.com --test_name patient_registration
+```
+
+For TypeScript output:
+```
+/workflow record-test-interactive --url https://myapp.com --test_name checkout --language playwright-test
+```
+
+**What happens (5 steps):**
+
+| Step | What the AI does |
+|------|-----------------|
+| 1. Install & Launch | Installs Playwright browsers if needed, then opens a real browser at your URL via `playwright codegen`. You click through your test scenario — every action is recorded |
+| 2. Read & Analyze | Reads the raw recording, identifies fragile CSS selectors, hardcoded values, missing waits, and actions without assertions |
+| 3. Enhance | Rewrites the code applying 10 mandatory hardening rules (see below) |
+| 4. Setup & Save | Creates virtualenv if needed, installs `pytest-playwright`, sets up `conftest.py` and `pyproject.toml`, saves the test file |
+| 5. Validate & Auto-fix | Runs the test. If it fails, reads the error, fixes the code, and retries up to 3 times |
+
+**10 hardening rules applied in Step 3:**
+
+1. **Replace ALL CSS/XPath selectors** with `get_by_role`, `get_by_label`, `get_by_text` (priority order)
+2. **Kill all `.nth()` and `.first`** — scope to parents, filter by content
+3. **Smart waits** — no `time.sleep`, no `networkidle` on SPAs — element-based waits only
+4. **Assertions after every action** — login, form submit, navigation, data creation
+5. **Extract all hardcoded values** — credentials to `os.getenv()`, dynamic data to `uuid`
+6. **Proper pytest-playwright structure** — fixtures, authenticated page, imports
+7. **Explicit dropdown/datepicker handling** — wait for options to be visible before clicking
+8. **Section comments** — `# Step 1: Login`, `# Step 2: Fill form`, etc.
+9. **Error resilience** — default timeouts (15s actions, 30s navigation)
+10. **Clean up codegen artifacts** — remove boilerplate, redundant waits, duplicate clicks
+
+**Autonomous execution:** The workflow runs in autonomous mode — it never
+asks "Should I go ahead?". The AI installs dependencies, saves files,
+runs tests, and fixes failures without prompting.
+
+**record-test vs record-test-interactive:**
+
+| Feature | record-test | record-test-interactive |
+|---------|------------|------------------------|
+| Who clicks? | AI clicks autonomously | You click, Playwright records |
+| Best for | Simple flows (login, navigation) | Complex forms, dropdowns, date pickers |
+| Selectors | AI picks selectors during execution | Playwright captures exact selectors, AI hardens them |
+| Validation | No auto-run | Auto-runs the test, fixes failures up to 3x |
+| Project setup | Saves test file only | Creates venv, conftest.py, pyproject.toml, installs deps |
+
+### Build Infrastructure workflow
+
+The `build-infra` workflow is an **architecture-first infrastructure
+copilot**. It doesn't just generate Terraform — it analyzes your project,
+proposes cloud architecture with tradeoffs, and walks you through the
+entire deployment lifecycle with approval gates at every stage.
+
+**Example:**
+```
+/workflow build-infra --provider aws --goal "deploy this Flask API with Postgres for production"
+```
+
+```
+/workflow build-infra --provider linode --goal "deploy this hobby app cheaply"
+```
+
+**What happens (8 steps):**
+
+| Step | What the AI does | Approval needed? |
+|------|-----------------|-----------------|
+| 1. Analyze project | Reads your codebase to identify stack, DB needs, scale signals | No (read-only) |
+| 2. Propose architecture | Designs cloud architecture with component diagram, alternatives, cost estimates | No (read-only) |
+| 3. Confirm design | Presents decision checklist (compute, DB, networking, scaling, budget) | No (read-only) |
+| 4. Generate Terraform | Creates modular .tf files: main, variables, outputs, providers, tfvars, README | Yes (file writes) |
+| 5. Generate CI/CD | Creates GitHub Actions workflow for plan-on-PR, apply-on-merge | Yes (file writes) |
+| 6. Review & validate | Runs `terraform fmt`, `terraform validate`, AI security review | Yes (shell commands) |
+| 7. Plan deployment | Runs `terraform plan`, summarizes what will be created/changed/destroyed | Yes (shell commands) |
+| 8. Post-deploy verify | Checks outputs, health endpoints, browser smoke test, deployment summary | No (read-only) |
+
+**Supported providers:** AWS, Linode, DigitalOcean, Cloudflare, GCP, Azure
+
+**Key design principle:** Architecture first, not code first. Steps 1-3
+are about understanding your project and designing the right
+infrastructure. Terraform is the artifact, not the product.
+
+### DevOps workflow examples
+
+```
+# Health check before a maintenance window
+/workflow infra-health-check --namespace production
+
+# Incident response when a service is down
+/workflow incident-response --service payment-api --symptom "5xx errors" --severity sev1
+
+# Security audit of your infrastructure code
+/workflow security-audit --scope full --namespace production
+
+# Find wasted resources and right-size
+/workflow resource-optimization --namespace default
+
+# Validate before deploying
+/workflow pre-deploy-check --manifest_path k8s/production/ --environment production
+
+# Check database before/after a migration
+/workflow db-migration-check --connection mydb --phase pre
+```
+
 ### Tips
 
-- **Playwright workflows** (verify-deploy, reproduce-bug, record-test)
-  need the Playwright MCP server connected in the MCP panel.
+- **Playwright workflows** (verify-deploy, reproduce-bug, record-test,
+  record-test-interactive) need the Playwright MCP server connected in
+  the MCP panel. The interactive workflow also needs a display (it opens
+  a real browser window for you to click through).
+- **DevOps workflows** need `kubectl` and/or `docker` available on
+  your machine with appropriate cluster/daemon access.
+- **Build Infrastructure** needs the cloud provider's CLI and Terraform
+  installed (`aws`, `linode-cli`, `terraform`).
 - **Keep steps focused.** Each step is a single AI turn — don't try to
   pack too much into one prompt.
 - **Use defaults** for optional inputs so workflows are quick to run
   without flags.
-- **Stronger models = better automation.** For complex multi-page
-  browser scenarios, use GPT-4o/4.1, Claude Sonnet/Opus, or Gemini 2.5
-  Pro. Smaller models may struggle with long tool-calling sequences.
+- **Stronger models = better automation.** For complex multi-step
+  workflows, use GPT-4o/4.1, Claude Sonnet/Opus, or Gemini 2.5 Pro.
 
 ## Plans
 

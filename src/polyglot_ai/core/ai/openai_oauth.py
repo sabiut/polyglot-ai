@@ -536,6 +536,7 @@ class OpenAIOAuthClient(AIProvider):
                 httpx.ReadTimeout,
                 httpx.ConnectError,
                 httpx.ReadError,
+                httpx.RemoteProtocolError,
             ) as e:
                 if attempt < max_retries - 1:
                     wait = 3 * (attempt + 1)

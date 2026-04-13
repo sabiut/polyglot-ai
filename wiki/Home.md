@@ -58,11 +58,28 @@ This wiki is the full user guide. Pick a section below.
 
 ## Recent additions
 
-- **⚡ Workflows** — repeatable multi-step AI investigations defined in
-  YAML. Run `/workflow verify-deploy --url https://staging.example.com` to
-  execute a 3-step deployment check with Playwright screenshots, console
-  error analysis, and a pass/fail summary. Three workflows ship built-in;
-  create your own in `.polyglot/workflows/`. See **[Chat → Workflows](Chat#workflows)**.
+- **🏗️ Build Infrastructure** — architecture-first infrastructure copilot.
+  Describe what you want ("deploy this Flask API to AWS with Postgres"),
+  the AI analyzes your project, proposes architecture with tradeoffs,
+  generates modular Terraform, validates, and deploys — with approval gates
+  at every stage. See **[Chat → Build Infrastructure](Chat#build-infrastructure-workflow)**.
+- **⚡ 12 Built-in Workflows** — repeatable multi-step AI workflows for
+  QA (verify-deploy, record-test, record-test-interactive, reproduce-bug),
+  DevOps (health check, incident response, pre-deploy check, resource
+  optimization), security audit, and database migration checks. Create
+  your own in `.polyglot/workflows/`. See **[Chat → Workflows](Chat#workflows)**.
+- **🎬 Record Test Interactive** — click through a site while Playwright
+  records, AI hardens the code with 10 mandatory rules (resilient
+  selectors, smart waits, assertions), auto-validates by running the test,
+  and fixes failures up to 3 times. See
+  **[Chat → Record Test Interactive](Chat#record-test-interactive-workflow)**.
+- **📋 Copy Review Results** — new Copy button in the Review panel header
+  exports the full review as formatted Markdown (summary, stats, all
+  findings grouped by severity with suggestions).
+- **⏱️ Shell exec timeout** — the AI can now request up to 10-minute
+  timeouts for long-running commands like Playwright codegen.
+- **🤖 Autonomous workflow mode** — all workflows now execute without
+  asking "Should I go ahead?". The user approved by launching the workflow.
 - **🔍 Docker Compose Security** review mode — scans `docker-compose*.yml`
   for hardcoded secrets, privileged containers, docker.sock mounts, DB
   ports on `0.0.0.0`, missing `cap_drop`, and more.

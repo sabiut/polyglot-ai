@@ -143,6 +143,10 @@ TOOL_DEFINITIONS = [
                         "type": "string",
                         "description": "Working directory relative to project root (optional)",
                     },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default 30). Use a higher value (e.g. 300) for long-running or interactive commands like playwright codegen.",
+                    },
                 },
                 "required": ["command"],
             },

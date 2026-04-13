@@ -74,6 +74,12 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 async def shell_exec(sandbox, args: dict) -> str:
     command = args.get("command", "")
     workdir = args.get("workdir")
+    timeout = args.get("timeout")
+
+    # Clamp custom timeout to a sane range (1–600 seconds / 10 minutes).
+    # Interactive tools like `playwright codegen` need minutes, not seconds.
+    if timeout is not None:
+        timeout = max(1, min(int(timeout), 600))
 
     # shell_exec is in REQUIRES_APPROVAL — by the time we get here,
     # the user has explicitly approved this command (or bootstrap mode
@@ -81,7 +87,10 @@ async def shell_exec(sandbox, args: dict) -> str:
     # user_approved=True so the sandbox skips the command allowlist
     # while still enforcing shell-operator and blocked-pattern checks.
     # exec_command validates internally — no separate validate call needed.
-    output, returncode = await sandbox.exec_command(command, workdir, user_approved=True)
+    kwargs: dict = {"user_approved": True}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    output, returncode = await sandbox.exec_command(command, workdir, **kwargs)
     result = output if output else "(no output)"
     if returncode != 0:
         result += f"\n[exit code: {returncode}]"

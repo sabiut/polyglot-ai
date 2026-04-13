@@ -122,6 +122,21 @@ class ReviewPanel(QWidget):
         self._run_btn.clicked.connect(self._on_run_review)
         header_layout.addWidget(self._run_btn)
 
+        # Copy results button — enabled only when results are displayed
+        self._copy_btn = QPushButton("📋 Copy")
+        self._copy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333; color: #ccc; font-weight: 600;
+                padding: 5px 12px; border: 1px solid #555; border-radius: 5px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #444; color: #fff; }
+            QPushButton:disabled { background-color: #2a2a2a; color: #555; border-color: #333; }
+        """)
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setEnabled(False)
+        self._copy_btn.clicked.connect(self._copy_results_to_clipboard)
+        header_layout.addWidget(self._copy_btn)
+
         layout.addWidget(header)
 
         # ── Content area (scrollable) ──
@@ -334,6 +349,7 @@ class ReviewPanel(QWidget):
 
         self._run_btn.setEnabled(True)
         self._run_btn.setText("▶ Run Review")
+        self._copy_btn.setEnabled(result.status != "failed")
 
         # Record on the active task so the timeline reflects the review
         # and the AI's system prompt knows the latest review outcome.
@@ -399,6 +415,7 @@ class ReviewPanel(QWidget):
             logger.exception("review_panel: could not record review on task")
 
     def _clear_results(self) -> None:
+        self._copy_btn.setEnabled(False)
         while self._content_layout.count():
             item = self._content_layout.takeAt(0)
             if item.widget():
@@ -601,3 +618,72 @@ class ReviewPanel(QWidget):
             layout.addWidget(suggestion)
 
         return card
+
+    # ── Copy results to clipboard ─────────────────────────────────
+    def _format_results_as_text(self, result: ReviewResult) -> str:
+        """Format the full review result as copyable Markdown text."""
+        lines: list[str] = []
+        lines.append("# Code Review Results\n")
+
+        # Stats
+        lines.append(
+            f"**Files reviewed:** {result.files_reviewed} | "
+            f"**Additions:** +{result.total_additions} | "
+            f"**Deletions:** -{result.total_deletions} | "
+            f"**Findings:** {len(result.findings)}"
+        )
+        if result.critical_count or result.high_count:
+            lines.append(
+                f"**Critical:** {result.critical_count} | "
+                f"**High:** {result.high_count}"
+            )
+        if result.model:
+            lines.append(f"**Model:** {result.model}")
+        lines.append("")
+
+        # Summary
+        lines.append(f"## Summary\n{result.summary}\n")
+
+        if not result.findings:
+            lines.append("✅ No issues found — the changes look good!")
+            return "\n".join(lines)
+
+        # Findings grouped by severity
+        severity_order = ["critical", "high", "medium", "low", "info"]
+        grouped = result.by_severity
+        for sev in severity_order:
+            findings = grouped.get(sev, [])
+            if not findings:
+                continue
+            lines.append(f"## {sev.upper()} ({len(findings)})\n")
+            for f in findings:
+                icon = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🔵",
+                    "info": "ℹ️",
+                }.get(sev, "•")
+                lines.append(f"### {icon} {f.title}")
+                lines.append(f"**File:** `{f.file}:{f.line}` | **Category:** {f.category.value}\n")
+                lines.append(f"{f.body}\n")
+                if f.suggestion:
+                    lines.append(f"**💡 Suggestion:**\n```\n{f.suggestion}\n```\n")
+
+        return "\n".join(lines)
+
+    def _copy_results_to_clipboard(self) -> None:
+        """Copy the full review results as Markdown to the clipboard."""
+        if self._current_result is None:
+            return
+        text = self._format_results_as_text(self._current_result)
+        from PyQt6.QtWidgets import QApplication
+
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(text)
+            # Flash button text as confirmation
+            self._copy_btn.setText("✅ Copied!")
+            from PyQt6.QtCore import QTimer
+
+            QTimer.singleShot(2000, lambda: self._copy_btn.setText("📋 Copy"))

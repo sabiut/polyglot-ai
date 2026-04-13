@@ -1,0 +1,144 @@
+name: Security Audit
+description: Scan infrastructure-as-code files and running configurations for security vulnerabilities — checks Terraform, K8s manifests, Dockerfiles, Helm charts, and live cluster settings.
+
+inputs:
+  - name: scope
+    description: What to audit — "iac" (files only), "runtime" (live cluster only), or "full" (both)
+    required: false
+    default: full
+  - name: namespace
+    description: Kubernetes namespace for runtime checks
+    required: false
+    default: default
+
+steps:
+  - name: Discover and scan IaC files
+    prompt: |
+      {{scope}} — if this is "runtime", skip this step and report "IaC scan skipped — runtime only."
+
+      Scan the project for infrastructure-as-code files:
+
+      1. Use file_search and list_directory to find:
+         - Terraform files: *.tf, *.tfvars
+         - Kubernetes manifests: *.yaml, *.yml in k8s/, manifests/, deploy/ directories
+         - Dockerfiles: Dockerfile, Dockerfile.*, *.dockerfile
+         - Docker Compose: docker-compose*.yml, compose*.yml
+         - Helm charts: Chart.yaml, values.yaml, templates/ directories
+      2. For each file found, use file_read to examine its contents.
+      3. For EACH file, check for these security issues:
+
+      **Terraform:**
+      - Hardcoded secrets, passwords, or API keys
+      - Security groups with 0.0.0.0/0 ingress on sensitive ports
+      - Unencrypted storage (S3 buckets, EBS volumes, RDS without encryption)
+      - Public access enabled on databases or storage
+      - Missing logging/audit trails
+      - No state locking configured
+
+      **Kubernetes manifests:**
+      - Containers running as root (no securityContext or runAsNonRoot: false)
+      - Privileged containers or hostNetwork/hostPID enabled
+      - Missing resource limits (CPU/memory)
+      - Secrets in plain text instead of Secret resources
+      - No network policies defined
+      - Images using :latest tag instead of pinned versions
+
+      **Dockerfiles:**
+      - Running as root (no USER directive)
+      - Using ADD instead of COPY (ADD can fetch remote URLs)
+      - Secrets in ENV or COPY'd into the image
+      - Base images not pinned to specific versions
+      - Installing unnecessary packages or leaving package manager caches
+
+      **Helm charts:**
+      - Default values with weak/default passwords
+      - No pod security context in templates
+      - Service accounts with excessive permissions
+
+      List every finding with the file path and line number.
+
+  - name: Cross-reference review findings
+    prompt: |
+      {{scope}} — if this is "runtime", skip this step.
+
+      Check if there are any existing IaC review findings available using get_review_findings.
+      If a review has been run previously, retrieve findings filtered by severity "critical" and "high" first, then "medium".
+
+      Cross-reference these findings with what you discovered in step 1:
+      - Note any findings the review engine caught that you missed
+      - Note any findings you caught that the review engine missed
+      - Combine into a single deduplicated list
+
+      If no prior review exists, note this and rely on the manual scan from step 1.
+
+  - name: Audit live runtime configuration
+    prompt: |
+      {{scope}} — if this is "iac", skip this step and report "Runtime audit skipped — IaC only."
+
+      Audit the live Kubernetes cluster in namespace {{namespace}}:
+
+      1. Use k8s_list_pods and k8s_describe for each pod to check:
+         - Are containers running as root?
+         - Are there privileged containers?
+         - Are resource limits set?
+         - Are liveness and readiness probes configured?
+         - Are service account tokens auto-mounted unnecessarily?
+         - Are secrets mounted as environment variables (less secure) vs volume files?
+
+      2. Use k8s_list_services to check:
+         - Any services exposed as LoadBalancer or NodePort that should be ClusterIP?
+         - Any services without selectors (potential misconfig)?
+
+      3. If Docker is available, use docker_inspect on running containers to check:
+         - Privileged mode enabled?
+         - Host networking used?
+         - Sensitive host paths mounted?
+         - Capabilities added beyond defaults?
+         - Running as root user?
+
+      For each finding, note the resource name and the specific setting that is insecure.
+
+  - name: Generate security audit report
+    prompt: |
+      Compile all findings into a security audit report.
+
+      ## Security Audit Report
+      **Scope:** {{scope}}
+      **Namespace:** {{namespace}}
+      **Date:** [current date]
+
+      ### Executive Summary
+      - Total findings: [count]
+      - Critical: [count] | High: [count] | Medium: [count] | Low: [count]
+      - Overall posture: [GOOD / NEEDS ATTENTION / AT RISK]
+
+      ### Critical & High Findings
+      For each finding:
+      #### [N]. [Title] — [CRITICAL/HIGH]
+      - **Location:** [file:line or resource name]
+      - **Issue:** [what is wrong]
+      - **Risk:** [what could happen if exploited]
+      - **Remediation:**
+        ```
+        [exact code or config change to fix it]
+        ```
+
+      ### Medium & Low Findings
+      | # | Severity | Location | Issue | Fix |
+      |---|----------|----------|-------|-----|
+      | [table rows] |
+
+      ### Compliance Checklist
+      - [ ] No containers running as root
+      - [ ] All images pinned to specific versions
+      - [ ] Resource limits set on all pods
+      - [ ] No hardcoded secrets in code or config
+      - [ ] Network policies in place
+      - [ ] Encryption at rest configured
+      - [ ] Liveness/readiness probes on all services
+      - [ ] RBAC follows least privilege
+
+      ### Recommended Priority Actions
+      1. [Most urgent fix — what and why]
+      2. [Second priority]
+      3. [Third priority]

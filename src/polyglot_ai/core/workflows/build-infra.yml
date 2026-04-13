@@ -1,0 +1,345 @@
+name: Build Infrastructure
+description: Architecture-first infrastructure workflow — analyze your project, propose cloud architecture, generate Terraform, validate, and deploy with approval gates at every stage.
+
+inputs:
+  - name: provider
+    description: Cloud provider (aws, linode, digitalocean, cloudflare, gcp, azure)
+    required: true
+  - name: goal
+    description: What you want to deploy in plain English (e.g. "deploy this Flask API with Postgres for production")
+    required: true
+  - name: environment
+    description: Target environment name
+    required: false
+    default: production
+
+steps:
+  - name: Analyze project
+    prompt: |
+      Analyze this project to understand what needs to be deployed.
+
+      Use file_read and list_directory to examine:
+
+      1. **Application stack:**
+         - Language and framework (check pyproject.toml, package.json, go.mod, Cargo.toml, etc.)
+         - Entry point and how the app starts
+         - Port it listens on
+         - Whether it's a web app, API, worker, static site, or data pipeline
+
+      2. **Dependencies:**
+         - Database requirements (check for SQLAlchemy, Prisma, pg, mysql, redis, etc.)
+         - Cache/queue systems (Redis, RabbitMQ, Celery, etc.)
+         - External service integrations (S3, email, etc.)
+         - Background job processing
+
+      3. **Existing infrastructure:**
+         - Docker present? (Dockerfile, docker-compose.yml)
+         - Kubernetes manifests?
+         - Existing Terraform?
+         - CI/CD workflows? (.github/workflows/, .gitlab-ci.yml)
+         - Environment variable patterns (.env.example, config files)
+
+      4. **Scale signals:**
+         - Is it a monolith or microservices?
+         - Static assets that need CDN?
+         - File upload/storage needs?
+
+      Produce a clear project profile:
+      - **Type:** [web app / API / worker / static site / fullstack / data pipeline]
+      - **Stack:** [Python Flask / Node Express / etc.]
+      - **Database:** [PostgreSQL / MySQL / SQLite / none]
+      - **Cache/Queue:** [Redis / none]
+      - **Docker ready:** [yes / no]
+      - **Existing infra:** [none / partial Terraform / K8s manifests / etc.]
+
+  - name: Propose architecture
+    prompt: |
+      Based on the project analysis, propose a cloud architecture for
+      deploying to **{{provider}}** for **{{environment}}**.
+
+      User's goal: {{goal}}
+
+      Design the architecture:
+
+      1. **Recommended architecture** — draw it as a text diagram:
+         ```
+         [Internet] → [Load Balancer] → [App Service] → [Database]
+                                                      → [Cache]
+         ```
+         List every component with its {{provider}}-specific service name.
+
+      2. **Alternatives** — briefly describe 1-2 simpler or more scalable alternatives:
+         - **Simpler option:** [e.g., single VM instead of container orchestration]
+         - **Scalable option:** [e.g., Kubernetes instead of ECS]
+
+      3. **Tradeoffs** for the recommended architecture:
+         - Operational complexity: [low/medium/high]
+         - Cost class: [hobby / small team / production / enterprise]
+         - Scaling approach: [manual / autoscaling / serverless]
+         - Maintenance burden: [what needs ongoing attention]
+
+      4. **Components breakdown:**
+         | Component | Service | Purpose | Estimated Cost |
+         |-----------|---------|---------|---------------|
+         | Compute | [e.g., ECS Fargate, Linode VM] | Run the application | [rough monthly] |
+         | Database | [e.g., RDS PostgreSQL, Managed DB] | Data persistence | [rough monthly] |
+         | Load Balancer | [e.g., ALB, NodeBalancer] | Traffic routing | [rough monthly] |
+         | [etc.] | | | |
+
+      5. **Networking:**
+         - VPC / private network layout
+         - Public vs private subnets
+         - Security group / firewall rules
+
+      Do NOT generate any Terraform yet — this step is purely about architecture design.
+
+  - name: Confirm design decisions
+    prompt: |
+      Before generating Terraform, confirm the key design decisions with the user.
+
+      Present this decision checklist based on the proposed architecture:
+
+      ## Architecture Decisions for {{environment}} on {{provider}}
+
+      Based on the project analysis and proposed architecture, here are the
+      decisions that will shape the Terraform code. Review and adjust:
+
+      ### Compute
+      - [ ] **Deployment model:** [containers / VMs / serverless / static hosting]
+      - [ ] **Container orchestration:** [ECS / EKS / K8s / Docker Compose / none]
+
+      ### Database
+      - [ ] **Managed database:** [yes — fully managed / no — self-hosted on VM]
+      - [ ] **Database engine:** [PostgreSQL / MySQL / SQLite / none]
+      - [ ] **High availability:** [single instance / multi-AZ / read replicas]
+
+      ### Networking
+      - [ ] **VPC isolation:** [yes — private subnets / no — public only]
+      - [ ] **SSL/TLS:** [managed certificates / Let's Encrypt / BYO]
+      - [ ] **Custom domain:** [yes / no — use provider default]
+
+      ### Scaling
+      - [ ] **Autoscaling:** [yes — based on CPU/memory / no — fixed replicas]
+      - [ ] **Min/max instances:** [min: 1 / max: 3]
+
+      ### Storage
+      - [ ] **Object storage:** [needed / not needed]
+      - [ ] **Persistent volumes:** [needed / not needed]
+
+      ### Monitoring
+      - [ ] **Logging:** [provider native / external / none for now]
+      - [ ] **Alerting:** [yes / not for now]
+
+      ### Budget
+      - [ ] **Target:** [cheapest / balanced / production-grade]
+
+      Proceeding with the recommended settings. If you want to change any
+      decision, tell me in the next message after this workflow completes.
+      Otherwise, moving on to Terraform generation.
+
+  - name: Generate Terraform
+    prompt: |
+      Generate production-ready Terraform for the confirmed architecture
+      on **{{provider}}** for **{{environment}}**.
+
+      Create a modular Terraform structure. Use file_write to save each file
+      to the `terraform/` directory (or `infra/` if terraform/ already exists
+      for something else).
+
+      Generate these files:
+
+      1. **`terraform/main.tf`** — main resource definitions
+         - All resources for the confirmed architecture
+         - Use modules where appropriate
+         - Add comments explaining each resource block
+
+      2. **`terraform/variables.tf`** — input variables
+         - All configurable values (region, instance size, DB credentials, etc.)
+         - Sensible defaults where possible
+         - Descriptions for every variable
+         - Mark sensitive variables with `sensitive = true`
+
+      3. **`terraform/outputs.tf`** — useful outputs
+         - Application URL / endpoint
+         - Database connection info (without passwords)
+         - Any IDs or ARNs needed for CI/CD
+
+      4. **`terraform/providers.tf`** — provider configuration
+         - {{provider}} provider with version constraint
+         - Required Terraform version
+         - Backend configuration placeholder (commented out)
+
+      5. **`terraform/{{environment}}.tfvars`** — environment-specific values
+         - All variable values for {{environment}}
+         - Placeholder for secrets (with comments like "# Set via TF_VAR_db_password")
+
+      6. **`terraform/README.md`** — deployment instructions
+         - Prerequisites (CLI tools, credentials)
+         - Step-by-step deployment guide
+         - How to set secrets
+         - How to destroy infrastructure
+
+      Requirements:
+      - Pin all provider and module versions
+      - Use data sources to reference existing resources where possible
+      - Tag all resources with environment, project, and managed-by labels
+      - Never hardcode secrets — use variables marked sensitive
+      - Follow {{provider}} best practices and naming conventions
+
+  - name: Generate CI/CD pipeline
+    prompt: |
+      Generate a CI/CD pipeline for the Terraform infrastructure.
+
+      Use file_write to create:
+
+      1. **`.github/workflows/terraform.yml`** — GitHub Actions workflow:
+         - On pull request: `terraform fmt -check`, `terraform validate`, `terraform plan`
+         - On push to main: `terraform apply -auto-approve` (or manual approval step)
+         - Use OIDC or secrets for {{provider}} credentials
+         - Cache Terraform providers for speed
+         - Post plan output as PR comment
+
+      2. **`terraform/backend.tf.example`** — remote state backend config:
+         - S3/GCS/Linode Object Storage for state
+         - DynamoDB/equivalent for state locking
+         - Instructions in comments
+
+      3. Add to **`terraform/README.md`** (append):
+         - How to set up remote state
+         - Required GitHub secrets
+         - How to handle secrets (never commit tfvars with real secrets)
+         - Recommended: use a secrets manager for DB passwords, API keys
+
+      If the project already has `.github/workflows/`, make sure the new
+      workflow doesn't conflict. Use a descriptive filename like `terraform.yml`.
+
+  - name: Review and validate
+    prompt: |
+      Review and validate the generated Terraform code.
+
+      1. **Format check**: Run shell_exec with "terraform fmt -check -recursive terraform/"
+         If it reports formatting issues, run "terraform fmt -recursive terraform/" to fix them.
+
+      2. **Syntax validation**: Run shell_exec with:
+         - "cd terraform && terraform init -backend=false" (initialize without backend)
+         - "cd terraform && terraform validate"
+         Report any errors and fix them.
+
+      3. **Security review**: Read back all generated .tf files and check for:
+         - Any hardcoded credentials that slipped through
+         - Public access to databases or storage
+         - Security groups / firewalls too permissive (0.0.0.0/0 on non-HTTP ports)
+         - Unencrypted storage or databases
+         - Missing logging or audit trails
+         - Over-permissive IAM roles
+         - Resources without deletion protection
+
+      4. **Completeness check**: Verify:
+         - All resources from the architecture are represented
+         - All variables have descriptions and sensible defaults
+         - Outputs exist for key endpoints and IDs
+         - README has complete instructions
+
+      Report validation results:
+      - Format: [PASS / FIXED]
+      - Validation: [PASS / FAIL — details]
+      - Security: [findings if any]
+      - Completeness: [any gaps]
+
+      Fix any issues found before proceeding.
+
+  - name: Plan deployment
+    prompt: |
+      Run Terraform plan to preview what will be created.
+
+      IMPORTANT: This step requires {{provider}} credentials to be configured.
+      If credentials are not set up, explain exactly what the user needs to do:
+      - Which environment variables to set (e.g., AWS_ACCESS_KEY_ID, LINODE_TOKEN)
+      - Or which CLI tool to authenticate with (e.g., aws configure, linode-cli)
+
+      If credentials are available:
+      1. Run shell_exec with "cd terraform && terraform init"
+      2. Run shell_exec with "cd terraform && terraform plan -var-file={{environment}}.tfvars -out=tfplan"
+
+      Parse the plan output and summarize:
+
+      ## Terraform Plan Summary
+      **Environment:** {{environment}}
+      **Provider:** {{provider}}
+
+      ### Resources to Create
+      | Resource | Type | Name |
+      |----------|------|------|
+      | [rows] |
+
+      ### Resources to Modify
+      | Resource | Change |
+      |----------|--------|
+      | [rows] |
+
+      ### Resources to Destroy
+      | Resource | Reason |
+      |----------|--------|
+      | [rows or "None"] |
+
+      **Total:** [N] to add, [N] to change, [N] to destroy
+
+      ### Next Step
+      To apply this plan, run: `cd terraform && terraform apply tfplan`
+      Or wait for the next workflow step to apply with approval.
+
+      Do NOT apply yet — this step only plans.
+
+  - name: Post-deploy verification
+    prompt: |
+      After the user has applied the Terraform (either manually or through CI/CD),
+      verify the deployment.
+
+      1. **Check Terraform outputs**: Run shell_exec with "cd terraform && terraform output"
+         - Note the application URL, database endpoint, and other key outputs
+
+      2. **Verify service health**:
+         - If a URL/endpoint was output, try to reach it with shell_exec using
+           "curl -s -o /dev/null -w '%{http_code}' [URL]"
+         - If Kubernetes was deployed, use k8s_list_pods and k8s_list_deployments
+           to verify pods are running
+         - If a database was created, verify it's accepting connections (if connection
+           details are available)
+
+      3. **Browser smoke test** (if Playwright MCP is available and a web URL exists):
+         - Navigate to the application URL
+         - Take a screenshot
+         - Check for console errors
+         - Verify the page loads correctly
+
+      4. **Generate deployment summary**:
+
+      ## Deployment Summary: {{environment}}
+      **Provider:** {{provider}}
+      **Date:** [current date]
+      **Status:** [VERIFIED / PARTIALLY VERIFIED / NOT YET VERIFIED]
+
+      ### Infrastructure Created
+      | Resource | Details |
+      |----------|---------|
+      | [from terraform output] |
+
+      ### Health Checks
+      | Check | Status | Details |
+      |-------|--------|---------|
+      | Endpoint reachable | PASS/FAIL | [URL and status code] |
+      | Pods running | PASS/FAIL/N/A | [pod status] |
+      | Database reachable | PASS/FAIL/N/A | [connection status] |
+      | Browser test | PASS/FAIL/N/A | [page load status] |
+
+      ### Important Next Steps
+      1. Set up monitoring and alerting
+      2. Configure backup schedules for databases
+      3. Set up log aggregation
+      4. Add the Terraform state to version control (backend config)
+      5. Document the infrastructure for your team
+
+      ### Useful Commands
+      - View state: `cd terraform && terraform show`
+      - Update infrastructure: `cd terraform && terraform plan && terraform apply`
+      - Destroy everything: `cd terraform && terraform destroy` (requires confirmation)

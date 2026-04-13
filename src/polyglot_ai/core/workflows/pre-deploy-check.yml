@@ -1,0 +1,117 @@
+name: Pre-Deployment Check
+description: Validate infrastructure changes before applying — review manifests for issues, dry-run against the cluster, check current health, and produce a go/no-go decision.
+
+inputs:
+  - name: manifest_path
+    description: Path to the manifest file or directory to deploy (e.g. k8s/production/, deploy.yaml)
+    required: true
+  - name: namespace
+    description: Target Kubernetes namespace
+    required: false
+    default: default
+  - name: environment
+    description: Target environment name (for report header)
+    required: false
+    default: production
+
+steps:
+  - name: Review manifests for issues
+    prompt: |
+      Review the manifests at "{{manifest_path}}" before deployment to {{environment}}.
+
+      1. Use file_read to read all manifest files at {{manifest_path}}.
+         If it is a directory, use list_directory first and then read each YAML file.
+      2. For each manifest, check for:
+         - Valid YAML syntax
+         - Required fields present (apiVersion, kind, metadata, spec)
+         - Image tags — are they pinned to a specific version (not :latest)?
+         - Resource limits and requests defined
+         - Liveness and readiness probes configured for all containers
+         - Security context set (runAsNonRoot, readOnlyRootFilesystem)
+         - Namespace matches "{{namespace}}" or is left for the deploy command to set
+         - No hardcoded secrets (should use Secret references or external secret managers)
+         - Labels and annotations present for observability
+      3. Also check get_review_findings in case an IaC review has been run previously.
+
+      List every issue found with the file, line, and severity (blocker vs warning).
+
+  - name: Check current cluster state
+    prompt: |
+      Before deploying, assess the current state of the {{namespace}} namespace.
+
+      1. Use k8s_list_pods in {{namespace}} — is everything healthy right now?
+         - Any pods in CrashLoopBackOff or Error? (deploying on top of a broken state is risky)
+         - Any pods still rolling out from a previous deployment?
+      2. Use k8s_list_deployments — are all deployments at desired replica count?
+      3. Use k8s_describe on deployments that will be affected by the manifests in
+         {{manifest_path}} to capture:
+         - Current image version (so we can document what is changing)
+         - Current resource settings
+         - Rollout history
+
+      Report the current state and flag if the cluster is NOT healthy enough for a new deployment.
+
+  - name: Dry-run the deployment
+    prompt: |
+      Perform a dry-run to validate the manifests against the cluster without actually applying them.
+
+      1. Use shell_exec to run: kubectl apply --dry-run=server -f {{manifest_path}} -n {{namespace}}
+         This validates against the actual cluster API server without making changes.
+         If that fails, try: kubectl apply --dry-run=client -f {{manifest_path}} -n {{namespace}}
+
+      2. If the dry-run succeeds, also run: kubectl diff -f {{manifest_path}} -n {{namespace}}
+         This shows exactly what will change. Parse the diff output and summarize:
+         - What resources will be created (new)?
+         - What resources will be modified (changed)?
+         - What specific fields are changing (image version, replicas, env vars, etc.)?
+
+      3. If the dry-run fails, report the exact error. Common issues:
+         - Schema validation errors (wrong field names or types)
+         - Immutable field changes (trying to change something that can't be updated in-place)
+         - Missing namespaces, CRDs, or dependencies
+         - RBAC permission errors
+
+      Report dry-run results clearly — pass or fail, and what specifically will change.
+
+  - name: Produce go/no-go decision
+    prompt: |
+      Based on all previous steps, produce a deployment readiness assessment.
+
+      ## Pre-Deployment Report: {{environment}}
+      **Manifests:** {{manifest_path}}
+      **Namespace:** {{namespace}}
+      **Decision:** GO / NO-GO / PROCEED WITH CAUTION
+
+      ### Manifest Review
+      - Blockers found: [count — any blocker means NO-GO]
+      - Warnings found: [count]
+      - [list of issues]
+
+      ### Current Cluster Health
+      - Status: [HEALTHY / DEGRADED / UNHEALTHY]
+      - [issues if any — unhealthy cluster means NO-GO]
+
+      ### Dry-Run Results
+      - Status: [PASSED / FAILED — failure means NO-GO]
+      - Changes that will be applied:
+        | Resource | Change Type | Details |
+        |----------|------------|---------|
+        | [deployment/service/etc] | [create/update] | [what changes] |
+
+      ### Risk Assessment
+      - **Blast radius:** [what could break if this deployment fails]
+      - **Rollback plan:** kubectl rollout undo deployment/[name] -n {{namespace}}
+      - **Estimated downtime:** [none if rolling update / seconds if recreate]
+
+      ### Checklist
+      - [ ] Manifests pass validation
+      - [ ] No hardcoded secrets
+      - [ ] Images pinned to specific versions
+      - [ ] Resource limits set
+      - [ ] Health probes configured
+      - [ ] Current cluster is healthy
+      - [ ] Dry-run passed
+      - [ ] Rollback plan documented
+
+      ### Recommendation
+      [Clear statement: deploy now, fix issues first, or deploy with specific precautions]

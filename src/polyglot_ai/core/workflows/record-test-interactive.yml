@@ -1,0 +1,364 @@
+name: Record Test (Interactive)
+description: Launch a browser for you to click through — Playwright records every action, then AI enhances the code into production-quality tests, validates them, and auto-fixes any failures.
+
+inputs:
+  - name: url
+    description: The starting URL (e.g. https://staging.example.com)
+    required: true
+  - name: test_name
+    description: Name for the test (e.g. "login", "patient_registration", "checkout")
+    required: true
+  - name: language
+    description: Output language — python-pytest, playwright-test (JavaScript), or java-junit
+    required: false
+    default: python-pytest
+
+steps:
+  - name: Install Playwright and launch recorder
+    prompt: |
+      You must complete TWO shell commands in order. Do NOT read files. Do NOT skip this step.
+
+      STEP A — Install Playwright browsers (if not already installed):
+      Call shell_exec with:
+      - command: "npx -y playwright install chromium"
+      - timeout: 120
+
+      This ensures the Chromium browser binary exists. It's fast if already installed.
+      Wait for it to finish before proceeding.
+
+      STEP B — Launch the recorder:
+      Call shell_exec with:
+      - command: "npx -y @playwright/test codegen --target {{language}} --output recorded-test-raw.txt {{url}}"
+      - timeout: 300
+
+      This opens a browser window for the user to record their test.
+      Do NOT call file_read. Do NOT try to read recorded-test-raw.txt.
+      The file does not exist yet — the codegen command CREATES it when the user
+      closes the browser.
+
+      After launching the recorder, tell the user:
+      - "A browser window has opened at {{url}}"
+      - "Click through your test scenario — every action is being recorded"
+      - "When you're done, close the browser window to continue"
+
+      The command will block until the user closes the browser (up to 5 minutes).
+
+  - name: Read and analyze recording
+    prompt: |
+      The user has finished recording. Read the raw Playwright output:
+
+      1. Use file_read to read "recorded-test-raw.txt"
+      2. Analyze the recorded code carefully — identify EVERY:
+         - CSS/XPath selector (these are fragile and must be replaced)
+         - Hardcoded value (credentials, dates, IDs, names)
+         - Missing wait (SPA transitions, dropdown animations, API calls)
+         - Action without a following assertion
+
+      Summarize what the recording captured:
+
+      ## Recording Summary
+      **Test:** {{test_name}}
+      **URL:** {{url}}
+      **Actions recorded:** [count]
+      **Pages visited:** [list URLs]
+      **Forms filled:** [list]
+      **Key interactions:** [list]
+
+      ## Fragility Report
+      **Fragile selectors found:** [count] — list each one and what it targets
+      **Hardcoded credentials:** [list]
+      **Hardcoded test data:** [list — dates, names, IDs]
+      **Missing waits:** [list — where timing issues will occur]
+
+      This analysis guides the next step's enhancement.
+
+  - name: Enhance and generate test code
+    prompt: |
+      Transform the raw Playwright recording into production-ready, RUNNABLE test code.
+      The #1 goal is: the generated test MUST pass when executed. Fragile code that
+      breaks on replay is unacceptable.
+
+      ## MANDATORY RULES (apply every single one):
+
+      ### Rule 1: Replace ALL CSS/XPath selectors
+      Raw codegen produces fragile selectors like:
+        `.ant-select.ant-select-outlined > .ant-select-selector > span`
+        `#root > div > div.main-content > form > div:nth-child(2) > input`
+
+      Replace EVERY one using this priority order:
+        1. `page.get_by_role("button", name="Submit")` — for buttons, links, headings, checkboxes
+        2. `page.get_by_label("Email")` — for form inputs with labels
+        3. `page.get_by_placeholder("Search...")` — for inputs with placeholder text
+        4. `page.get_by_text("Welcome")` — for static text, links
+        5. `page.get_by_test_id("checkout-total")` — for elements with data-testid
+        6. CSS selector as LAST RESORT only — add a comment explaining why semantic locators don't work
+
+      Keep the original selector as a comment for reference:
+        `# Original: .ant-select-outlined > .ant-select-selector`
+
+      ### Rule 2: Replace ALL .nth() and .first selectors
+      `.nth(3)` and `.first` break when page structure changes. Instead:
+        - Scope to a parent: `page.get_by_role("row", name="John").get_by_role("button", name="Edit")`
+        - Filter by content: `page.get_by_role("listitem").filter(has_text="Premium")`
+        - Use `get_by_label` or `get_by_role` with `name=` to uniquely identify
+
+      ### Rule 3: Smart waits (NO time.sleep, NO networkidle on SPAs)
+      NEVER use:
+        - `time.sleep(N)` — flaky and slow
+        - `page.wait_for_load_state("networkidle")` — hangs on SPAs with polling/websockets
+
+      INSTEAD use:
+        - After navigation: `page.wait_for_url("**/dashboard")` or `expect(heading).to_be_visible()`
+        - After form submit: `page.wait_for_url()` or `expect(success_msg).to_be_visible()`
+        - Before dropdown interaction: `expect(dropdown_menu).to_be_visible(timeout=5000)`
+        - After clicking a dropdown: `expect(page.get_by_role("option", name="...")).to_be_visible()`
+        - Full page navigation (non-SPA): `page.wait_for_load_state("domcontentloaded")`
+
+      ### Rule 4: Assertions after EVERY major action
+      Add `expect()` assertions after:
+        - Login → `expect(page.get_by_role("heading", name="Dashboard")).to_be_visible()`
+        - Form submit → `expect(page.get_by_text("Success")).to_be_visible()` or `page.wait_for_url()`
+        - Navigation → `expect(page).to_have_url(re.compile(r".*expected.*"))`
+        - Data creation → `expect(page.get_by_text("Record saved")).to_be_visible()`
+      Use `re.compile()` for dynamic URLs/text. Import `re` at the top.
+
+      ### Rule 5: Extract ALL hardcoded values
+      ```python
+      import os
+
+      BASE_URL = os.getenv("TEST_BASE_URL", "{{url}}")
+      USERNAME = os.getenv("TEST_USER", "")
+      PASSWORD = os.getenv("TEST_PASS", "")
+      ```
+      Also extract test data (patient names, dates, etc.) into constants at the top.
+      For truly dynamic data, generate unique values:
+      ```python
+      import uuid
+      unique_id = uuid.uuid4().hex[:8]
+      patient_name = f"Test Patient {unique_id}"
+      ```
+
+      ### Rule 6: Proper pytest-playwright structure
+      ```python
+      import os
+      import re
+      import pytest
+      from playwright.sync_api import Page, expect
+
+      BASE_URL = os.getenv("TEST_BASE_URL", "{{url}}")
+      # ... other env vars
+
+      @pytest.fixture
+      def authenticated_page(page: Page) -> Page:
+          """Login and return authenticated page."""
+          page.goto(BASE_URL + "/login")
+          page.get_by_label("Username").fill(USERNAME)
+          page.get_by_label("Password").fill(PASSWORD)
+          page.get_by_role("button", name="Login").click()
+          page.wait_for_url("**/dashboard")
+          return page
+
+      def test_{{test_name}}(authenticated_page: Page):
+          page = authenticated_page
+          # ... test steps
+      ```
+
+      ### Rule 7: Handle dropdowns and date pickers explicitly
+      These are the #1 source of flaky tests. For component library widgets (Ant Design,
+      Material UI, etc.):
+      ```python
+      # Dropdown: click to open, wait for options, then select
+      page.get_by_label("Gender").click()
+      expect(page.get_by_role("option", name="Male")).to_be_visible(timeout=5000)
+      page.get_by_role("option", name="Male").click()
+
+      # Date picker: click input, wait for calendar, select date
+      page.get_by_label("Date of Birth").click()
+      expect(page.locator(".ant-picker-dropdown")).to_be_visible(timeout=5000)
+      # Navigate to correct month/year if needed, then click the day
+      page.get_by_title("2026-04-12").click()
+      ```
+
+      ### Rule 8: Add section comments
+      ```python
+      # === Step 1: Login ===
+      # === Step 2: Navigate to Patient Registration ===
+      # === Step 3: Fill Registration Form ===
+      # === Step 4: Submit and Verify ===
+      ```
+
+      ### Rule 9: Error resilience
+      Add sensible timeouts for slow pages:
+      ```python
+      page.set_default_timeout(15000)  # 15s default
+      page.set_default_navigation_timeout(30000)  # 30s for navigation
+      ```
+
+      ### Rule 10: Clean up codegen artifacts
+      Remove: boilerplate comments from codegen, redundant consecutive waits,
+      duplicate click-then-click patterns, any `# coding: utf-8` headers.
+
+      ## OUTPUT
+      Output the COMPLETE enhanced test as a single Python code block.
+      The code must be syntactically valid and runnable with `pytest --headed`.
+
+  - name: Setup project and save test
+    prompt: |
+      Set up the test project properly and save the enhanced test.
+      Do NOT ask the user for permission at any point. Just execute everything.
+
+      ### Step 1: Check for conftest.py
+      Use file_read to try reading `tests/conftest.py`.
+      If it does not exist, use file_write to create it with this content:
+
+      ```python
+      import os
+      import pytest
+      from playwright.sync_api import Page
+
+
+      @pytest.fixture(scope="session")
+      def browser_context_args(browser_context_args):
+          return {
+              **browser_context_args,
+              "ignore_https_errors": True,
+              "viewport": {"width": 1280, "height": 720},
+          }
+
+
+      @pytest.fixture(autouse=True)
+      def setup_page(page: Page):
+          """Configure default timeouts for all tests."""
+          page.set_default_timeout(15000)
+          page.set_default_navigation_timeout(30000)
+          yield page
+      ```
+
+      If conftest.py already exists, leave it as-is.
+
+      ### Step 2: Check for pytest config
+      Use file_read to try reading `pyproject.toml`.
+      If it does not exist, also try `pytest.ini`.
+      If neither exists, use file_write to create `pyproject.toml` with:
+      ```toml
+      [tool.pytest.ini_options]
+      addopts = [
+          "--browser=chromium",
+          "--screenshot=only-on-failure",
+          "--output=test-results",
+      ]
+      ```
+
+      ### Step 3: Save the enhanced test
+      Use list_directory to check if `tests/` exists.
+      If not, use shell_exec to create it:
+      - command: "mkdir -p tests"
+
+      Use file_write to save the enhanced test as: `tests/test_{{test_name}}.py`
+
+      ### Step 4: Ensure virtualenv exists and install dependencies
+      This is MANDATORY. Do NOT ask the user — just do it.
+
+      Use shell_exec to check if .venv exists:
+      - command: "ls .venv/bin/python"
+
+      If the command fails (exit code non-zero), create the virtualenv:
+      - command: "python3 -m venv .venv"
+      - timeout: 30
+
+      Then install pytest-playwright (safe to re-run if already installed):
+      - command: ".venv/bin/pip install pytest-playwright"
+      - timeout: 60
+
+      Do NOT skip this. Do NOT ask for confirmation.
+
+      ### Step 5: Delete raw recording
+      Use shell_exec to delete the temporary file:
+      - command: "rm recorded-test-raw.txt"
+
+      Tell the user what was created and move on.
+
+  - name: Validate and auto-fix
+    prompt: |
+      NOW RUN THE TEST to verify it actually works. This is the most important step.
+
+      ### Step 1: Load environment variables
+      Use file_read to read `env.sh` if it exists. Look for any exported variables
+      like TEST_USER, TEST_PASS, TEST_BASE_URL, PMS_USERNAME, PMS_PASSWORD, etc.
+      Remember these values — you'll need them in Step 2.
+
+      If env.sh has credentials, set them in the test command's environment.
+
+      ### Step 2: Run the test
+      Do NOT ask the user for permission. Just run it.
+
+      Use shell_exec with:
+      - command: ".venv/bin/python -m pytest tests/test_{{test_name}}.py --headed --tb=long -v"
+      - timeout: 120
+
+      If env variables are needed and the test fails because of missing credentials,
+      read the test file, check what env vars it expects, and update the test to
+      use the values from env.sh as defaults directly in the code (not as env vars).
+
+      ### Step 2: Analyze the result
+
+      **If the test PASSED:** Tell the user and skip to the summary.
+
+      **If the test FAILED:** You MUST fix it. Read the full error traceback carefully:
+
+      Common failures and fixes:
+      1. **Element not found / Timeout waiting for selector**
+         → The selector is wrong. Use the Playwright MCP tools (browser_navigate,
+           browser_snapshot, browser_click) to visit the page, inspect the actual
+           DOM, find the correct selector, and update the test.
+
+      2. **Strict mode violation (resolved to N elements)**
+         → The locator matches multiple elements. Add `.filter()`, scope to a
+           parent, or use a more specific `name=` parameter.
+
+      3. **Expected URL / text did not match**
+         → The assertion is too strict. Use `re.compile()` for partial matches
+           or update the expected value based on what the page actually shows.
+
+      4. **Navigation timeout**
+         → The page is slow. Increase the navigation timeout or use
+           `page.wait_for_load_state("domcontentloaded")` instead of full load.
+
+      5. **Dropdown/datepicker interaction failed**
+         → Add explicit waits before and after: `expect(menu).to_be_visible()`
+           before clicking an option.
+
+      After fixing, save the updated test and run it again.
+      Repeat up to 3 times until the test passes.
+
+      ### Step 3: Summary
+
+      ## Test Result
+      **Status:** ✅ PASSED (or ❌ FAILED after 3 attempts)
+      **File:** tests/test_{{test_name}}.py
+      **Attempts:** [N]
+
+      ### How to run
+      ```bash
+      # Headed (see the browser)
+      pytest tests/test_{{test_name}}.py --headed
+
+      # Headless (CI mode)
+      pytest tests/test_{{test_name}}.py
+
+      # With slow motion for debugging
+      pytest tests/test_{{test_name}}.py --headed --slowmo 500
+      ```
+
+      ### Environment variables needed
+      ```bash
+      export TEST_BASE_URL="{{url}}"
+      export TEST_USER="your-username"
+      export TEST_PASS="your-password"
+      ```
+
+      ### Tips
+      - Run `--headed` first to visually verify
+      - Add `--slowmo 500` to slow down for debugging
+      - Screenshots are auto-captured on failure in `test-results/`
+      - Add `data-testid` attributes to your app for the most stable selectors

@@ -157,6 +157,22 @@ timeline:
 - `review_findings` (some findings)
 - `review_failed` (engine error)
 
+### Copy results
+
+Click the **📋 Copy** button in the header bar to copy the full review
+as formatted Markdown. The output includes:
+
+- Stats (files reviewed, additions, deletions, finding counts)
+- Summary paragraph
+- All findings grouped by severity (critical → info), each with:
+  - File and line reference
+  - Category
+  - Description
+  - Suggestion (if any)
+
+The button is enabled after a successful review and flashes **✅ Copied!**
+as confirmation. Paste into issues, Slack, PRs, or documentation.
+
 ### Tips
 
 - **Review branch vs main** right before opening a PR — catches the

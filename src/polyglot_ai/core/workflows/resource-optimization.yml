@@ -1,0 +1,119 @@
+name: Resource Optimization
+description: Analyze Kubernetes and Docker resource usage to find waste — oversized requests, idle pods, unused images, and right-sizing recommendations.
+
+inputs:
+  - name: namespace
+    description: Kubernetes namespace to analyze (use "all" for all namespaces)
+    required: false
+    default: default
+  - name: include_docker
+    description: Also analyze local Docker resources (yes/no)
+    required: false
+    default: "yes"
+
+steps:
+  - name: Audit Kubernetes resource configuration
+    prompt: |
+      Analyze Kubernetes resource allocation in namespace "{{namespace}}".
+
+      1. Use k8s_list_deployments to get all deployments. For each, use k8s_describe to check:
+         - CPU requests and limits
+         - Memory requests and limits
+         - Number of replicas — is this more than needed?
+         - Are there horizontal pod autoscalers? If not, should there be?
+
+      2. Use k8s_list_pods to find:
+         - Pods in Completed state that could be cleaned up
+         - Pods that have been running for a very long time without restarts (possible idle workloads)
+         - Pods without resource requests/limits (unbounded resource usage)
+
+      3. Try to get actual resource usage by running shell_exec with
+         "kubectl top pods -n {{namespace}}" (this only works if metrics-server
+         is installed — if it fails, note that and continue with
+         configuration-only analysis).
+
+      For each deployment/pod, note:
+      - Configured requests vs limits
+      - Actual usage (if available from kubectl top)
+      - Whether the resource settings look reasonable or oversized
+
+  - name: Analyze Docker resource usage
+    prompt: |
+      {{include_docker}} — if "no", skip this step and report "Docker analysis skipped."
+
+      Analyze local Docker resource usage:
+
+      1. Use docker_list_containers to get all containers (running and stopped).
+         - Flag stopped/exited containers that are using disk space
+         - Flag containers running for a very long time (possible forgotten workloads)
+      2. Use docker_list_images to find:
+         - Dangling images (no tag) wasting disk space
+         - Very large images (note the size)
+         - Multiple versions of the same image (only latest needed?)
+         - Images not used by any running container
+      3. For running containers, use docker_inspect to check:
+         - Memory limits — are they set? Are they reasonable?
+         - CPU limits — set and reasonable?
+         - Volume mounts — any large volumes that might be unnecessary?
+
+      Estimate disk space that could be reclaimed by cleaning up unused images and stopped containers.
+
+  - name: Review IaC resource specifications
+    prompt: |
+      Check the project files for resource specifications that could be optimized.
+
+      1. Use file_search to find Kubernetes manifests, Helm values files, and Docker Compose files.
+      2. Use file_read on any files that define resource requests, limits, or replica counts.
+      3. Look for:
+         - Resource requests set equal to limits (prevents efficient bin-packing)
+         - Very high memory or CPU requests that seem out of proportion for the workload type
+         - Replica counts hardcoded at high numbers without autoscaling
+         - Base images that are unnecessarily large (e.g., full Ubuntu instead of Alpine/Distroless)
+         - Multi-stage Docker builds not being used (large final images)
+         - Unused ports exposed
+         - Volumes provisioned larger than likely needed
+
+      Note the file, line, current value, and what you would recommend instead.
+
+  - name: Generate optimization report
+    prompt: |
+      Compile all findings into a resource optimization report.
+
+      ## Resource Optimization Report
+      **Namespace:** {{namespace}}
+      **Date:** [current date]
+
+      ### Summary
+      - Total workloads analyzed: [count]
+      - Optimization opportunities found: [count]
+      - Estimated resource savings: [if calculable from data]
+
+      ### Right-Sizing Recommendations
+      | Workload | Current CPU Req/Lim | Recommended CPU | Current Mem Req/Lim | Recommended Mem | Rationale |
+      |----------|--------------------|-----------------|--------------------|-----------------|-----------|
+      | [rows] |
+
+      ### Scaling Recommendations
+      | Workload | Current Replicas | Recommended | HPA Suggested? | Rationale |
+      |----------|-----------------|-------------|----------------|-----------|
+      | [rows] |
+
+      ### Cleanup Opportunities
+      - **Stopped containers:** [count] — run `docker container prune` to reclaim space
+      - **Unused images:** [count] — run `docker image prune -a` to reclaim ~[size]
+      - **Completed pods:** [list] — can be deleted
+
+      ### Image Optimization
+      | Image | Current Size | Recommendation |
+      |-------|-------------|----------------|
+      | [e.g., switch from ubuntu:22.04 to python:3.12-slim] |
+
+      ### Quick Wins (do these first)
+      1. [Easiest, highest-impact change]
+      2. [Second]
+      3. [Third]
+
+      ### Longer-Term Improvements
+      1. [Add HPA for workload X]
+      2. [Switch to distroless base images]
+      3. [Implement resource quotas per namespace]

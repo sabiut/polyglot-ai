@@ -1,0 +1,143 @@
+name: Incident Response
+description: Structured incident investigation — triage severity, check infra and logs, identify root cause, assess rollback options, and generate an incident report with comms template.
+
+inputs:
+  - name: service
+    description: The affected service or application name
+    required: true
+  - name: symptom
+    description: What is happening (e.g. "5xx errors", "service unreachable", "high latency")
+    required: true
+  - name: namespace
+    description: Kubernetes namespace where the service runs
+    required: false
+    default: default
+  - name: severity
+    description: Incident severity (sev1/sev2/sev3) — affects urgency of recommendations
+    required: false
+    default: sev2
+
+steps:
+  - name: Triage current state
+    prompt: |
+      An incident has been reported for {{service}} in namespace {{namespace}}.
+      Reported symptom: {{symptom}}
+      Declared severity: {{severity}}
+
+      Perform immediate triage:
+
+      1. Check Kubernetes pod status for anything related to "{{service}}":
+         - Use k8s_list_pods in namespace {{namespace}} — look for pods matching "{{service}}"
+         - Note pod status, restart counts, age
+         - Use k8s_describe on any unhealthy pods to check events
+      2. Check deployments for "{{service}}":
+         - Are replicas at desired count?
+         - Is a rollout in progress?
+      3. If Docker is available, check container status for "{{service}}"
+      4. Check services — is the service endpoint configured and reachable?
+
+      Produce a quick triage summary:
+      - Is the service partially up or fully down?
+      - How many pods/containers are affected?
+      - When did the problem likely start (based on pod age, restart times)?
+      - Initial severity assessment — does the declared {{severity}} match what you see?
+
+  - name: Collect error evidence from logs
+    prompt: |
+      Now collect error evidence for {{service}} in {{namespace}}.
+
+      1. For each pod related to "{{service}}", pull recent logs (last 100 lines) using k8s_pod_logs.
+         - If a pod is crash-looping, get logs from the previous container instance too
+      2. If Docker containers are involved, get their logs too.
+      3. In the logs, specifically look for:
+         - The FIRST error after normal operation (this is often the root cause)
+         - Connection errors to databases, caches, or upstream services
+         - Out-of-memory kills or resource exhaustion
+         - Authentication/authorization failures
+         - Missing environment variables or config
+         - Certificate expiry or TLS errors
+
+      Extract and list the top 5 most relevant error messages with timestamps.
+      Note any pattern — is it one error repeated, or a cascade of different failures?
+
+  - name: Check recent changes
+    prompt: |
+      Check what changed recently that could have caused this incident:
+
+      1. Use git_log to check the last 15 commits — what was deployed recently?
+      2. Use git_diff to see what the most recent changes modified
+      3. Try to check CI status — use shell_exec with "gh run list --limit 5" if GitHub CLI is available
+      4. Look at the Kubernetes deployment — use k8s_describe on the {{service}} deployment to check:
+         - Current image tag/version
+         - When it was last updated
+         - Rollout history annotations
+
+      Correlate the timeline:
+      - When did the symptom ({{symptom}}) start?
+      - What deployment or change happened just before that?
+      - Did CI pass for the last deployment?
+
+  - name: Assess mitigation options
+    prompt: |
+      Based on the evidence collected, assess mitigation options for {{service}}.
+
+      Consider these options and rate each as RECOMMENDED / POSSIBLE / NOT APPLICABLE:
+
+      1. **Rollback deployment**: Is there a previous known-good version? Use k8s_describe to check rollout history.
+         - Risk: [what could go wrong with rollback]
+         - Command: the exact kubectl rollout undo command that would work
+
+      2. **Restart pods**: Would a restart fix a transient issue (memory leak, stale connection)?
+         - Risk: [brief downtime, might not fix root cause]
+
+      3. **Scale up**: Would more replicas help (if it is a capacity issue)?
+         - Risk: [cost, might mask the real problem]
+
+      4. **Configuration fix**: Is it a config/secret/env var issue that needs a quick patch?
+         - What exactly needs to change
+
+      5. **Upstream dependency**: Is the real problem in a dependency (database, cache, external API)?
+         - What to check or who to contact
+
+      Do NOT execute any mitigation yet — present the options so the user can decide.
+      For {{severity}} severity, indicate which option you recommend trying first.
+
+  - name: Generate incident report
+    prompt: |
+      Compile everything into a formal incident report.
+
+      ## Incident Report: {{service}}
+      **Severity:** {{severity}}
+      **Symptom:** {{symptom}}
+      **Status:** INVESTIGATING
+
+      ### Timeline
+      - [HH:MM] — First signs of the issue (from log timestamps)
+      - [HH:MM] — Incident declared
+      - [HH:MM] — Investigation started (now)
+
+      ### Impact
+      - What is affected (service, endpoints, users)
+      - Scope (full outage vs partial degradation)
+
+      ### Root Cause Analysis
+      **Probable cause:** [your best assessment]
+      **Confidence:** [high/medium/low]
+      **Evidence:**
+      - [key error messages]
+      - [correlation with recent changes]
+      - [infrastructure state]
+
+      ### Mitigation Options (ranked)
+      1. [Recommended action] — risk: [low/medium/high]
+      2. [Alternative action] — risk: [low/medium/high]
+
+      ### Stakeholder Communication Template
+      > **Subject: [{{severity}} upper] — {{service}} {{symptom}}**
+      > We are aware of [issue description]. The issue started at approximately [time].
+      > [Impact description]. We are currently [investigating/mitigating].
+      > Next update in [30 minutes / 1 hour].
+
+      ### Follow-up Actions
+      1. [What to do after the incident is resolved]
+      2. [Preventive measures for the future]

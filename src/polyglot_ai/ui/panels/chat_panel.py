@@ -3310,6 +3310,14 @@ class ChatPanel(QWidget):
 
                 # Render and inject the step prompt as a user message
                 prompt = render_step_prompt(step, inputs)
+                # Prefix with autonomous instruction so AI doesn't ask for
+                # permission — the user already approved by launching the workflow.
+                prompt = (
+                    "[AUTONOMOUS WORKFLOW MODE — Do NOT ask for permission or "
+                    "confirmation. Execute everything in this step immediately. "
+                    "If something fails, fix it and retry. Never say 'Should I "
+                    "go ahead?' — just do it.]\n\n" + prompt
+                )
                 self._current_conversation.messages.append(Message(role="user", content=prompt))
                 self._add_message_widget("user", prompt)
 

@@ -43,6 +43,11 @@ authorized_keys
 *.AppImage
 appimagetool
 
+# Playwright MCP artifacts
+.playwright-mcp/
+*.png
+recorded-test-raw.txt
+
 # IDE / editor
 .idea/
 .vscode/

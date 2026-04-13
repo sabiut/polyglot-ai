@@ -116,7 +116,7 @@ MCP_CATALOG = [
         "icon": "🎭",
         "description": "Browser automation and web interaction",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@0.0.70", "--headless"],
+        "args": ["-y", "@playwright/mcp@0.0.70", "--headless", "--isolated"],
         "config_fields": [],
     },
     {
