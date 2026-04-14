@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import AsyncGenerator
 
 from google import genai
@@ -16,6 +17,8 @@ from polyglot_ai.core.ai.provider import AIProvider
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
+
+_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
     "gemini-3.1-pro-preview",
@@ -31,6 +34,8 @@ class GoogleClient(AIProvider):
         super().__init__(event_bus)
         self._api_key = api_key
         self._client = genai.Client(api_key=api_key)
+        self._cached_models: list[str] | None = None
+        self._models_cached_at: float = 0.0
 
     @property
     def name(self) -> str:
@@ -45,6 +50,9 @@ class GoogleClient(AIProvider):
         self._client = genai.Client(api_key=api_key)
 
     async def list_models(self) -> list[str]:
+        now = time.time()
+        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
+            return list(self._cached_models)
         try:
             models = []
             for model in self._client.models.list():
@@ -53,7 +61,10 @@ class GoogleClient(AIProvider):
                     model_id = model_id[7:]
                 if "gemini" in model_id:
                     models.append(model_id)
-            return sorted(set(models)) if models else DEFAULT_MODELS
+            result = sorted(set(models)) if models else list(DEFAULT_MODELS)
+            self._cached_models = result
+            self._models_cached_at = now
+            return list(result)
         except Exception:
             logger.exception("Failed to list Google models")
             return list(DEFAULT_MODELS)

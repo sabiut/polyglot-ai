@@ -283,37 +283,41 @@ class DatabaseConnection:
             return []
         try:
             async with self._pg_pool.acquire() as conn:
-                table_rows = await conn.fetch(
-                    "SELECT table_name FROM information_schema.tables "
-                    "WHERE table_schema = 'public' ORDER BY table_name"
+                # Single bulk query for all tables and columns (avoids N+1)
+                col_rows = await conn.fetch(
+                    "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, "
+                    "  c.ordinal_position, "
+                    "  CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_pk "
+                    "FROM information_schema.columns c "
+                    "LEFT JOIN ( "
+                    "  SELECT k.table_name, k.column_name "
+                    "  FROM information_schema.key_column_usage k "
+                    "  JOIN information_schema.table_constraints tc "
+                    "    ON k.constraint_name = tc.constraint_name "
+                    "    AND k.table_schema = tc.table_schema "
+                    "  WHERE tc.constraint_type = 'PRIMARY KEY' "
+                    "    AND tc.table_schema = 'public' "
+                    ") pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name "
+                    "WHERE c.table_schema = 'public' "
+                    "ORDER BY c.table_name, c.ordinal_position"
                 )
-                tables = []
-                for trow in table_rows:
-                    table_name = trow["table_name"]
-                    col_rows = await conn.fetch(
-                        "SELECT column_name, data_type, is_nullable, "
-                        "  (SELECT COUNT(*) FROM information_schema.key_column_usage k "
-                        "   JOIN information_schema.table_constraints tc "
-                        "     ON k.constraint_name = tc.constraint_name "
-                        "   WHERE k.table_name = c.table_name "
-                        "     AND k.column_name = c.column_name "
-                        "     AND tc.constraint_type = 'PRIMARY KEY') as is_pk "
-                        "FROM information_schema.columns c "
-                        "WHERE table_schema = 'public' AND table_name = $1 "
-                        "ORDER BY ordinal_position",
-                        table_name,
-                    )
-                    columns = [
+
+                # Group columns by table
+                tables_map: dict[str, list[ColumnInfo]] = {}
+                for cr in col_rows:
+                    tname = cr["table_name"]
+                    if tname not in tables_map:
+                        tables_map[tname] = []
+                    tables_map[tname].append(
                         ColumnInfo(
                             name=cr["column_name"],
                             data_type=cr["data_type"],
                             nullable=cr["is_nullable"] == "YES",
                             primary_key=cr["is_pk"] > 0,
                         )
-                        for cr in col_rows
-                    ]
-                    tables.append(TableInfo(name=table_name, columns=columns))
-                return tables
+                    )
+
+                return [TableInfo(name=tname, columns=cols) for tname, cols in tables_map.items()]
         except Exception:
             logger.exception("Failed to get PostgreSQL schema")
             return []
@@ -407,29 +411,33 @@ class DatabaseConnection:
             return []
         try:
             async with self._mysql_pool.acquire() as conn:
-                # Use one cursor for SHOW TABLES
+                # Single bulk query for all tables and columns (avoids N+1)
                 async with conn.cursor() as cur:
-                    await cur.execute("SHOW TABLES")
-                    table_rows = await cur.fetchall()
+                    await cur.execute(
+                        "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, "
+                        "  c.IS_NULLABLE, c.COLUMN_KEY "
+                        "FROM information_schema.COLUMNS c "
+                        "WHERE c.TABLE_SCHEMA = DATABASE() "
+                        "ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION"
+                    )
+                    col_rows = await cur.fetchall()
 
-                # Use a fresh cursor for each DESCRIBE
-                tables = []
-                for (table_name,) in table_rows:
-                    safe_name = table_name.replace("`", "``")
-                    async with conn.cursor() as desc_cur:
-                        await desc_cur.execute(f"DESCRIBE `{safe_name}`")  # noqa: S608
-                        col_rows = await desc_cur.fetchall()
-                    columns = [
+                # Group columns by table
+                tables_map: dict[str, list[ColumnInfo]] = {}
+                for cr in col_rows:
+                    tname = cr[0]
+                    if tname not in tables_map:
+                        tables_map[tname] = []
+                    tables_map[tname].append(
                         ColumnInfo(
-                            name=cr[0],
-                            data_type=cr[1],
-                            nullable=cr[2] == "YES",
-                            primary_key=cr[3] == "PRI",
+                            name=cr[1],
+                            data_type=cr[2],
+                            nullable=cr[3] == "YES",
+                            primary_key=cr[4] == "PRI",
                         )
-                        for cr in col_rows
-                    ]
-                    tables.append(TableInfo(name=table_name, columns=columns))
-                return tables
+                    )
+
+                return [TableInfo(name=tname, columns=cols) for tname, cols in tables_map.items()]
         except Exception:
             logger.exception("Failed to get MySQL schema")
             return []

@@ -42,8 +42,18 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
-        self.setMinimumSize(1024, 768)
-        self.resize(1400, 900)
+
+        # Adaptive minimum and initial size based on the actual screen
+        from polyglot_ai.ui import theme_colors as _tc
+
+        size_class = _tc.screen_size_class()
+        if size_class == "sm":
+            self.setMinimumSize(900, 600)
+        else:
+            self.setMinimumSize(1024, 768)
+
+        x, y, w, h = _tc.initial_window_geometry()
+        self.setGeometry(x, y, w, h)
 
         # Set window icon explicitly (some Linux DEs ignore app-level icon)
         from PyQt6.QtGui import QIcon
@@ -135,13 +145,18 @@ class MainWindow(QMainWindow):
         self._center_splitter = QSplitter(Qt.Orientation.Vertical)
         self._center_splitter.addWidget(self._editor_panel)
         self._center_splitter.addWidget(self._terminal_panel)
-        self._center_splitter.setSizes([700, 300])
 
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._main_splitter.addWidget(self._sidebar_stack)
         self._main_splitter.addWidget(self._center_splitter)
         self._main_splitter.addWidget(self._right_tabs)
-        self._main_splitter.setSizes([250, 700, 350])
+
+        # Adaptive splitter sizes based on screen
+        from polyglot_ai.ui import theme_colors as _tc_split
+
+        splits = _tc_split.initial_splitter_sizes(self.width())
+        self._main_splitter.setSizes(splits["main"])
+        self._center_splitter.setSizes(splits["center"])
 
         central_layout.addWidget(self._main_splitter)
         self.setCentralWidget(central)
@@ -757,10 +772,28 @@ class MainWindow(QMainWindow):
 
     def restore_session(self, session_data: dict) -> None:
         """Restore session from saved settings."""
-        # Window geometry
+        # Window geometry — clamp to actual screen so the window isn't
+        # placed off-screen when switching between monitors / resolutions.
         geo = session_data.get("session.window_geometry")
         if geo and isinstance(geo, dict) and "w" in geo:
-            self.setGeometry(geo.get("x", 100), geo.get("y", 100), geo["w"], geo["h"])
+            x, y, w, h = geo.get("x", 100), geo.get("y", 100), geo["w"], geo["h"]
+            try:
+                from PyQt6.QtWidgets import QApplication
+
+                screen = QApplication.primaryScreen()
+                if screen:
+                    avail = screen.availableGeometry()
+                    # Clamp size to available screen
+                    w = min(w, avail.width())
+                    h = min(h, avail.height())
+                    # Ensure window is visible (at least 100px on-screen)
+                    if x + w < avail.x() + 100 or x > avail.right() - 100:
+                        x = avail.x() + (avail.width() - w) // 2
+                    if y + h < avail.y() + 50 or y > avail.bottom() - 50:
+                        y = avail.y() + (avail.height() - h) // 2
+            except Exception:
+                pass
+            self.setGeometry(x, y, w, h)
 
         # Splitter sizes
         sizes = session_data.get("session.splitter_sizes")

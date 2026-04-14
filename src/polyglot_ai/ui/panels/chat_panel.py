@@ -3116,10 +3116,18 @@ class ChatPanel(QWidget):
             safe_task(self._load_conversation(conv_id), name="task_conv_load")
 
     def _refresh_project_files(self) -> None:
-        """Scan project for files and feed to @mention popup."""
+        """Scan project for files and feed to @mention popup (non-blocking)."""
         project_root = self._get_project_root()
         if not project_root:
             return
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._refresh_project_files_async(project_root), name="mention_scan")
+
+    async def _refresh_project_files_async(self, project_root: str) -> None:
+        """Scan project files in a background thread so the UI stays responsive."""
+        import asyncio
         import os
 
         root = Path(project_root)
@@ -3136,18 +3144,23 @@ class ChatPanel(QWidget):
             ".tox",
             ".eggs",
         }
-        files: list[str] = []
-        try:
-            for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if d not in skip_dirs]
-                for f in filenames:
-                    rel = os.path.relpath(os.path.join(dirpath, f), root)
-                    files.append(rel)
-                if len(files) > 5000:
-                    break
-        except OSError:
-            pass
-        files.sort()
+
+        def _scan() -> list[str]:
+            found: list[str] = []
+            try:
+                for dirpath, dirnames, filenames in os.walk(root):
+                    dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+                    for f in filenames:
+                        rel = os.path.relpath(os.path.join(dirpath, f), root)
+                        found.append(rel)
+                    if len(found) > 5000:
+                        break
+            except OSError:
+                pass
+            found.sort()
+            return found
+
+        files = await asyncio.to_thread(_scan)
         self._input.set_project_files(files)
 
     def set_tools(self, tools: list[dict], registry) -> None:

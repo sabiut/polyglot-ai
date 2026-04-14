@@ -167,6 +167,43 @@ def scan_content_for_secrets(content: str, max_scan: int = 50_000) -> list[str]:
     return findings
 
 
+# ── Cached secret scan for file paths ────────────────────────────
+# Used by context builder to avoid re-scanning unchanged files.
+# Key: file path → (mtime_ns, findings_list)
+_secret_scan_cache: dict[str, tuple[int, list[str]]] = {}
+_SECRET_SCAN_CACHE_MAX = 2000
+
+
+def scan_file_for_secrets_cached(file_path: Path) -> list[str]:
+    """Scan a file for secrets, returning cached result if mtime unchanged."""
+    key = str(file_path)
+    try:
+        mtime_ns = file_path.stat().st_mtime_ns
+    except OSError:
+        return []
+
+    cached = _secret_scan_cache.get(key)
+    if cached and cached[0] == mtime_ns:
+        return cached[1]
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+
+    findings = scan_content_for_secrets(content)
+
+    # Evict oldest entries if cache is full
+    if len(_secret_scan_cache) >= _SECRET_SCAN_CACHE_MAX:
+        # Remove ~25% of entries (arbitrary oldest by iteration order)
+        to_remove = list(_secret_scan_cache.keys())[: _SECRET_SCAN_CACHE_MAX // 4]
+        for k in to_remove:
+            _secret_scan_cache.pop(k, None)
+
+    _secret_scan_cache[key] = (mtime_ns, findings)
+    return findings
+
+
 def sanitize_error(message: str, max_length: int = 200) -> str:
     """Redact potential secrets from error messages before logging/display."""
     result = message

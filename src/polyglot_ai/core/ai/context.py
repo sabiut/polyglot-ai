@@ -599,7 +599,7 @@ class ContextBuilder:
             if f not in files_to_read:
                 files_to_read.append(f)
 
-        from polyglot_ai.core.security import scan_content_for_secrets
+        from polyglot_ai.core.security import scan_file_for_secrets_cached
 
         for file_path in files_to_read:
             if total_chars >= MAX_CONTEXT_CHARS:
@@ -610,10 +610,9 @@ class ContextBuilder:
                 size = file_path.stat().st_size
                 if size > MAX_FILE_SIZE:
                     continue
-                content = file_path.read_text(encoding="utf-8", errors="replace")
 
-                # Content-based secret scanning — skip files with embedded secrets
-                findings = scan_content_for_secrets(content)
+                # Content-based secret scanning (cached by mtime)
+                findings = scan_file_for_secrets_cached(file_path)
                 if findings:
                     rel = file_path.relative_to(self._project_root)
                     logger.warning(
@@ -623,6 +622,7 @@ class ContextBuilder:
                     )
                     continue
 
+                content = file_path.read_text(encoding="utf-8", errors="replace")
                 rel = file_path.relative_to(self._project_root)
                 header = f"\n=== {rel} ===\n"
                 parts.append(header + content)

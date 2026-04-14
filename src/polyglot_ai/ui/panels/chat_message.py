@@ -70,6 +70,7 @@ class ChatMessage(QWidget):
         """
 
         is_user = role == "user"
+        self._is_user = is_user
 
         # Outer layout — minimal margins so text uses full width
         outer = QHBoxLayout(self)
@@ -81,10 +82,10 @@ class ChatMessage(QWidget):
             outer.addStretch()
 
             # For short messages use a compact bubble, for long ones go wider
-            is_long = len(content) > 200 or content.count("\n") > 3
+            self._is_long = len(content) > 200 or content.count("\n") > 3
 
             bubble = QWidget()
-            if is_long:
+            if self._is_long:
                 # Long/pasted content: wider card with subtle left border
                 bubble.setStyleSheet(
                     "QWidget { background-color: #2a2a2c; border-radius: 12px; "
@@ -105,7 +106,9 @@ class ChatMessage(QWidget):
             self._content_label.setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
             )
-            self._content_label.setMaximumWidth(560 if is_long else 480)
+            # Dynamic max-width: ~70% of parent for long, ~55% for short,
+            # with sensible floor/ceiling so it works on any screen size
+            self._update_bubble_max_width()
             self._content_label.setStyleSheet(
                 "QTextBrowser { color: #e8e8e8; font-size: 13px; background: transparent; "
                 "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', sans-serif; "
@@ -116,6 +119,7 @@ class ChatMessage(QWidget):
             if content:
                 self._set_content(content)
             bubble_layout.addWidget(self._content_label)
+            self._bubble = bubble
             outer.addWidget(bubble)
 
         else:
@@ -454,9 +458,29 @@ class ChatMessage(QWidget):
             fork_act.triggered.connect(lambda: self.on_fork(self))
         menu.exec(event.globalPos())
 
+    def _update_bubble_max_width(self) -> None:
+        """Set user-bubble max-width as a fraction of the available width."""
+        if not getattr(self, "_is_user", False):
+            return
+        # Walk up to find a parent with meaningful width
+        parent_w = 0
+        p = self.parentWidget()
+        while p and p.width() < 200:
+            p = p.parentWidget()
+        if p:
+            parent_w = p.width()
+        if parent_w < 300:
+            parent_w = 800  # fallback before first layout
+
+        is_long = getattr(self, "_is_long", False)
+        ratio = 0.70 if is_long else 0.55
+        max_w = max(280, min(int(parent_w * ratio), 900))
+        self._content_label.setMaximumWidth(max_w)
+
     def resizeEvent(self, event) -> None:
-        """Recalculate content height when widget width changes."""
+        """Recalculate content height and bubble width when widget resizes."""
         super().resizeEvent(event)
+        self._update_bubble_max_width()
         self._resize_content()
 
     def append_content(self, text: str) -> None:

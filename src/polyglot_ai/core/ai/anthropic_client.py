@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import AsyncGenerator
 
 from anthropic import AsyncAnthropic
@@ -15,6 +16,8 @@ from polyglot_ai.core.ai.provider import AIProvider
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
+
+_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
     "claude-opus-4-6",
@@ -31,6 +34,8 @@ class AnthropicClient(AIProvider):
     def __init__(self, api_key: str, event_bus: EventBus) -> None:
         super().__init__(event_bus)
         self._client = AsyncAnthropic(api_key=api_key)
+        self._cached_models: list[str] | None = None
+        self._models_cached_at: float = 0.0
 
     @property
     def name(self) -> str:
@@ -44,10 +49,16 @@ class AnthropicClient(AIProvider):
         self._client = AsyncAnthropic(api_key=api_key)
 
     async def list_models(self) -> list[str]:
+        now = time.time()
+        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
+            return list(self._cached_models)
         try:
             response = await self._client.models.list(limit=100)
             models = [m.id for m in response.data if m.id.startswith("claude")]
-            return sorted(models) if models else DEFAULT_MODELS
+            result = sorted(models) if models else list(DEFAULT_MODELS)
+            self._cached_models = result
+            self._models_cached_at = now
+            return list(result)
         except Exception:
             logger.exception("Failed to list Anthropic models")
             return list(DEFAULT_MODELS)

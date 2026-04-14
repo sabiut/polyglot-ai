@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 from pathlib import Path
@@ -196,15 +197,16 @@ class FileOperations:
     _MAX_SEARCH_PATTERN_LEN = 500
 
     def search(self, pattern: str, path: str = ".", max_results: int = 50) -> list[dict]:
-        """Search for a pattern in files under project root (or a subdirectory)."""
+        """Search for a pattern in files (sync fallback).
+
+        Prefer :meth:`search_async` from async contexts to avoid blocking
+        the event loop's thread pool.
+        """
         if self._project_root is None:
             return []
-
-        # Reject oversized patterns (DoS protection)
         if len(pattern) > self._MAX_SEARCH_PATTERN_LEN:
             return []
 
-        # Validate and scope search directory
         search_dir = "."
         if path and path != ".":
             resolved = self.validate_path(path)
@@ -212,7 +214,6 @@ class FileOperations:
                 search_dir = str(resolved.relative_to(self._project_root))
 
         try:
-            # Use "--" to prevent pattern/dir from being interpreted as flags
             result = subprocess.run(
                 ["grep", "-rn", "-F", "-l", "--", pattern, search_dir],
                 cwd=self._project_root,
@@ -220,23 +221,60 @@ class FileOperations:
                 text=True,
                 timeout=10,
             )
-            # Filter results: exclude files that match secret patterns
-            from polyglot_ai.core.security import is_secret_file
-
-            files = result.stdout.strip().split("\n")[: max_results * 2]
-            filtered = []
-            for f in files:
-                if not f:
-                    continue
-                clean = f.lstrip("./")
-                if is_secret_file(Path(clean)):
-                    continue
-                filtered.append({"file": clean})
-                if len(filtered) >= max_results:
-                    break
-            return filtered
+            return self._filter_search_results(result.stdout, max_results)
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return []
+
+    async def search_async(
+        self, pattern: str, path: str = ".", max_results: int = 50
+    ) -> list[dict]:
+        """Search for a pattern using async subprocess (non-blocking)."""
+        if self._project_root is None:
+            return []
+        if len(pattern) > self._MAX_SEARCH_PATTERN_LEN:
+            return []
+
+        search_dir = "."
+        if path and path != ".":
+            resolved = self.validate_path(path)
+            if resolved.is_dir():
+                search_dir = str(resolved.relative_to(self._project_root))
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "grep",
+                "-rn",
+                "-F",
+                "-l",
+                "--",
+                pattern,
+                search_dir,
+                cwd=self._project_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            return self._filter_search_results(stdout.decode(errors="replace"), max_results)
+        except (asyncio.TimeoutError, FileNotFoundError, OSError):
+            return []
+
+    @staticmethod
+    def _filter_search_results(stdout: str, max_results: int) -> list[dict]:
+        """Filter grep output, excluding secret files."""
+        from polyglot_ai.core.security import is_secret_file
+
+        files = stdout.strip().split("\n")[: max_results * 2]
+        filtered: list[dict] = []
+        for f in files:
+            if not f:
+                continue
+            clean = f.lstrip("./")
+            if is_secret_file(Path(clean)):
+                continue
+            filtered.append({"file": clean})
+            if len(filtered) >= max_results:
+                break
+        return filtered
 
     def list_dir(self, path: str = ".", depth: int = 3) -> str:
         """Return a tree-formatted directory listing."""

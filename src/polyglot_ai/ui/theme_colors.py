@@ -257,6 +257,143 @@ def get_for(theme: str, token: str) -> str:
     return _THEMES[theme][token]
 
 
+# ── Screen scale factor ──────────────────────────────────────────
+# Computed once from the primary screen's logical DPI.  All layout
+# constants below are the "reference" values for a 96-DPI / 1× display.
+# Use ``scaled(px)`` anywhere a pixel value should adapt to the user's
+# display.
+
+_scale_factor: float | None = None
+
+
+def _get_scale_factor() -> float:
+    """Return the ratio of the primary screen's DPI to the 96-DPI baseline."""
+    global _scale_factor
+    if _scale_factor is not None:
+        return _scale_factor
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            screen = app.primaryScreen()
+            if screen is not None:
+                _scale_factor = screen.logicalDotsPerInch() / 96.0
+                return _scale_factor
+    except Exception:
+        pass
+    _scale_factor = 1.0
+    return _scale_factor
+
+
+def scaled(px: int | float) -> int:
+    """Scale a pixel value by the current display DPI factor.
+
+    On a standard 96-DPI display this is a no-op.  On HiDPI (e.g. 144 DPI
+    Retina) the value is multiplied by 1.5×, etc.
+    """
+    return round(px * _get_scale_factor())
+
+
+# ── Screen geometry helpers ──────────────────────────────────────
+
+# Size class thresholds (logical pixels, width-based)
+SCREEN_SM = 1366  # Small laptop (1366×768)
+SCREEN_MD = 1920  # Standard desktop (1080p)
+SCREEN_LG = 2560  # Large / QHD / ultra-wide
+
+
+def screen_size_class() -> str:
+    """Return 'sm', 'md', or 'lg' based on the primary screen width."""
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            screen = app.primaryScreen()
+            if screen is not None:
+                w = screen.availableGeometry().width()
+                if w < SCREEN_MD:
+                    return "sm"
+                elif w < SCREEN_LG:
+                    return "md"
+                else:
+                    return "lg"
+    except Exception:
+        pass
+    return "md"
+
+
+def initial_window_geometry() -> tuple[int, int, int, int]:
+    """Return (x, y, width, height) adapted to the primary screen.
+
+    Takes 85% of available space on small screens, 75% on medium,
+    and caps at 1800×1100 on large displays.  Always centered.
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            screen = app.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                sw, sh = avail.width(), avail.height()
+                cls = screen_size_class()
+                if cls == "sm":
+                    w = int(sw * 0.92)
+                    h = int(sh * 0.90)
+                elif cls == "lg":
+                    w = min(int(sw * 0.70), 1800)
+                    h = min(int(sh * 0.75), 1100)
+                else:  # md
+                    w = int(sw * 0.78)
+                    h = int(sh * 0.82)
+                x = avail.x() + (sw - w) // 2
+                y = avail.y() + (sh - h) // 2
+                return x, y, w, h
+    except Exception:
+        pass
+    return 100, 100, 1400, 900
+
+
+def initial_splitter_sizes(total_width: int) -> dict[str, list[int]]:
+    """Return adaptive splitter sizes based on total window width.
+
+    Returns dict with 'main' (3-way: sidebar, center, right-tabs)
+    and 'center' (2-way: editor, terminal) keys.
+    """
+    cls = screen_size_class()
+
+    if cls == "sm":
+        # Small screen: narrower sidebar, smaller chat panel
+        sidebar = 200
+        right = max(280, int(total_width * 0.25))
+        center = total_width - sidebar - right
+        return {
+            "main": [sidebar, center, right],
+            "center": [600, 200],
+        }
+    elif cls == "lg":
+        # Large screen: generous space everywhere
+        sidebar = 280
+        right = max(400, int(total_width * 0.24))
+        center = total_width - sidebar - right
+        return {
+            "main": [sidebar, center, right],
+            "center": [700, 350],
+        }
+    else:
+        # Medium: balanced default
+        sidebar = 250
+        right = max(340, int(total_width * 0.26))
+        center = total_width - sidebar - right
+        return {
+            "main": [sidebar, center, right],
+            "center": [700, 300],
+        }
+
+
 # ── Spacing (px) ──────────────────────────────────────────────────
 
 SPACING_XS = 2

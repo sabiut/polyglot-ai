@@ -28,6 +28,7 @@ from polyglot_ai.core.bridge import EventBus
 logger = logging.getLogger(__name__)
 
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
     "claude-opus-4-6",
@@ -48,6 +49,9 @@ class ClaudeOAuthClient(AIProvider):
         self._expires_at: int | None = None
         self._subscription_type: str | None = None
         self._client: AsyncAnthropic | None = None
+        # Model list cache — avoids repeated API calls
+        self._cached_models: list[str] | None = None
+        self._models_cached_at: float = 0.0
         self._load_tokens()
 
     @property
@@ -176,13 +180,20 @@ class ClaudeOAuthClient(AIProvider):
         return shutil.which("claude") is not None
 
     async def list_models(self) -> list[str]:
-        """List available Claude models."""
+        """List available Claude models (cached for 5 minutes)."""
+        now = time.time()
+        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
+            return list(self._cached_models)
+
         if not self._client:
             return list(DEFAULT_MODELS)
         try:
             response = await self._client.models.list(limit=100)
             models = [m.id for m in response.data if m.id.startswith("claude")]
-            return sorted(models) if models else DEFAULT_MODELS
+            result = sorted(models) if models else list(DEFAULT_MODELS)
+            self._cached_models = result
+            self._models_cached_at = now
+            return list(result)
         except Exception:
             logger.exception("Failed to list Claude models via subscription")
             return list(DEFAULT_MODELS)

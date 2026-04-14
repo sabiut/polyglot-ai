@@ -403,6 +403,19 @@ class Database:
             (conv_id, fork_message_id),
         )
 
+        # Batch-fetch ALL attachments in one query instead of N+1
+        message_ids = [msg["id"] for msg in messages]
+        attachments_by_msg: dict[int, list[dict]] = {}
+        if message_ids:
+            placeholders = ",".join("?" for _ in message_ids)
+            all_attachments = await self.fetchall(
+                f"SELECT message_id, filename, mime_type, file_path, file_size "
+                f"FROM attachments WHERE message_id IN ({placeholders})",
+                tuple(message_ids),
+            )
+            for att in all_attachments:
+                attachments_by_msg.setdefault(att["message_id"], []).append(att)
+
         try:
             # Create forked conversation
             cursor = await self._conn.execute(
@@ -433,12 +446,7 @@ class Database:
                 )
                 new_msg_id = cursor2.lastrowid
 
-                attachments = await self.fetchall(
-                    "SELECT filename, mime_type, file_path, file_size "
-                    "FROM attachments WHERE message_id = ?",
-                    (msg["id"],),
-                )
-                for att in attachments:
+                for att in attachments_by_msg.get(msg["id"], []):
                     await self._conn.execute(
                         """INSERT INTO attachments
                            (message_id, filename, mime_type, file_path, file_size)

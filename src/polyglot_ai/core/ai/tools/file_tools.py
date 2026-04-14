@@ -175,7 +175,8 @@ async def dir_delete(file_ops, args: dict) -> str:
 async def file_search(file_ops, args: dict) -> str:
     pattern = args.get("pattern", "")
     search_path = args.get("path", ".")
-    results = await asyncio.to_thread(file_ops.search, pattern, path=search_path)
+    # Use async subprocess directly — avoids blocking a thread pool thread
+    results = await file_ops.search_async(pattern, path=search_path)
     if not results:
         return "No matches found."
     return "\n".join(r["file"] for r in results)
