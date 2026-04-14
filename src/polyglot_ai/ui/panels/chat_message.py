@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -50,6 +50,14 @@ class ChatMessage(QWidget):
         super().__init__(parent)
         self._role = role
         self._content = content
+        # Throttle markdown re-renders during streaming so the GUI stays
+        # responsive.  Instead of re-rendering on every token, we buffer
+        # incoming text and flush at most every 80 ms.
+        self._render_dirty = False
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(80)
+        self._render_timer.timeout.connect(self._flush_render)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setStyleSheet("background: transparent;")
 
@@ -452,10 +460,26 @@ class ChatMessage(QWidget):
         self._resize_content()
 
     def append_content(self, text: str) -> None:
+        """Buffer streaming chunks and render at most every 80 ms.
+
+        Without throttling, every single token triggers a full
+        markdown→HTML conversion + QTextBrowser reflow which blocks the
+        Qt event loop and causes "not responding" on long responses.
+        """
         self._content += text
-        self._set_content(self._content)
+        self._render_dirty = True
+        if not self._render_timer.isActive():
+            self._render_timer.start()
+
+    def _flush_render(self) -> None:
+        """Actually re-render the accumulated content."""
+        if self._render_dirty:
+            self._render_dirty = False
+            self._set_content(self._content)
 
     def set_final_content(self, content: str) -> None:
+        self._render_timer.stop()
+        self._render_dirty = False
         self._content = content
         self._set_content(content)
 

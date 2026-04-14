@@ -1765,6 +1765,10 @@ class ChatPanel(QWidget):
                 if chunk.usage:
                     usage_info = chunk.usage
 
+            # Flush any buffered rendering from the throttled append_content
+            if self._current_assistant_msg:
+                self._current_assistant_msg._flush_render()
+
             tool_calls_list = None
             if tool_calls_data:
                 logger.info(
@@ -2200,6 +2204,10 @@ class ChatPanel(QWidget):
                 len(full_content),
                 len(tool_calls_data),
             )
+
+            # Flush any buffered rendering from the throttled append_content
+            if self._current_assistant_msg:
+                self._current_assistant_msg._flush_render()
 
             # Build tool calls list
             tool_calls_list = None
