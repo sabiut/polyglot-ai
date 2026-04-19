@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import AsyncGenerator
 
 from google import genai
 from google.genai import types
 
-from polyglot_ai.constants import (
-    EVT_AI_STREAM_CHUNK,
-)
 from polyglot_ai.core.ai.models import StreamChunk
-from polyglot_ai.core.ai.provider import AIProvider
+from polyglot_ai.core.ai.provider import AIProvider, ModelListCache
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
-
-_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
     "gemini-3.1-pro-preview",
@@ -34,8 +28,7 @@ class GoogleClient(AIProvider):
         super().__init__(event_bus)
         self._api_key = api_key
         self._client = genai.Client(api_key=api_key)
-        self._cached_models: list[str] | None = None
-        self._models_cached_at: float = 0.0
+        self._model_cache = ModelListCache(DEFAULT_MODELS, "Google")
 
     @property
     def name(self) -> str:
@@ -50,24 +43,22 @@ class GoogleClient(AIProvider):
         self._client = genai.Client(api_key=api_key)
 
     async def list_models(self) -> list[str]:
-        now = time.time()
-        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
-            return list(self._cached_models)
-        try:
-            models = []
+        async def _fetch() -> list[str]:
+            # genai's list() is sync; iterate inline (the outer cache
+            # ensures this only runs at most once per TTL window).
+            models: list[str] = []
             for model in self._client.models.list():
                 model_id = model.name
                 if model_id.startswith("models/"):
                     model_id = model_id[7:]
                 if "gemini" in model_id:
                     models.append(model_id)
-            result = sorted(set(models)) if models else list(DEFAULT_MODELS)
-            self._cached_models = result
-            self._models_cached_at = now
-            return list(result)
-        except Exception:
-            logger.exception("Failed to list Google models")
-            return list(DEFAULT_MODELS)
+            # De-duplicate before the cache sorts. The cache sorts a
+            # list; a set would change iteration order per run, so we
+            # normalise here.
+            return sorted(set(models))
+
+        return await self._model_cache.get(_fetch)
 
     async def stream_chat(
         self,
@@ -147,10 +138,15 @@ class GoogleClient(AIProvider):
             ):
                 if chunk.text:
                     total_text += chunk.text
-                    self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=chunk.text)
-                    yield StreamChunk(delta_content=chunk.text)
+                    yield self._emit_text_delta(chunk.text)
 
-                # Extract function calls from Gemini response
+                # Extract function calls from Gemini response. Gemini
+                # returns whole calls (no fragmentation), so we emit a
+                # single start-chunk with the full id+name and the
+                # args already packed into the ``arguments`` field.
+                # OpenAI-compatible shape is preserved via
+                # :meth:`_tool_call_start_chunk` then a direct
+                # args-dict overwrite — cleaner than faking a split.
                 if (
                     hasattr(chunk, "candidates")
                     and chunk.candidates
@@ -164,20 +160,15 @@ class GoogleClient(AIProvider):
 
                             tidx = next_tool_idx
                             next_tool_idx += 1
-                            yield StreamChunk(
-                                tool_calls=[
-                                    {
-                                        "index": tidx,
-                                        "id": f"call_{fc.name}_{tidx}",
-                                        "function": {
-                                            "name": fc.name,
-                                            "arguments": _json.dumps(dict(fc.args))
-                                            if fc.args
-                                            else "{}",
-                                        },
-                                    }
-                                ]
+                            args_str = _json.dumps(dict(fc.args)) if fc.args else "{}"
+                            sc = self._tool_call_start_chunk(
+                                tidx, f"call_{fc.name}_{tidx}", fc.name
                             )
+                            # Gemini gives us the full args at once,
+                            # not fragments — patch the builder shape
+                            # in place rather than emit a start+args pair.
+                            sc.tool_calls[0]["function"]["arguments"] = args_str
+                            yield sc
 
                 # Check for usage metadata
                 if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
@@ -196,13 +187,12 @@ class GoogleClient(AIProvider):
             yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:
-        try:
-            # Try listing models as a connection test
-            models = list(self._client.models.list())
-            if models:
-                return True, "Connection successful"
-            return False, "No models returned"
-        except Exception as e:
-            from polyglot_ai.core.security import sanitize_error
+        # The genai SDK's list() is synchronous, so wrap it in an async
+        # lambda for the shared helper. An empty-list case reports
+        # success-ish (connected but no models) — treat it the same as
+        # a successful connection rather than a failure, matching the
+        # other providers' "Connection successful" outcome.
+        async def _check() -> list[str]:
+            return list(self._client.models.list())
 
-            return False, sanitize_error(str(e))
+        return await self._test_connection_via_list(_check)

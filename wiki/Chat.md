@@ -26,6 +26,152 @@ app. Toggle it with `Ctrl+Shift+A`.
 └──────────────┴──────────────────────────────┘
 ```
 
+## Slash commands
+
+Type any of these at the start of the chat input. They're handled
+locally (no round-trip to the model) and clear the input when
+executed. Typing something that starts with `/` but isn't a known
+command (e.g. `/wat`) falls through as a regular chat message.
+
+### Quick reference
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show the list of commands |
+| `/status` | Show session info — project, provider count, message count, MCP servers |
+| `/new` | Start a fresh conversation (same as clicking **+ New**) |
+| `/clear` | Clear the message area and reset the conversation |
+| `/model [name]` | Show the current model, or switch to one matching `name` |
+| `/review [branch]` | Run a code review on working changes (no arg) or `branch` |
+| `/fix [issue]` | Ask the AI to analyze and fix an error or failing test |
+| `/test [command]` | Run tests (auto-detects framework if `command` is omitted) and fix failures |
+| `/explain [target]` | Ask the AI to explain the current project or a specific target |
+| `/commit [message]` | Stage changes and commit; generates a message if omitted |
+| `/git [command]` | Run a git command (no arg → current status) |
+| `/workflow …` | Run a multi-step workflow — see [Workflows](#workflows) below |
+
+### Each command in detail
+
+#### `/help`
+Prints this same command list inline. Use it when you forget the
+syntax.
+
+#### `/status`
+One-shot diagnostic. Shows:
+- **Project** — absolute path, or `None` if no project is open
+- **Providers** — how many are active (need at least one)
+- **Messages** — count in the current conversation (0 means a new conversation)
+- **MCP Servers** — how many are connected and total tool count
+
+Good first thing to run when "why isn't the AI doing X?" — you'll
+quickly see if no provider is configured or no MCP server is up.
+
+#### `/new`
+Starts a new conversation. The same as clicking **+ New** in the
+header. The current conversation is kept in the sidebar — this
+doesn't delete it. If a task is active, the new conversation is
+bound to the task on first save.
+
+#### `/clear`
+Wipes the messages from the current conversation in the DB and the
+UI. The conversation row is removed from the sidebar. **This is not
+undoable.** Use `/new` instead if you want to keep the old one.
+
+#### `/model [name]`
+Without an argument, prints the current model (e.g. "Current model:
+gpt-5.4"). With an argument, does a case-insensitive substring match
+against every model in the dropdown and switches to the first hit.
+
+```
+/model haiku         → claude-haiku-4-5
+/model gpt-5.4-mini  → gpt-5.4-mini
+/model nope          → "Model 'nope' not found"
+```
+
+#### `/review [branch]`
+Runs the code-review engine on a diff. Without arguments, reviews
+the uncommitted working changes. With a branch name, reviews
+`branch..HEAD`. Output lands in the **Review** panel (right tabs),
+and the next AI turn can see the findings via the
+`get_review_findings` tool.
+
+```
+/review              → review of working changes
+/review main         → review of everything since main
+/review origin/main  → remote comparison
+```
+
+See [Tests and Review](Tests-and-Review.md).
+
+#### `/fix [issue]`
+Template prompt: *"Please analyze and fix: {issue}. Read the
+relevant files, identify the problem, and propose a fix."*
+
+Without an argument, defaults to "the last error or failing test".
+The AI is expected to read files, apply patches, and re-run to
+confirm.
+
+```
+/fix                                     → last error
+/fix the 500 in the payment handler      → specific issue
+```
+
+#### `/test [command]`
+Template prompt. With a command, runs it and fixes failures:
+*"Run this test command: `{cmd}`. If it fails, analyze the output
+and fix the issues."*
+
+Without a command, asks the AI to detect the test framework
+(pytest / jest / go test / etc.) and run it.
+
+```
+/test                                  → auto-detect
+/test pytest tests/test_auth.py -v     → specific
+/test go test ./internal/...            → go package
+```
+
+#### `/explain [target]`
+Template prompt: *"Explain {target} clearly and concisely. Include
+purpose, key components, and how they fit together."*
+
+Without a target, defaults to "the current project". Good for
+onboarding or for asking about a specific file / function.
+
+```
+/explain                            → whole project
+/explain the indexer                → by name
+/explain src/polyglot_ai/app.py     → by path
+```
+
+#### `/commit [message]`
+With a message: asks the AI to stage all changes and commit with
+exactly that message. Without: asks the AI to look at `git diff`,
+generate a conventional commit message, and show it for review
+before committing.
+
+```
+/commit                        → AI generates + shows a message
+/commit "fix: null deref in X" → commit with the given message
+```
+
+#### `/git [command]`
+With an argument, runs `git {command}` and shows the output.
+Without, defaults to a status + recent commits summary.
+
+```
+/git                            → status + branch + recent commits
+/git log --oneline -20          → specific
+/git rebase -i HEAD~3           → interactive (blocked by sandbox)
+```
+
+#### `/workflow …`
+See the [Workflows](#workflows) section below for the full command
+surface. Summary:
+
+- `/workflow` — list available workflows
+- `/workflow seed` — copy bundled defaults into `.polyglot/workflows/`
+- `/workflow <name> --key value …` — run a workflow with inputs
+
 ## Providers and models
 
 The model dropdown aggregates every model exposed by your connected
@@ -350,8 +496,8 @@ For TypeScript output:
 | 1. Install & Launch | Installs Playwright browsers if needed, then opens a real browser at your URL via `playwright codegen`. You click through your test scenario — every action is recorded |
 | 2. Read & Analyze | Reads the raw recording, identifies fragile CSS selectors, hardcoded values, missing waits, and actions without assertions |
 | 3. Enhance | Rewrites the code applying 10 mandatory hardening rules (see below) |
-| 4. Setup & Save | Creates virtualenv if needed, installs `pytest-playwright`, sets up `conftest.py` and `pyproject.toml`, saves the test file |
-| 5. Validate & Auto-fix | Runs the test. If it fails, reads the error, fixes the code, and retries up to 3 times |
+| 4. Setup & Save | Normalizes `test_name` → safe Python identifier, backs up any existing test file, creates virtualenv if needed, installs `pytest-playwright`, sets up `conftest.py` and `pyproject.toml`, saves the test file |
+| 5. Validate & Auto-fix | Runs the test (sourcing `env.sh` if present for credentials). If it fails, reads the error, fixes the code, and retries up to 3 times. Raw recording is kept on disk until the test passes so you can always diff. |
 
 **10 hardening rules applied in Step 3:**
 
@@ -369,6 +515,25 @@ For TypeScript output:
 **Autonomous execution:** The workflow runs in autonomous mode — it never
 asks "Should I go ahead?". The AI installs dependencies, saves files,
 runs tests, and fixes failures without prompting.
+
+**Credentials (security):** The validator runs pytest inside a
+subshell that first `source`s `env.sh` (if present). Put your test
+credentials there — e.g. `export TEST_USER="alice"`. The workflow
+**never** writes credentials into the test source code, and if
+`env.sh` is missing it only creates it with empty placeholders. Add
+`env.sh` to `.gitignore`.
+
+**Safe filenames:** Whatever you pass for `--test_name` is
+normalized before writing any file: lowercased, non-alphanumeric
+characters collapsed to `_`, digit-first names get a `t_` prefix.
+So `"My Login Test!"` becomes `tests/test_my_login_test.py` — a
+valid, importable Python module. If a test file with that name
+already exists, it's backed up to `.bak` first.
+
+**Recording kept on failure:** `recorded-test-raw.txt` stays on
+disk if the 3 retries all fail, so you can diff the enhanced code
+against the original Playwright capture. It's cleaned up only after
+a passing run.
 
 **record-test vs record-test-interactive:**
 

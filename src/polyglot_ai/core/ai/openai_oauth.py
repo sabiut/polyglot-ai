@@ -172,10 +172,18 @@ class OpenAIOAuthClient(AIProvider):
 
     @staticmethod
     def is_codex_available() -> bool:
+        """Return True iff ``npx`` is on PATH and answers within 10s.
+
+        Narrow catch: ``OSError`` covers the "npx missing / not executable"
+        cases (FileNotFoundError, PermissionError) and
+        ``TimeoutExpired`` covers a hung invocation. Any other exception
+        is a bug and should surface.
+        """
         try:
             subprocess.run(["npx", "--version"], capture_output=True, timeout=10)
             return True
-        except Exception:
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.debug("npx availability check failed: %s", exc)
             return False
 
     def _get_headers(self) -> dict:

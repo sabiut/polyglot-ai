@@ -3,21 +3,15 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import AsyncGenerator
 
 from anthropic import AsyncAnthropic
 
-from polyglot_ai.constants import (
-    EVT_AI_STREAM_CHUNK,
-)
 from polyglot_ai.core.ai.models import StreamChunk
-from polyglot_ai.core.ai.provider import AIProvider
+from polyglot_ai.core.ai.provider import AIProvider, ModelListCache
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
-
-_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
     "claude-opus-4-6",
@@ -34,8 +28,7 @@ class AnthropicClient(AIProvider):
     def __init__(self, api_key: str, event_bus: EventBus) -> None:
         super().__init__(event_bus)
         self._client = AsyncAnthropic(api_key=api_key)
-        self._cached_models: list[str] | None = None
-        self._models_cached_at: float = 0.0
+        self._model_cache = ModelListCache(DEFAULT_MODELS, "Anthropic")
 
     @property
     def name(self) -> str:
@@ -49,19 +42,11 @@ class AnthropicClient(AIProvider):
         self._client = AsyncAnthropic(api_key=api_key)
 
     async def list_models(self) -> list[str]:
-        now = time.time()
-        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
-            return list(self._cached_models)
-        try:
+        async def _fetch() -> list[str]:
             response = await self._client.models.list(limit=100)
-            models = [m.id for m in response.data if m.id.startswith("claude")]
-            result = sorted(models) if models else list(DEFAULT_MODELS)
-            self._cached_models = result
-            self._models_cached_at = now
-            return list(result)
-        except Exception:
-            logger.exception("Failed to list Anthropic models")
-            return list(DEFAULT_MODELS)
+            return [m.id for m in response.data if m.id.startswith("claude")]
+
+        return await self._model_cache.get(_fetch)
 
     async def stream_chat(
         self,
@@ -208,38 +193,19 @@ class AnthropicClient(AIProvider):
                                 tidx = next_tool_idx
                                 block_to_tool_idx[event.index] = tidx
                                 next_tool_idx += 1
-                                yield StreamChunk(
-                                    tool_calls=[
-                                        {
-                                            "index": tidx,
-                                            "id": event.content_block.id,
-                                            "function": {
-                                                "name": event.content_block.name,
-                                                "arguments": "",
-                                            },
-                                        }
-                                    ]
+                                yield self._tool_call_start_chunk(
+                                    tidx,
+                                    event.content_block.id,
+                                    event.content_block.name,
                                 )
 
                     elif event_type == "content_block_delta" and hasattr(event, "index"):
                         delta = event.delta
                         if hasattr(delta, "text"):
-                            self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=delta.text)
-                            yield StreamChunk(delta_content=delta.text)
+                            yield self._emit_text_delta(delta.text)
                         elif hasattr(delta, "partial_json"):
                             tidx = block_to_tool_idx.get(event.index, 0)
-                            yield StreamChunk(
-                                tool_calls=[
-                                    {
-                                        "index": tidx,
-                                        "id": None,
-                                        "function": {
-                                            "name": None,
-                                            "arguments": delta.partial_json,
-                                        },
-                                    }
-                                ]
-                            )
+                            yield self._tool_call_args_chunk(tidx, delta.partial_json)
 
                     elif event_type == "message_delta":
                         if hasattr(event, "usage") and event.usage:
@@ -274,10 +240,4 @@ class AnthropicClient(AIProvider):
             yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:
-        try:
-            await self._client.models.list(limit=1)
-            return True, "Connection successful"
-        except Exception as e:
-            from polyglot_ai.core.security import sanitize_error
-
-            return False, sanitize_error(str(e))
+        return await self._test_connection_via_list(lambda: self._client.models.list(limit=1))

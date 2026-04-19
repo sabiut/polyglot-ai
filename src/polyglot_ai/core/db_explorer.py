@@ -105,24 +105,39 @@ class DatabaseConnection:
 
     async def disconnect(self) -> None:
         async with self._lock:
+            # Cleanup paths: failures here are non-recoverable (we're
+            # disconnecting anyway), but log at debug so a leaked pool
+            # or corrupted connection state is traceable.
             if self._sqlite_conn:
                 try:
                     await self._sqlite_conn.close()
                 except Exception:
-                    pass
+                    logger.debug(
+                        "SQLite close failed during disconnect for %s",
+                        self.name,
+                        exc_info=True,
+                    )
                 self._sqlite_conn = None
             if self._pg_pool:
                 try:
                     await self._pg_pool.close()
                 except Exception:
-                    pass
+                    logger.debug(
+                        "PostgreSQL pool close failed during disconnect for %s",
+                        self.name,
+                        exc_info=True,
+                    )
                 self._pg_pool = None
             if self._mysql_pool:
                 try:
                     self._mysql_pool.close()
                     await self._mysql_pool.wait_closed()
                 except Exception:
-                    pass
+                    logger.debug(
+                        "MySQL pool close failed during disconnect for %s",
+                        self.name,
+                        exc_info=True,
+                    )
                 self._mysql_pool = None
 
     async def get_schema(self) -> list[TableInfo]:
@@ -713,12 +728,19 @@ class DatabaseManager:
         *,
         read_only: bool = True,
     ) -> DatabaseConnection:
-        # Disconnect existing connection with same name if present
+        # Disconnect existing connection with same name if present.
+        # Replacement is best-effort: if the old connection can't be
+        # cleanly torn down we log at debug and proceed — the caller
+        # wants the new connection regardless.
         if name in self._connections:
             try:
                 await self._connections[name].disconnect()
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to disconnect existing connection '%s' before replace",
+                    name,
+                    exc_info=True,
+                )
         conn = DatabaseConnection(name, db_type, connection_string, mcp_client, read_only=read_only)
         self._connections[name] = conn
         return conn

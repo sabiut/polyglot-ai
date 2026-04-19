@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import mimetypes
-import shutil
-from pathlib import Path
+from pathlib import Path  # noqa: F401 — still used by downstream methods we haven't touched
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -21,18 +19,23 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from polyglot_ai.core.ai.models import Conversation, Message, ToolCall
-from polyglot_ai.ui.panels.chat_message import ChatMessage
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import chat_icons
+from polyglot_ai.ui.panels.chat_attachments import ATTACH_DIR as _ATTACH_DIR  # noqa: F401
+from polyglot_ai.ui.panels import chat_conversation_list as conv_list_actions
+from polyglot_ai.ui.panels.chat_attachments import AttachmentManager
+from polyglot_ai.ui.panels.chat_commands import handle_slash_command
+from polyglot_ai.ui.panels.chat_input import ChatInput
+from polyglot_ai.ui.panels.chat_message import ChatMessage
+from polyglot_ai.ui.panels.chat_model_caps import MODEL_CAPS as _MODEL_CAPS
 
 if TYPE_CHECKING:
     from polyglot_ai.core.ai.context import ContextBuilder
@@ -40,111 +43,6 @@ if TYPE_CHECKING:
     from polyglot_ai.core.database import Database
 
 logger = logging.getLogger(__name__)
-
-# Attachment storage dir
-_ATTACH_DIR = Path.home() / ".local" / "share" / "polyglot-ai" / "attachments"
-
-# Model capability info
-_MODEL_CAPS = {
-    "gpt-5.4": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Most capable for complex tasks",
-    },
-    "gpt-5.4-mini": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Balanced speed and capability",
-    },
-    "gpt-5.4-nano": {
-        "vision": False,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Fastest for quick answers",
-    },
-    "o3": {
-        "vision": False,
-        "tools": True,
-        "reasoning": True,
-        "fast": False,
-        "desc": "Advanced reasoning model",
-    },
-    "o3-mini": {
-        "vision": False,
-        "tools": True,
-        "reasoning": True,
-        "fast": True,
-        "desc": "Fast reasoning model",
-    },
-    "o4-mini": {
-        "vision": False,
-        "tools": True,
-        "reasoning": True,
-        "fast": True,
-        "desc": "Efficient reasoning model",
-    },
-    "claude-opus-4-6": {
-        "vision": True,
-        "tools": True,
-        "reasoning": True,
-        "fast": False,
-        "desc": "Most capable for ambitious work",
-    },
-    "claude-sonnet-4-6": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Most efficient for everyday tasks",
-    },
-    "claude-haiku-4-5": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Fastest for quick answers",
-    },
-    "claude-sonnet-4-5": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Strong balanced model",
-    },
-    "claude-sonnet-4-0": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Reliable everyday model",
-    },
-    "gemini-3.1-pro-preview": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Most capable Gemini model",
-    },
-    "gemini-3-flash-preview": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Fast and efficient",
-    },
-    "gemini-3.1-flash-lite-preview": {
-        "vision": True,
-        "tools": False,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Lightweight and fast",
-    },
-}
 
 
 class ChatPanel(QWidget):
@@ -164,7 +62,9 @@ class ChatPanel(QWidget):
         self._tool_registry = None
         self._mcp_client = None
         self._persisted_message_count = 0
-        self._pending_attachments: list[dict] = []  # {path, filename, mime_type, size}
+        # Attachment state lives in AttachmentManager; constructed in
+        # _setup_ui once the attach_bar widget exists.
+        self._attachments: AttachmentManager | None = None
         self._current_plan = None
         self._onboarding_shown = False
         self._drop_overlay: QLabel | None = None
@@ -220,7 +120,7 @@ class ChatPanel(QWidget):
             "scaffolding commands (npm/pip/go/cargo install) don't prompt. "
             "Click again to end early."
         )
-        self._bootstrap_btn.setIcon(self._make_unlock_icon())
+        self._bootstrap_btn.setIcon(chat_icons.make_unlock_icon())
         self._bootstrap_btn.setStyleSheet(_btn_base)
         self._bootstrap_btn.clicked.connect(self._toggle_bootstrap_mode)
         header_layout.addWidget(self._bootstrap_btn)
@@ -236,7 +136,7 @@ class ChatPanel(QWidget):
         self._new_chat_btn = QPushButton("  New")
         self._new_chat_btn.setFixedHeight(26)
         self._new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_chat_btn.setIcon(self._make_plus_icon())
+        self._new_chat_btn.setIcon(chat_icons.make_plus_icon())
         self._new_chat_btn.setStyleSheet(_btn_base)
         self._new_chat_btn.clicked.connect(self._new_conversation)
         header_layout.addWidget(self._new_chat_btn)
@@ -263,7 +163,9 @@ class ChatPanel(QWidget):
             }}
             QLineEdit:focus {{ border-color: {tc.get("accent_primary")}; }}
         """)
-        self._search_input.textChanged.connect(self._on_search)
+        self._search_input.textChanged.connect(
+            lambda q: conv_list_actions.filter_by_search(self._conv_list, q)
+        )
         sidebar_layout.addWidget(self._search_input)
 
         # Category filter buttons
@@ -310,7 +212,9 @@ class ChatPanel(QWidget):
         """)
         self._conv_list.currentRowChanged.connect(self._on_conversation_selected)
         self._conv_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._conv_list.customContextMenuRequested.connect(self._show_conv_context_menu)
+        self._conv_list.customContextMenuRequested.connect(
+            lambda pos: conv_list_actions.show_context_menu(self, pos)
+        )
         sidebar_layout.addWidget(self._conv_list)
 
         splitter.addWidget(sidebar)
@@ -389,9 +293,13 @@ class ChatPanel(QWidget):
         self._attach_bar_layout.setContentsMargins(12, 4, 12, 4)
         self._attach_bar_layout.setSpacing(6)
         msg_layout.addWidget(self._attach_bar)
+        # Manager owns the pending-attachment list and renders chips
+        # into the bar. Constructed here because it needs the widgets
+        # above.
+        self._attachments = AttachmentManager(self._attach_bar, self._attach_bar_layout)
 
         # ── Input area ──
-        self._create_arrow_icon()
+        chat_icons.create_arrow_png()
 
         input_wrapper = QWidget()
         input_wrapper.setStyleSheet("background: transparent;")
@@ -425,8 +333,8 @@ class ChatPanel(QWidget):
             }}
         """)
         self._input.submit_requested.connect(self._on_send)
-        self._input.file_dropped.connect(self._add_attachment_from_path)
-        self._input.image_pasted.connect(self._add_pasted_image)
+        self._input.file_dropped.connect(self._attachments.add_from_path)
+        self._input.image_pasted.connect(self._attachments.add_from_pixmap)
         card_layout.addWidget(self._input)
 
         # Toolbar — clean layout: [attach] [model] — [status] — [send/stop]
@@ -452,7 +360,7 @@ class ChatPanel(QWidget):
         self._plus_btn.setFixedSize(28, 28)
         self._plus_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plus_btn.setToolTip("Attach files, templates, and more")
-        self._plus_btn.setIcon(self._make_toolbar_icon("plus"))
+        self._plus_btn.setIcon(chat_icons.make_toolbar_icon("plus"))
         self._plus_btn.setStyleSheet(f"""
             #toolbarIconBtn {{
                 background-color: transparent; border: none;
@@ -503,7 +411,7 @@ class ChatPanel(QWidget):
         self._search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._search_btn.setToolTip("Enable web search for current information")
         self._search_btn.setCheckable(True)
-        self._search_btn.setIcon(self._make_toolbar_icon("search"))
+        self._search_btn.setIcon(chat_icons.make_toolbar_icon("search"))
         self._search_btn.setStyleSheet(f"""
             #toolbarSearchBtn {{
                 background-color: transparent; border: none;
@@ -525,7 +433,7 @@ class ChatPanel(QWidget):
         self._template_btn.setFixedSize(28, 28)
         self._template_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._template_btn.setToolTip("Prompt templates")
-        self._template_btn.setIcon(self._make_toolbar_icon("template"))
+        self._template_btn.setIcon(chat_icons.make_toolbar_icon("template"))
         self._template_btn.setStyleSheet(f"""
             #toolbarTplBtn {{
                 background-color: transparent; border: none;
@@ -586,7 +494,7 @@ class ChatPanel(QWidget):
         self._send_btn.setFixedSize(32, 32)
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._send_btn.setToolTip("Send message (Enter)")
-        self._send_btn.setIcon(self._create_send_icon())
+        self._send_btn.setIcon(chat_icons.make_send_icon())
         self._send_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: #ececec; border: none; border-radius: 16px;
@@ -612,7 +520,11 @@ class ChatPanel(QWidget):
         wrapper_layout.addWidget(input_card)
         msg_layout.addWidget(input_wrapper)
         splitter.addWidget(msg_container)
-        splitter.setSizes([0, 400])
+        # Default sizes: show the conversation sidebar (220px) alongside
+        # the main chat area. Users can still collapse by dragging the
+        # handle; their last-used sizes are restored from session on
+        # next launch.
+        splitter.setSizes([220, 780])
 
         layout.addWidget(splitter)
 
@@ -700,7 +612,7 @@ class ChatPanel(QWidget):
             for url in mime.urls():
                 path = url.toLocalFile()
                 if path:
-                    self._add_attachment_from_path(path)
+                    self._attachments.add_from_path(path)
             event.acceptProposedAction()
         elif mime.hasText():
             self._input.setPlainText(mime.text())
@@ -737,10 +649,10 @@ class ChatPanel(QWidget):
             QMenu::separator {{ height: 1px; background-color: {tc.get("bg_hover")}; margin: 4px 12px; }}
         """)
 
-        attach_icon = self._create_menu_icon("paperclip")
-        folder_icon = self._create_menu_icon("folder")
-        terminal_icon = self._create_menu_icon("terminal")
-        settings_icon = self._create_menu_icon("gear")
+        attach_icon = chat_icons.make_menu_icon("paperclip")
+        folder_icon = chat_icons.make_menu_icon("folder")
+        terminal_icon = chat_icons.make_menu_icon("terminal")
+        settings_icon = chat_icons.make_menu_icon("gear")
 
         add_files = QAction(attach_icon, "  Add files or photos", menu)
         add_files.triggered.connect(self._attach_file)
@@ -756,7 +668,7 @@ class ChatPanel(QWidget):
         open_terminal.triggered.connect(self._open_terminal_from_menu)
         menu.addAction(open_terminal)
 
-        mcp_icon = self._create_menu_icon("plug")
+        mcp_icon = chat_icons.make_menu_icon("plug")
         open_mcp = QAction(mcp_icon, "  MCP Servers", menu)
         open_mcp.triggered.connect(self._open_mcp_from_menu)
         menu.addAction(open_mcp)
@@ -781,225 +693,7 @@ class ChatPanel(QWidget):
             "All Files (*);;Images (*.png *.jpg *.jpeg *.gif *.webp);;Code Files (*.py *.js *.ts *.html *.css)",
         )
         for f in files:
-            self._add_attachment_from_path(f)
-
-    def _add_attachment_from_path(self, file_path: str) -> None:
-        """Add a file attachment with preview."""
-        p = Path(file_path)
-        if not p.exists():
-            return
-
-        mime, _ = mimetypes.guess_type(str(p))
-        if not mime:
-            mime = "application/octet-stream"
-
-        # Copy to attachments dir
-        _ATTACH_DIR.mkdir(parents=True, exist_ok=True)
-        import uuid
-
-        dest = _ATTACH_DIR / f"{uuid.uuid4().hex}_{p.name}"
-        shutil.copy2(p, dest)
-
-        attach = {
-            "path": str(dest),
-            "original": str(p),
-            "filename": p.name,
-            "mime_type": mime,
-            "size": p.stat().st_size,
-        }
-        self._pending_attachments.append(attach)
-        self._update_attach_bar()
-
-    def _add_pasted_image(self, pixmap: QPixmap) -> None:
-        """Handle image paste from clipboard."""
-        _ATTACH_DIR.mkdir(parents=True, exist_ok=True)
-        import uuid
-
-        filename = f"pasted_{uuid.uuid4().hex[:8]}.png"
-        dest = _ATTACH_DIR / filename
-        pixmap.save(str(dest), "PNG")
-
-        attach = {
-            "path": str(dest),
-            "original": "clipboard",
-            "filename": filename,
-            "mime_type": "image/png",
-            "size": dest.stat().st_size,
-        }
-        self._pending_attachments.append(attach)
-        self._update_attach_bar()
-
-    def _update_attach_bar(self) -> None:
-        """Show/update the attachment preview bar."""
-        # Clear existing
-        while self._attach_bar_layout.count():
-            item = self._attach_bar_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        if not self._pending_attachments:
-            self._attach_bar.hide()
-            return
-
-        self._attach_bar.show()
-        for i, attach in enumerate(self._pending_attachments):
-            chip = QWidget()
-            chip.setStyleSheet(
-                f"background: {tc.get('bg_hover')}; border-radius: {tc.RADIUS_MD}px; padding: 2px;"
-            )
-            chip_layout = QHBoxLayout(chip)
-            chip_layout.setContentsMargins(8, 2, 4, 2)
-            chip_layout.setSpacing(4)
-
-            # Icon or thumbnail
-            if attach["mime_type"].startswith("image/"):
-                thumb = QLabel()
-                pm = QPixmap(attach["path"]).scaled(
-                    24,
-                    24,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                thumb.setPixmap(pm)
-                chip_layout.addWidget(thumb)
-
-            name = QLabel(attach["filename"][:20])
-            name.setStyleSheet(
-                f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; background: transparent;"
-            )
-            chip_layout.addWidget(name)
-
-            size_kb = attach["size"] / 1024
-            size_label = QLabel(f"({size_kb:.0f}KB)")
-            size_label.setStyleSheet(
-                f"color: {tc.get('text_muted')}; font-size: 10px; background: transparent;"
-            )
-            chip_layout.addWidget(size_label)
-
-            remove_btn = QPushButton("✕")
-            remove_btn.setFixedSize(18, 18)
-            remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            remove_btn.setStyleSheet(
-                f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; border: none; font-size: {tc.FONT_MD}px; }}"
-                f"QPushButton:hover {{ color: #ff4444; }}"
-            )
-            idx = i
-            remove_btn.clicked.connect(lambda checked, x=idx: self._remove_attachment(x))
-            chip_layout.addWidget(remove_btn)
-
-            self._attach_bar_layout.addWidget(chip)
-
-        self._attach_bar_layout.addStretch()
-
-    def _remove_attachment(self, index: int) -> None:
-        if 0 <= index < len(self._pending_attachments):
-            self._pending_attachments.pop(index)
-            self._update_attach_bar()
-
-    # ─── Conversation management ────────────────────────────────────
-
-    def _show_conv_context_menu(self, position) -> None:
-        item = self._conv_list.itemAt(position)
-        if not item:
-            return
-
-        conv_id = item.data(Qt.ItemDataRole.UserRole)
-        menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {tc.get("bg_surface_overlay")}; border: 1px solid {tc.get("border_menu")};
-                padding: 4px 0; color: {tc.get("text_primary")}; font-size: {tc.FONT_MD}px;
-            }}
-            QMenu::item {{ padding: 4px 20px; }}
-            QMenu::item:selected {{ background-color: {tc.get("bg_active")}; }}
-            QMenu::separator {{ height: 1px; background: {tc.get("border_menu")}; margin: 4px 8px; }}
-        """)
-
-        rename_act = menu.addAction("Rename...")
-        rename_act.triggered.connect(lambda: self._rename_conversation(item, conv_id))
-
-        pin_act = menu.addAction("Pin / Unpin")
-        pin_act.triggered.connect(lambda: self._pin_conversation(conv_id))
-
-        menu.addSeparator()
-
-        export_act = menu.addAction("Export as text...")
-        export_act.triggered.connect(lambda: self._export_conversation(conv_id))
-
-        menu.addSeparator()
-
-        delete_act = menu.addAction("Delete")
-        delete_act.triggered.connect(lambda: self._delete_conversation(item, conv_id))
-
-        menu.exec(self._conv_list.viewport().mapToGlobal(position))
-
-    def _rename_conversation(self, item: QListWidgetItem, conv_id: int) -> None:
-        new_name, ok = QInputDialog.getText(
-            self, "Rename Conversation", "New name:", text=item.text()
-        )
-        if ok and new_name:
-            item.setText(new_name)
-            if self._db:
-                from polyglot_ai.core.async_utils import safe_task
-
-                safe_task(self._db.rename_conversation(conv_id, new_name), name="db_rename")
-
-    def _delete_conversation(self, item: QListWidgetItem, conv_id: int) -> None:
-        reply = QMessageBox.question(
-            self,
-            "Delete Conversation",
-            f"Delete '{item.text()}'? This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            row = self._conv_list.row(item)
-            self._conv_list.takeItem(row)
-            if self._current_conversation and self._current_conversation.id == conv_id:
-                self._new_conversation()
-            if self._db:
-                from polyglot_ai.core.async_utils import safe_task
-
-                safe_task(self._db.delete_conversation(conv_id), name="db_delete")
-
-    def _pin_conversation(self, conv_id: int) -> None:
-        if self._db:
-            from polyglot_ai.core.async_utils import safe_task
-
-            safe_task(self._db.pin_conversation(conv_id), name="db_pin")
-
-    def _export_conversation(self, conv_id: int) -> None:
-        async def do_export():
-            if not self._db:
-                return
-            messages = await self._db.get_messages(conv_id)
-            lines = []
-            for msg in messages:
-                role = msg.get("role", "?").upper()
-                content = msg.get("content", "")
-                lines.append(f"[{role}]\n{content}\n")
-            text = "\n".join(lines)
-            from polyglot_ai.core.async_utils import run_blocking
-
-            await run_blocking(Path(path).write_text, text, "utf-8")
-
-        # Show file dialog synchronously (before async), then write in thread
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Conversation", "conversation.txt", "Text Files (*.txt)"
-        )
-        if not path:
-            return
-
-        from polyglot_ai.core.async_utils import safe_task
-
-        safe_task(do_export(), name="export_conversation")
-
-    def _on_search(self, query: str) -> None:
-        """Filter conversation list by search query."""
-        query = query.lower().strip()
-        for i in range(self._conv_list.count()):
-            item = self._conv_list.item(i)
-            if item:
-                item.setHidden(bool(query) and query not in item.text().lower())
+            self._attachments.add_from_path(f)
 
     # ─── Stop generation ────────────────────────────────────────────
 
@@ -1256,138 +950,6 @@ class ChatPanel(QWidget):
         else:
             self._agent_status_label.setVisible(False)
 
-    # ─── Slash Commands ────────────────────────────────────────────
-
-    def _handle_slash_command(self, text: str) -> bool:
-        """Handle /commands. Returns True if handled."""
-        parts = text.split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1] if len(parts) > 1 else ""
-
-        if cmd == "/clear":
-            self._clear_messages()
-            self._current_conversation = None
-            self._add_system_message("Conversation cleared.")
-            return True
-
-        if cmd == "/new":
-            self._new_conversation()
-            return True
-
-        if cmd == "/model":
-            if arg:
-                # Try to select the requested model
-                for i in range(self._model_combo.count()):
-                    if arg.lower() in self._model_combo.itemText(i).lower():
-                        self._model_combo.setCurrentIndex(i)
-                        self._add_system_message(
-                            f"Switched to model: {self._model_combo.itemText(i).strip()}"
-                        )
-                        return True
-                self._add_system_message(
-                    f"Model '{arg}' not found. Available models are in the dropdown."
-                )
-            else:
-                _, display = self._get_selected_model()
-                self._add_system_message(f"Current model: {display}")
-            return True
-
-        if cmd == "/review":
-            self._run_code_review(arg)
-            return True
-
-        if cmd == "/status":
-            project_root = self._get_project_root()
-            provider_count = (
-                len(self._provider_manager.get_all_providers()) if self._provider_manager else 0
-            )
-            msg_count = (
-                len(self._current_conversation.messages) if self._current_conversation else 0
-            )
-            mcp_servers = self._mcp_client.connected_servers if self._mcp_client else []
-            mcp_tools = len(self._mcp_client.available_tools) if self._mcp_client else 0
-            self._add_system_message(
-                f"**Project:** {project_root or 'None'}\n"
-                f"**Providers:** {provider_count} active\n"
-                f"**Messages:** {msg_count} in current conversation\n"
-                f"**MCP Servers:** {len(mcp_servers)} connected ({mcp_tools} tools)"
-            )
-            return True
-
-        if cmd == "/fix":
-            # Ask AI to fix the last error or a specified issue
-            issue = arg or "the last error or failing test"
-            self._inject_ai_prompt(
-                f"Please analyze and fix: {issue}. Read the relevant files, identify the problem, and propose a fix."
-            )
-            return True
-
-        if cmd == "/test":
-            # Ask AI to run tests and handle failures
-            test_cmd = arg or ""
-            if test_cmd:
-                self._inject_ai_prompt(
-                    f"Run this test command: `{test_cmd}`. If it fails, analyze the output and fix the issues."
-                )
-            else:
-                self._inject_ai_prompt(
-                    "Detect the test framework for this project (pytest, jest, go test, etc.), "
-                    "run the tests, and if any fail, analyze the output and propose fixes."
-                )
-            return True
-
-        if cmd == "/explain":
-            target = arg or "the current project"
-            self._inject_ai_prompt(
-                f"Explain {target} clearly and concisely. Include purpose, key components, and how they fit together."
-            )
-            return True
-
-        if cmd == "/commit":
-            msg = arg or ""
-            if msg:
-                self._inject_ai_prompt(f'Stage all changes and commit with message: "{msg}"')
-            else:
-                self._inject_ai_prompt(
-                    "Look at the current git diff, generate a clear conventional commit message, "
-                    "then stage and commit the changes. Show me the message before committing."
-                )
-            return True
-
-        if cmd == "/git":
-            if arg:
-                self._inject_ai_prompt(f"Run `git {arg}` and show me the output.")
-            else:
-                self._inject_ai_prompt(
-                    "Show me the current git status including branch, staged/unstaged changes, and recent commits."
-                )
-            return True
-
-        if cmd == "/workflow":
-            self._handle_workflow_command(arg)
-            return True
-
-        if cmd == "/help":
-            self._add_system_message(
-                "**Available commands:**\n"
-                "• `/clear` — Clear conversation\n"
-                "• `/new` — Start new conversation\n"
-                "• `/model [name]` — Show or switch model\n"
-                "• `/review [branch]` — Review code changes\n"
-                "• `/fix [issue]` — Fix an error or failing test\n"
-                "• `/test [command]` — Run tests and fix failures\n"
-                "• `/explain [target]` — Explain code or project\n"
-                "• `/commit [message]` — Stage and commit changes\n"
-                "• `/git [command]` — Run a git command\n"
-                "• `/workflow [name] [--key value]` — Run a multi-step workflow\n"
-                "• `/status` — Show session info\n"
-                "• `/help` — Show this help"
-            )
-            return True
-
-        # Unknown slash command — don't consume, let it go as a message
-        return False
-
     def _inject_ai_prompt(self, prompt: str) -> None:
         """Send a prompt to the AI as if the user typed it."""
         self._input.setPlainText(prompt)
@@ -1487,7 +1049,7 @@ class ChatPanel(QWidget):
 
     def _on_send(self) -> None:
         text = self._input.toPlainText().strip()
-        if not text and not self._pending_attachments:
+        if not text and not self._attachments.has_pending():
             return
         if self._streaming:
             return
@@ -1500,7 +1062,7 @@ class ChatPanel(QWidget):
         # Handle slash commands
         if text.startswith("/"):
             self._input.clear()
-            if self._handle_slash_command(text):
+            if handle_slash_command(self, text):
                 return
 
         if not self._provider_manager or not self._provider_manager.has_providers:
@@ -1549,8 +1111,8 @@ class ChatPanel(QWidget):
         attachment_info = []
         message_attachments: list[Attachment] = []
 
-        if self._pending_attachments:
-            for att in self._pending_attachments:
+        if self._attachments.has_pending():
+            for att in self._attachments.pending:
                 attachment_info.append(att)
                 if att["mime_type"].startswith("image/"):
                     # Store as image attachment for vision API
@@ -1626,8 +1188,7 @@ class ChatPanel(QWidget):
                         content += f"\n\n[Attached: {att['filename']}]"
                 else:
                     content += f"\n\n[Attached: {att['filename']} ({att['mime_type']})]"
-            self._pending_attachments.clear()
-            self._update_attach_bar()
+            self._attachments.clear()
 
         user_msg = Message(
             role="user",
@@ -3191,7 +2752,7 @@ class ChatPanel(QWidget):
         """Update button text/state. Stops its own timer on expiry."""
         if self._tool_registry is None or not self._tool_registry.is_bootstrap_active():
             self._bootstrap_btn.setText("  Bootstrap")
-            self._bootstrap_btn.setIcon(self._make_unlock_icon())
+            self._bootstrap_btn.setIcon(chat_icons.make_unlock_icon())
             self._bootstrap_btn.setStyleSheet(
                 f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
                 f"background: {tc.get('bg_input')}; color: #fff; "
@@ -3205,288 +2766,13 @@ class ChatPanel(QWidget):
         remaining = self._tool_registry.bootstrap_seconds_remaining()
         mins, secs = divmod(remaining, 60)
         self._bootstrap_btn.setText(f"  Bootstrap · {mins}:{secs:02d}")
-        self._bootstrap_btn.setIcon(self._make_lock_icon())
+        self._bootstrap_btn.setIcon(chat_icons.make_lock_icon())
         self._bootstrap_btn.setStyleSheet(
             f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
             f"background: {tc.get('accent_warning')}; color: #fff; "
             "border: none; border-radius: 4px; font-weight: 600; }"
         )
 
-    # ── Workflow execution ──────────────────────────────────────────
-
-    def _handle_workflow_command(self, arg: str) -> None:
-        """Handle ``/workflow [name] [--key value ...]``."""
-        from polyglot_ai.core.workflow_engine import (
-            WorkflowLoader,
-            parse_workflow_args,
-            validate_inputs,
-        )
-
-        project_root = self._get_project_root()
-
-        if not arg.strip():
-            # List available workflows
-            workflows = WorkflowLoader.list_workflows(project_root)
-            if not workflows:
-                self._add_system_message(
-                    "No workflows found. Add YAML files to "
-                    "`.polyglot/workflows/` or run `/workflow seed` to "
-                    "create the built-in defaults."
-                )
-                return
-            lines = ["**Available workflows:**"]
-            for wf in workflows:
-                inputs_hint = ""
-                required = [i for i in wf.inputs if i.required]
-                if required:
-                    inputs_hint = " " + " ".join(f"--{i.name} <value>" for i in required)
-                lines.append(f"• `/workflow {wf.slug}{inputs_hint}` — {wf.description}")
-            self._add_system_message("\n".join(lines))
-            return
-
-        if arg.strip() == "seed":
-            if not project_root:
-                self._add_system_message("Open a project first to seed workflows.")
-                return
-            count = WorkflowLoader.seed_defaults(project_root)
-            self._add_system_message(
-                f"Seeded {count} workflow(s) to `.polyglot/workflows/`. "
-                "Run `/workflow` to see the list."
-            )
-            return
-
-        name, inputs = parse_workflow_args(arg)
-        definition, load_error = WorkflowLoader.load(name, project_root)
-        if not definition:
-            msg = f"Workflow '{name}' not found. Run `/workflow` to see available workflows."
-            if load_error:
-                msg = f"Workflow '{name}' could not be loaded: {load_error}"
-            self._add_system_message(msg)
-            return
-
-        ok, filled_inputs, missing = validate_inputs(definition, inputs)
-        if not ok:
-            missing_hints = ", ".join(f"`--{m}`" for m in missing)
-            self._add_system_message(
-                f"Missing required inputs for **{definition.name}**: {missing_hints}\n\n"
-                f"Usage: `/workflow {name} {' '.join(f'--{m} <value>' for m in missing)}`"
-            )
-            return
-
-        self._start_workflow(definition, filled_inputs)
-
-    def _start_workflow(self, definition, inputs: dict[str, str]) -> None:
-        """Kick off a workflow — creates conversation if needed, then runs steps."""
-        if self._workflow_running:
-            self._add_system_message("A workflow is already running.")
-            return
-        if not self._provider_manager or not self._provider_manager.has_providers:
-            self._add_system_message("Please sign in or add an API key first.")
-            return
-
-        full_id, display_model = self._get_selected_model()
-        if not full_id:
-            self._add_system_message("Please select a model from the dropdown.")
-            return
-
-        # Ensure a conversation exists
-        if self._current_conversation is None:
-            self._current_conversation = Conversation(model=full_id or display_model)
-            self._persisted_message_count = 0
-
-        self._welcome.hide()
-        self._workflow_running = True
-
-        # Show workflow start banner
-        input_summary = ", ".join(f"{k}={v}" for k, v in inputs.items())
-        self._add_system_message(
-            f"**⚡ Starting workflow: {definition.name}**\n"
-            f"{definition.description}\n"
-            f"Inputs: {input_summary}\n"
-            f"Steps: {len(definition.steps)}"
-        )
-
-        # Record on active task
-        if hasattr(self, "_task_manager") and self._task_manager:
-            try:
-                self._task_manager.add_note(
-                    "workflow_started",
-                    f"Workflow started: {definition.name}",
-                    data={
-                        "workflow": definition.slug,
-                        "inputs": inputs,
-                        "steps": len(definition.steps),
-                    },
-                    category="workflow",
-                )
-            except Exception:
-                logger.debug("Failed to record workflow_started note", exc_info=True)
-
-        from polyglot_ai.core.async_utils import safe_task
-
-        try:
-            safe_task(
-                self._run_workflow_steps(definition, inputs),
-                name=f"workflow_{definition.slug}",
-                on_error=lambda e: self._on_workflow_error(definition, inputs, e),
-            )
-        except Exception:
-            self._workflow_running = False
-            self._add_system_message("Failed to start workflow.")
-
-    async def _run_workflow_steps(self, definition, inputs: dict[str, str]) -> None:
-        """Execute each workflow step by injecting its prompt and streaming."""
-        from polyglot_ai.core.ai.models import Message
-        from polyglot_ai.core.workflow_engine import render_step_prompt
-
-        completed = 0
-        try:
-            for i, step in enumerate(definition.steps):
-                if not self._workflow_running:
-                    break  # cancelled
-                if self._current_conversation is None:
-                    self._add_system_message("Conversation closed during workflow.")
-                    break
-
-                # Show step header
-                self._add_system_message(f"**Step {i + 1}/{len(definition.steps)}: {step.name}**")
-
-                # Render and inject the step prompt as a user message
-                prompt = render_step_prompt(step, inputs)
-                # Prefix with autonomous instruction so AI doesn't ask for
-                # permission — the user already approved by launching the workflow.
-                prompt = (
-                    "[AUTONOMOUS WORKFLOW MODE — Do NOT ask for permission or "
-                    "confirmation. Execute everything in this step immediately. "
-                    "If something fails, fix it and retry. Never say 'Should I "
-                    "go ahead?' — just do it.]\n\n" + prompt
-                )
-                self._current_conversation.messages.append(Message(role="user", content=prompt))
-                self._add_message_widget("user", prompt)
-
-                # Stream the AI response (reuses full tool-calling loop)
-                await self._stream_response()
-                completed += 1
-
-        except asyncio.CancelledError:
-            self._add_system_message("Workflow cancelled.")
-        except Exception as e:
-            logger.exception("Workflow step failed")
-            self._add_system_message(f"Workflow error at step {completed + 1}: {e}")
-        finally:
-            self._finish_workflow(definition, inputs, completed)
-
-    def _finish_workflow(self, definition, inputs: dict[str, str], steps_completed: int) -> None:
-        """Clean up after workflow completes or fails."""
-        self._workflow_running = False
-        total = len(definition.steps)
-        status = "completed" if steps_completed == total else "partial"
-
-        self._add_system_message(
-            f"**⚡ Workflow finished: {definition.name}** — "
-            f"{steps_completed}/{total} steps {status}"
-        )
-
-        # Record on active task
-        if hasattr(self, "_task_manager") and self._task_manager:
-            try:
-                self._task_manager.add_note(
-                    "workflow_run",
-                    f"Workflow {status}: {definition.name} ({steps_completed}/{total} steps)",
-                    data={
-                        "workflow": definition.slug,
-                        "inputs": inputs,
-                        "steps_completed": steps_completed,
-                        "steps_total": total,
-                        "status": status,
-                    },
-                    category="workflow",
-                )
-            except Exception:
-                logger.debug("Failed to record workflow_run note", exc_info=True)
-
-        # Publish to panel state for AI visibility
-        try:
-            from polyglot_ai.core import panel_state
-
-            panel_state.set_last_workflow_run(
-                {
-                    "workflow": definition.slug,
-                    "name": definition.name,
-                    "status": status,
-                    "steps_completed": steps_completed,
-                    "steps_total": total,
-                    "inputs": inputs,
-                }
-            )
-        except Exception:
-            logger.debug("Failed to publish workflow state", exc_info=True)
-
-    def _on_workflow_error(self, definition, inputs: dict, error: Exception) -> None:
-        """Callback for workflow task failures — ensures cleanup happens."""
-        self._add_system_message(f"Workflow failed: {error}")
-        self._finish_workflow(definition, inputs, 0)
-
-    # ── Icon helpers for header buttons ──────────────────────────────
-
-    @staticmethod
-    def _make_unlock_icon():
-        """White open-padlock icon for the inactive bootstrap button."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        pm = QPixmap(14, 14)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        p.setBrush(QColor(0, 0, 0, 0))
-        # Lock body
-        p.drawRoundedRect(2, 7, 10, 6, 1.5, 1.5)
-        # Open shackle
-        p.drawArc(4, 1, 6, 8, 0, 180 * 16)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _make_lock_icon():
-        """White closed-padlock icon for the active bootstrap button."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        pm = QPixmap(14, 14)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        p.setBrush(QColor(0, 0, 0, 0))
-        # Lock body
-        p.drawRoundedRect(2, 7, 10, 6, 1.5, 1.5)
-        # Closed shackle
-        p.drawArc(4, 2, 6, 8, 0, 180 * 16)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _make_plus_icon():
-        """White plus icon for the new-conversation button."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        pm = QPixmap(14, 14)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(1.8)
-        p.setPen(pen)
-        # Horizontal line
-        p.drawLine(3, 7, 11, 7)
-        # Vertical line
-        p.drawLine(7, 3, 7, 11)
-        p.end()
-        return QIcon(pm)
 
     def prefill_input(self, text: str) -> None:
         """Public API: load text into the chat input box and focus it.
@@ -3542,165 +2828,6 @@ class ChatPanel(QWidget):
     def send_button(self) -> QPushButton:
         return self._send_btn
 
-    # ─── Icon creation (cached) ─────────────────────────────────────
-
-    @staticmethod
-    def _make_toolbar_icon(icon_type: str):
-        """Create white toolbar icons (plus, template, etc.)."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        size = 20
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-
-        if icon_type == "plus":
-            # + icon
-            painter.drawLine(10, 4, 10, 16)
-            painter.drawLine(4, 10, 16, 10)
-        elif icon_type == "search":
-            # Magnifying glass icon
-            from PyQt6.QtCore import QRectF
-
-            painter.drawEllipse(QRectF(3, 3, 10, 10))
-            painter.drawLine(12, 12, 17, 17)
-        elif icon_type == "template":
-            # Document/list icon (three horizontal lines with a corner fold)
-            painter.drawLine(5, 5, 15, 5)
-            painter.drawLine(5, 10, 15, 10)
-            painter.drawLine(5, 15, 12, 15)
-
-        painter.end()
-        return QIcon(pixmap)
-
-    @staticmethod
-    def _create_send_icon():
-        """Up-arrow send icon (dark on light circle, like ChatGPT)."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        size = 18
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#1a1a1a"))
-        pen.setWidthF(2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        # Up arrow: vertical line + chevron
-        p.drawLine(9, 14, 9, 5)
-        p.drawLine(9, 5, 5, 9)
-        p.drawLine(9, 5, 13, 9)
-        p.end()
-        return QIcon(pixmap)
-
-    @staticmethod
-    def _create_menu_icon(icon_type: str):
-        from PyQt6.QtCore import QPointF
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap as QPixmap2
-
-        size = 18
-        pixmap = QPixmap2(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#b0b0b0"))
-        pen.setWidthF(1.3)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        if icon_type == "paperclip":
-            path = QPainterPath()
-            path.moveTo(QPointF(12, 4))
-            path.cubicTo(QPointF(15, 1), QPointF(17, 4), QPointF(14, 7))
-            path.lineTo(QPointF(7, 14))
-            path.cubicTo(QPointF(3, 17), QPointF(1, 14), QPointF(4, 11))
-            path.lineTo(QPointF(10, 5))
-            painter.drawPath(path)
-        elif icon_type == "folder":
-            painter.drawRoundedRect(2, 5, 14, 10, 2, 2)
-            painter.drawRoundedRect(2, 4, 6, 3, 1, 1)
-        elif icon_type == "terminal":
-            painter.drawRoundedRect(2, 3, 14, 12, 2, 2)
-            painter.drawLine(5, 7, 8, 9)
-            painter.drawLine(8, 9, 5, 11)
-            painter.drawLine(10, 12, 14, 12)
-        elif icon_type == "plug":
-            # Plug/connector icon for MCP
-            painter.drawLine(9, 2, 9, 6)
-            painter.drawLine(6, 2, 6, 6)
-            painter.drawRoundedRect(4, 6, 10, 5, 2, 2)
-            painter.drawLine(7, 11, 7, 14)
-            painter.drawLine(10, 11, 10, 14)
-            painter.drawLine(5, 14, 12, 14)
-        elif icon_type == "gear":
-            from PyQt6.QtCore import QRectF
-
-            painter.drawEllipse(QRectF(5, 5, 8, 8))
-            for angle in range(0, 360, 45):
-                import math
-
-                r = 8.5
-                x = 9 + r * math.cos(math.radians(angle))
-                y = 9 + r * math.sin(math.radians(angle))
-                painter.drawLine(9, 9, int(x), int(y))
-
-        painter.end()
-        return QIcon(pixmap)
-
-    @staticmethod
-    def _create_plus_icon() -> str:
-        import tempfile
-
-        cache_dir = tempfile.mkdtemp(prefix="codex_icons_")
-        path = f"{cache_dir}/plus.png"
-        from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap as QPixmap2
-
-        pixmap = QPixmap2(16, 16)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.drawLine(8, 3, 8, 13)
-        painter.drawLine(3, 8, 13, 8)
-        painter.end()
-        pixmap.save(path, "PNG")
-        return path
-
-    @staticmethod
-    def _create_arrow_icon() -> str:
-        import tempfile
-
-        cache_dir = tempfile.mkdtemp(prefix="codex_icons_")
-        path = f"{cache_dir}/arrow.png"
-        from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap as QPixmap2
-
-        pixmap = QPixmap2(12, 12)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.drawLine(2, 4, 6, 8)
-        painter.drawLine(6, 8, 10, 4)
-        painter.end()
-        pixmap.save(path, "PNG")
-        return path
 
     def _open_project_from_menu(self) -> None:
         window = self.window()
@@ -3742,180 +2869,3 @@ class ChatPanel(QWidget):
                 window._action_toggle_terminal.toggle()
         if hasattr(window, "terminal_panel"):
             window.terminal_panel.setFocus()
-
-
-class FileMentionPopup(QWidget):
-    """Popup for @file mention fuzzy search."""
-
-    file_selected = None  # Set by ChatInput
-
-    def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("""
-            QWidget { background: #2d2d2d; border: 1px solid #555; border-radius: 6px; }
-            QListWidget { background: transparent; border: none; color: #d4d4d4;
-                          font-size: 13px; font-family: monospace; }
-            QListWidget::item { padding: 4px 8px; border-radius: 3px; }
-            QListWidget::item:selected { background: #094771; }
-            QListWidget::item:hover { background: #3e3e40; }
-        """)
-        from PyQt6.QtWidgets import QListWidget
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        self._list = QListWidget()
-        self._list.setMaximumHeight(200)
-        self._list.itemActivated.connect(self._on_select)
-        layout.addWidget(self._list)
-        self._files: list[str] = []
-
-    def set_files(self, files: list[str]) -> None:
-        self._files = files
-
-    def update_filter(self, query: str) -> None:
-        self._list.clear()
-        q = query.lower()
-        matches = [f for f in self._files if q in f.lower()][:15]
-        for m in matches:
-            self._list.addItem(m)
-        if matches:
-            self._list.setCurrentRow(0)
-
-    def _on_select(self, item) -> None:
-        if self.file_selected:
-            self.file_selected(item.text())
-        self.hide()
-
-    def select_current(self) -> None:
-        item = self._list.currentItem()
-        if item:
-            self._on_select(item)
-
-    def move_selection(self, delta: int) -> None:
-        row = self._list.currentRow() + delta
-        row = max(0, min(row, self._list.count() - 1))
-        self._list.setCurrentRow(row)
-
-
-class ChatInput(QTextEdit):
-    """Text input with Enter-to-send, drag-drop files, clipboard paste, and @mention."""
-
-    from PyQt6.QtCore import pyqtSignal as _pyqtSignal
-
-    submit_requested = _pyqtSignal()
-    file_dropped = _pyqtSignal(str)
-    image_pasted = _pyqtSignal(QPixmap)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self._mention_popup = FileMentionPopup(self)
-        self._mention_popup.file_selected = self._insert_mention
-        self._mention_start = -1  # cursor pos where @ was typed
-        self._project_files: list[str] = []
-
-    def set_project_files(self, files: list[str]) -> None:
-        """Update available files for @mention."""
-        self._project_files = files
-        self._mention_popup.set_files(files)
-
-    def keyPressEvent(self, event):
-        # Handle mention popup navigation
-        if self._mention_popup.isVisible():
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._mention_popup.select_current()
-                return
-            if event.key() == Qt.Key.Key_Escape:
-                self._mention_popup.hide()
-                return
-            if event.key() == Qt.Key.Key_Down:
-                self._mention_popup.move_selection(1)
-                return
-            if event.key() == Qt.Key.Key_Up:
-                self._mention_popup.move_selection(-1)
-                return
-            if event.key() == Qt.Key.Key_Tab:
-                self._mention_popup.select_current()
-                return
-
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                super().keyPressEvent(event)
-            else:
-                self.submit_requested.emit()
-            return
-
-        super().keyPressEvent(event)
-
-        # Check for @ trigger
-        text = self.toPlainText()
-        cursor_pos = self.textCursor().position()
-        if event.text() == "@" and self._project_files:
-            self._mention_start = cursor_pos
-            self._show_mention_popup("")
-        elif self._mention_popup.isVisible() and self._mention_start >= 0:
-            # Update filter as user types after @
-            if cursor_pos > self._mention_start:
-                query = text[self._mention_start : cursor_pos]
-                self._show_mention_popup(query)
-            else:
-                self._mention_popup.hide()
-
-    def _show_mention_popup(self, query: str) -> None:
-        self._mention_popup.update_filter(query)
-        # Position above the cursor
-        cursor_rect = self.cursorRect()
-        pos = self.mapToGlobal(cursor_rect.topLeft())
-        self._mention_popup.setFixedWidth(min(400, self.width()))
-        self._mention_popup.move(pos.x(), pos.y() - self._mention_popup.sizeHint().height() - 4)
-        self._mention_popup.show()
-
-    def _insert_mention(self, filepath: str) -> None:
-        """Replace @query with @filepath."""
-        cursor = self.textCursor()
-        # Select from @ to current position
-        cursor.setPosition(self._mention_start - 1)  # -1 for the @ char
-        cursor.setPosition(
-            cursor.position() + (self.textCursor().position() - self._mention_start + 1),
-            cursor.MoveMode.KeepAnchor,
-        )
-        cursor.insertText(f"@{filepath} ")
-        self.setTextCursor(cursor)
-        self._mention_start = -1
-
-    def canInsertFromMimeData(self, source):
-        return source.hasImage() or source.hasUrls() or source.hasText()
-
-    def insertFromMimeData(self, source):
-        """Handle paste — images from clipboard, files from drag."""
-        if source.hasImage():
-            image = source.imageData()
-            if image:
-                pixmap = QPixmap.fromImage(image)
-                if not pixmap.isNull():
-                    self.image_pasted.emit(pixmap)
-                    return
-
-        if source.hasUrls():
-            for url in source.urls():
-                if url.isLocalFile():
-                    self.file_dropped.emit(url.toLocalFile())
-            return
-
-        # Fall back to text
-        super().insertFromMimeData(source)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
-                if url.isLocalFile():
-                    self.file_dropped.emit(url.toLocalFile())
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)

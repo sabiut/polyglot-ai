@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from polyglot_ai.constants import EVT_AI_STREAM_CHUNK
 from polyglot_ai.core.ai.models import StreamChunk
-from polyglot_ai.core.ai.provider import AIProvider
+from polyglot_ai.core.ai.provider import AIProvider, ModelListCache
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
-
-_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 
 class OpenAIClient(AIProvider):
@@ -53,8 +50,7 @@ class OpenAIClient(AIProvider):
         self._enable_stream_options = enable_stream_options
         self._reasoning_prefixes = reasoning_prefixes
         self._client = self._make_client(api_key)
-        self._cached_models: list[str] | None = None
-        self._models_cached_at: float = 0.0
+        self._model_cache = ModelListCache(self._default_models, provider_display_name)
 
     def _make_client(self, api_key: str) -> AsyncOpenAI:
         kwargs = {"api_key": api_key, "timeout": 120}
@@ -74,21 +70,13 @@ class OpenAIClient(AIProvider):
         self._client = self._make_client(api_key)
 
     async def list_models(self) -> list[str]:
-        now = time.time()
-        if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
-            return list(self._cached_models)
-        try:
+        async def _fetch() -> list[str]:
             response = await self._client.models.list()
-            models = [
+            return [
                 m.id for m in response.data if any(m.id.startswith(p) for p in self._model_filter)
             ]
-            result = sorted(models) if models else list(self._default_models)
-            self._cached_models = result
-            self._models_cached_at = now
-            return list(result)
-        except Exception:
-            logger.exception("Failed to list %s models", self._provider_display_name)
-            return list(self._default_models)
+
+        return await self._model_cache.get(_fetch)
 
     async def stream_chat(
         self,
@@ -171,10 +159,4 @@ class OpenAIClient(AIProvider):
             yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:
-        try:
-            await self._client.models.list()
-            return True, "Connection successful"
-        except Exception as e:
-            from polyglot_ai.core.security import sanitize_error
-
-            return False, sanitize_error(str(e))
+        return await self._test_connection_via_list(self._client.models.list)

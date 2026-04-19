@@ -1,0 +1,43 @@
+# Pre-commit hooks — run `pre-commit install` once in the repo to enable.
+#
+# What runs:
+#   * ruff (lint) and ruff-format (auto-format) on changed .py files
+#   * basic hygiene hooks (trailing whitespace, end-of-file, merge conflict
+#     markers, accidental case-collision filenames, large files)
+#   * a pytest gate on push that runs the core test suite (skipped on commit
+#     to keep the inner loop fast)
+#
+# Rationale: match the CI stack (ruff is already the project formatter;
+# pytest is the only gate on main). Push-stage pytest catches regressions
+# before they reach the CI queue without slowing down every `git commit`.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (core suite)
+        entry: .venv/bin/python -m pytest tests/core -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

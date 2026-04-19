@@ -802,8 +802,29 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
         import keyring
 
         data = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            logger.error(
+                "MCP config %s: top level must be an object, got %s",
+                config_path,
+                type(data).__name__,
+            )
+            return []
+        raw_servers = data.get("servers", {})
+        if not isinstance(raw_servers, dict):
+            logger.error(
+                "MCP config %s: 'servers' must be an object, got %s",
+                config_path,
+                type(raw_servers).__name__,
+            )
+            return []
+
         servers = []
-        for name, cfg in data.get("servers", {}).items():
+        for name, cfg in raw_servers.items():
+            ok, reason = _validate_server_entry(name, cfg)
+            if not ok:
+                logger.warning("MCP config: skipping server %r — %s", name, reason)
+                continue
+
             env = cfg.get("env") or {}
             # Restore secrets from keyring
             for k, v in env.items():
@@ -814,7 +835,7 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
                 MCPServerConfig(
                     name=name,
                     command=cfg.get("command", ""),
-                    args=cfg.get("args", []),
+                    args=list(cfg.get("args", [])),
                     env=env,
                     enabled=cfg.get("enabled", True),
                 )
@@ -825,3 +846,53 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
 
         logger.error("Failed to load MCP config from %s: %s", config_path, sanitize_error(str(e)))
         return []
+
+
+def _validate_server_entry(name: object, cfg: object) -> tuple[bool, str]:
+    """Shape-check a single server entry from ``mcp_servers.json``.
+
+    Returns ``(True, "")`` when the entry is safe to instantiate, or
+    ``(False, reason)`` with a human-readable explanation. The load
+    path uses the reason for the warning log so users can diagnose a
+    malformed config without hunting through code.
+
+    Rules:
+    * ``name`` must be a non-empty string.
+    * ``cfg`` must be an object (dict).
+    * ``command`` must be a non-empty string.
+    * ``args`` (optional) must be a list of strings — a bare string
+      would be shell-split by ``stdio_client`` and open an injection
+      surface the caller didn't intend.
+    * ``env`` (optional) must be null or a dict of string→string.
+    * ``enabled`` (optional) must be a bool.
+    """
+    if not isinstance(name, str) or not name.strip():
+        return False, "server name must be a non-empty string"
+    if not isinstance(cfg, dict):
+        return False, f"expected object, got {type(cfg).__name__}"
+
+    command = cfg.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return False, "'command' must be a non-empty string"
+
+    args = cfg.get("args", [])
+    if not isinstance(args, list):
+        return False, f"'args' must be a list, got {type(args).__name__}"
+    for i, a in enumerate(args):
+        if not isinstance(a, str):
+            return False, f"'args[{i}]' must be a string, got {type(a).__name__}"
+
+    env = cfg.get("env")
+    if env is not None:
+        if not isinstance(env, dict):
+            return False, f"'env' must be an object, got {type(env).__name__}"
+        for k, v in env.items():
+            if not isinstance(k, str):
+                return False, f"env key {k!r} must be a string"
+            if not isinstance(v, str):
+                return False, f"env value for {k!r} must be a string, got {type(v).__name__}"
+
+    if "enabled" in cfg and not isinstance(cfg["enabled"], bool):
+        return False, f"'enabled' must be a bool, got {type(cfg['enabled']).__name__}"
+
+    return True, ""

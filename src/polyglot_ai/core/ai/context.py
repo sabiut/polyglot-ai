@@ -468,7 +468,9 @@ class ContextBuilder:
                 detections.append("  Lock: yarn.lock (yarn)")
             elif (root / "pnpm-lock.yaml").exists():
                 detections.append("  Lock: pnpm-lock.yaml (pnpm)")
-            # Check scripts
+            # Check scripts. Malformed package.json or an unreadable file
+            # shouldn't break project detection — skip quietly but leave
+            # a debug trail so misconfigured projects are diagnosable.
             try:
                 import json as _json
 
@@ -482,8 +484,9 @@ class ContextBuilder:
                     detections.append(f"  Dev: npm run dev ({scripts['dev'][:60]})")
                 if "lint" in scripts:
                     detections.append(f"  Lint: npm run lint ({scripts['lint'][:60]})")
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                # OSError: unreadable file. ValueError: json.JSONDecodeError subclass.
+                logger.debug("Could not parse package.json scripts: %s", exc)
 
         # Go
         if (root / "go.mod").exists():
@@ -627,7 +630,12 @@ class ContextBuilder:
                 header = f"\n=== {rel} ===\n"
                 parts.append(header + content)
                 total_chars += len(header) + len(content)
-            except Exception:
+            except (OSError, ValueError) as exc:
+                # OSError covers permission/missing/IO. ValueError covers
+                # relative_to() when a symlink escapes the project root.
+                # Skip the file but log at debug so "why isn't this file
+                # in context?" is answerable from the logs.
+                logger.debug("Skipping %s from context: %s", file_path, exc)
                 continue
 
         return "\n".join(parts)
@@ -655,12 +663,20 @@ class ContextBuilder:
         return files
 
     def read_file(self, rel_path: str) -> str | None:
-        """Read a specific file from the project."""
+        """Read a specific file from the project.
+
+        Returns None on any failure (missing file, permission, symlink
+        escaping the project root). The narrow catch — OSError for I/O
+        and ValueError for ``relative_to`` rejection — replaces a bare
+        ``Exception`` so programming errors (e.g. TypeError from a bad
+        caller) aren't silently swallowed.
+        """
         if not self._project_root:
             return None
         try:
             full = (self._project_root / rel_path).resolve()
             full.relative_to(self._project_root.resolve())
             return full.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except (OSError, ValueError) as exc:
+            logger.debug("read_file(%s) failed: %s", rel_path, exc)
             return None

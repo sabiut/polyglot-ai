@@ -158,7 +158,7 @@ steps:
           page.wait_for_url("**/dashboard")
           return page
 
-      def test_{{test_name}}(authenticated_page: Page):
+      def test_<safe_name>(authenticated_page: Page):  # replace <safe_name> with the sanitized name
           page = authenticated_page
           # ... test steps
       ```
@@ -207,6 +207,28 @@ steps:
       Set up the test project properly and save the enhanced test.
       Do NOT ask the user for permission at any point. Just execute everything.
 
+      ### Step 0: Normalize the test name (IMPORTANT)
+      The raw input was: ``{{test_name}}``
+
+      Python module names must be lowercase, contain only
+      ``[a-z0-9_]``, and not start with a digit. Before using the
+      name in any file path, compute a safe variant:
+
+      1. Lowercase the input
+      2. Replace every run of non-alphanumeric characters with a single ``_``
+      3. Strip leading/trailing ``_``
+      4. If the result starts with a digit, prefix with ``t_``
+      5. If the result is empty, use ``recorded``
+
+      Examples:
+        ``"My Login Test!"`` → ``my_login_test``
+        ``"Checkout Flow v2"`` → ``checkout_flow_v2``
+        ``"2-factor auth"`` → ``t_2_factor_auth``
+
+      Call this value ``<safe_name>``. Use it everywhere in the steps
+      below in place of ``{{test_name}}`` for file names. For human-
+      facing text (summaries, banners) keep the original name.
+
       ### Step 1: Check for conftest.py
       Use file_read to try reading `tests/conftest.py`.
       If it does not exist, use file_write to create it with this content:
@@ -254,7 +276,10 @@ steps:
       If not, use shell_exec to create it:
       - command: "mkdir -p tests"
 
-      Use file_write to save the enhanced test as: `tests/test_{{test_name}}.py`
+      Use file_write to save the enhanced test as:
+      ``tests/test_<safe_name>.py`` (use the sanitized name from Step 0).
+      If a file with that name already exists, back it up first:
+      ``shell_exec: "mv tests/test_<safe_name>.py tests/test_<safe_name>.py.bak"``
 
       ### Step 4: Ensure virtualenv exists and install dependencies
       This is MANDATORY. Do NOT ask the user — just do it.
@@ -272,9 +297,10 @@ steps:
 
       Do NOT skip this. Do NOT ask for confirmation.
 
-      ### Step 5: Delete raw recording
-      Use shell_exec to delete the temporary file:
-      - command: "rm recorded-test-raw.txt"
+      ### Step 5: (DO NOT delete the raw recording yet)
+      Keep ``recorded-test-raw.txt`` on disk for now — the next step
+      (Validate) may need to diff the enhanced test against the raw
+      recording if replay fails. Cleanup happens after the test passes.
 
       Tell the user what was created and move on.
 
@@ -285,24 +311,39 @@ steps:
       ### Step 1: Load environment variables
       Use file_read to read `env.sh` if it exists. Look for any exported variables
       like TEST_USER, TEST_PASS, TEST_BASE_URL, PMS_USERNAME, PMS_PASSWORD, etc.
-      Remember these values — you'll need them in Step 2.
-
-      If env.sh has credentials, set them in the test command's environment.
+      Remember the NAMES (not the values) — you'll need them in Step 2.
 
       ### Step 2: Run the test
       Do NOT ask the user for permission. Just run it.
 
       Use shell_exec with:
-      - command: ".venv/bin/python -m pytest tests/test_{{test_name}}.py --headed --tb=long -v"
+      - command: "bash -c 'source env.sh 2>/dev/null; .venv/bin/python -m pytest tests/test_<safe_name>.py --headed --tb=long -v'"  # <safe_name> from Step 0
       - timeout: 120
 
-      If env variables are needed and the test fails because of missing credentials,
-      read the test file, check what env vars it expects, and update the test to
-      use the values from env.sh as defaults directly in the code (not as env vars).
+      The ``source env.sh`` prefix loads the user's environment without
+      having to hardcode anything. If ``env.sh`` doesn't exist the
+      ``2>/dev/null`` suppresses the error and pytest still runs with
+      the regular environment.
+
+      SECURITY — if the test fails because of missing credentials:
+      - Do NOT write credentials into the test file or any committed code.
+      - Do NOT hardcode values from ``env.sh`` into the Python source.
+      - Instead: tell the user which env vars are missing and how to
+        add them to ``env.sh`` (which should already be gitignored).
+      - If you must create ``env.sh``, use file_write with placeholder
+        values (e.g. ``TEST_USER=""``) and remind the user to fill
+        them in — never put real secrets in the workflow output.
 
       ### Step 2: Analyze the result
 
-      **If the test PASSED:** Tell the user and skip to the summary.
+      **If the test PASSED:**
+      - Delete the raw recording with shell_exec:
+        ``command: "rm -f recorded-test-raw.txt"``
+      - Tell the user and skip to the summary.
+
+      If the test still fails after 3 attempts, LEAVE
+      ``recorded-test-raw.txt`` on disk so the user can diff the
+      enhanced test against the original recording.
 
       **If the test FAILED:** You MUST fix it. Read the full error traceback carefully:
 
@@ -335,19 +376,19 @@ steps:
 
       ## Test Result
       **Status:** ✅ PASSED (or ❌ FAILED after 3 attempts)
-      **File:** tests/test_{{test_name}}.py
+      **File:** tests/test_<safe_name>.py  (replace <safe_name> with the Step 0 value)
       **Attempts:** [N]
 
       ### How to run
       ```bash
       # Headed (see the browser)
-      pytest tests/test_{{test_name}}.py --headed
+      pytest tests/test_<safe_name>.py --headed
 
       # Headless (CI mode)
-      pytest tests/test_{{test_name}}.py
+      pytest tests/test_<safe_name>.py
 
       # With slow motion for debugging
-      pytest tests/test_{{test_name}}.py --headed --slowmo 500
+      pytest tests/test_<safe_name>.py --headed --slowmo 500
       ```
 
       ### Environment variables needed

@@ -104,13 +104,16 @@ class MainWindow(QMainWindow):
         self._right_tabs.setTabPosition(QTabWidget.TabPosition.North)
         from polyglot_ai.ui import theme_colors as tc
 
+        # Tab bar kept deliberately slim: 5px vertical padding + FONT_SM
+        # gives roughly 24px row height so the bar stops competing with
+        # the panel content for vertical real estate.
         self._right_tabs.setStyleSheet(f"""
             QTabWidget::pane {{ border: none; }}
             QTabBar::tab {{
                 background: {tc.get("bg_surface")}; color: {tc.get("text_tertiary")};
-                padding: 8px 16px; border: none;
+                padding: 5px 10px; border: none;
                 border-bottom: 2px solid transparent;
-                font-size: {tc.FONT_MD}px; font-weight: 600;
+                font-size: {tc.FONT_SM}px; font-weight: 600;
             }}
             QTabBar::tab:selected {{
                 color: {tc.get("text_heading")}; border-bottom: 2px solid {tc.get("accent_primary")};

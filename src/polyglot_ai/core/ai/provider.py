@@ -3,14 +3,55 @@
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
-from polyglot_ai.constants import EVT_AI_ERROR, EVT_AI_STREAM_DONE
+from polyglot_ai.constants import EVT_AI_ERROR, EVT_AI_STREAM_CHUNK, EVT_AI_STREAM_DONE
 from polyglot_ai.core.ai.models import StreamChunk
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
+
+_MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
+
+
+class ModelListCache:
+    """TTL cache for ``list_models`` results with fallback to defaults.
+
+    All three providers had copy-pasted the same cache-and-fallback
+    logic around their SDK's list-models call. That pattern lives here
+    now so a behaviour change (e.g. cache TTL, logging format) only has
+    to happen in one place. The per-provider differences — filtering,
+    sorting, id normalisation — stay in the caller's ``fetcher``.
+    """
+
+    def __init__(self, defaults: list[str], display_name: str) -> None:
+        self._defaults = list(defaults)
+        self._display_name = display_name
+        self._cached: list[str] | None = None
+        self._cached_at: float = 0.0
+
+    async def get(self, fetcher: Callable[[], Awaitable[list[str]]]) -> list[str]:
+        """Return cached models, or fetch fresh ones via ``fetcher``.
+
+        On any exception the defaults are returned — same behaviour as
+        the original per-provider code. The fetcher is responsible for
+        filtering to provider-relevant IDs; this helper only adds
+        sorting and fallback.
+        """
+        now = time.time()
+        if self._cached and (now - self._cached_at) < _MODEL_CACHE_TTL:
+            return list(self._cached)
+        try:
+            fetched = await fetcher()
+            result = sorted(fetched) if fetched else list(self._defaults)
+            self._cached = result
+            self._cached_at = now
+            return list(result)
+        except Exception:
+            logger.exception("Failed to list %s models", self._display_name)
+            return list(self._defaults)
 
 
 class AIProvider(ABC):
@@ -68,7 +109,64 @@ class AIProvider(ABC):
         """Emit EVT_AI_STREAM_DONE."""
         self._event_bus.emit(EVT_AI_STREAM_DONE)
 
-    def _test_connection_via_models(self, client) -> tuple[bool, str]:
-        """Common test_connection pattern shared by OpenAI-compatible providers."""
-        # This is a sync helper; callers should await the actual models.list()
-        raise NotImplementedError("Use in async context")
+    async def _test_connection_via_list(
+        self, list_fn: Callable[[], Awaitable[object]]
+    ) -> tuple[bool, str]:
+        """Standard connection test: call ``list_fn`` and report result.
+
+        Used by every provider — list models (or anything cheap) and
+        translate success/failure into the ``(ok, message)`` tuple the
+        UI expects. Error messages are routed through ``sanitize_error``
+        so API keys or endpoints can't leak into user-visible strings.
+        """
+        try:
+            await list_fn()
+            return True, "Connection successful"
+        except Exception as e:
+            from polyglot_ai.core.security import sanitize_error
+
+            return False, sanitize_error(str(e))
+
+    def _emit_text_delta(self, text: str) -> StreamChunk:
+        """Build a text-delta chunk and emit ``EVT_AI_STREAM_CHUNK``.
+
+        Every provider needs to do both together — the UI subscribes to
+        the event for incremental rendering, and the loop consumes the
+        yielded chunk for accumulation. Doing this in one place
+        prevents the "provider forgot to emit" bug class.
+        """
+        self._event_bus.emit(EVT_AI_STREAM_CHUNK, content=text)
+        return StreamChunk(delta_content=text)
+
+    @staticmethod
+    def _tool_call_start_chunk(index: int, call_id: str, name: str) -> StreamChunk:
+        """Canonical shape for the opening chunk of a tool call.
+
+        ``id`` and ``name`` are set here; subsequent argument fragments
+        use :meth:`_tool_call_args_chunk` with ``id=None``/``name=None``.
+        Centralising the shape prevents the concat-bug class where a
+        provider accidentally re-emits the id on later chunks and
+        downstream reassembly double-counts it.
+        """
+        return StreamChunk(
+            tool_calls=[
+                {
+                    "index": index,
+                    "id": call_id,
+                    "function": {"name": name, "arguments": ""},
+                }
+            ]
+        )
+
+    @staticmethod
+    def _tool_call_args_chunk(index: int, args_fragment: str) -> StreamChunk:
+        """Canonical shape for a tool-call argument continuation chunk."""
+        return StreamChunk(
+            tool_calls=[
+                {
+                    "index": index,
+                    "id": None,
+                    "function": {"name": None, "arguments": args_fragment},
+                }
+            ]
+        )
