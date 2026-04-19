@@ -7,6 +7,20 @@ from dataclasses import dataclass
 import pyte
 
 
+def _line_to_str(line, columns: int) -> str:
+    """Flatten one pyte line (column-indexed dict or full row) to text.
+
+    Both the visible screen buffer (``screen.buffer[row]``) and
+    historical lines (``screen.history.top`` entries) expose a
+    column-keyed mapping where missing columns represent spaces.
+    """
+    parts: list[str] = []
+    for col in range(columns):
+        char_data = line[col] if col in line else None
+        parts.append(char_data.data if (char_data and char_data.data) else " ")
+    return "".join(parts)
+
+
 @dataclass
 class Cell:
     char: str
@@ -16,6 +30,25 @@ class Cell:
     italics: bool
     underscore: bool
     reverse: bool
+
+
+class _BellCountingScreen(pyte.HistoryScreen):
+    """HistoryScreen that counts real bells.
+
+    We used to pre-scan incoming bytes for ``\\x07``, but that's wrong:
+    bash's ``PROMPT_COMMAND`` sets the terminal title with
+    ``\\e]0;<title>\\x07``, where the ``\\x07`` is an OSC string
+    terminator, not an audible bell. Pyte's parser handles that case
+    internally and only calls ``bell()`` for a true standalone BEL —
+    which is exactly what we want to flash on.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.bell_count = 0
+
+    def bell(self) -> None:  # type: ignore[override]
+        self.bell_count += 1
 
 
 class TerminalEmulator:
@@ -43,7 +76,7 @@ class TerminalEmulator:
     }
 
     def __init__(self, rows: int = 24, cols: int = 80) -> None:
-        self._screen = pyte.HistoryScreen(cols, rows, history=5000)
+        self._screen = _BellCountingScreen(cols, rows, history=5000)
         self._screen.set_mode(pyte.modes.LNM)
         self._stream = pyte.Stream(self._screen)
         self._dirty = True
@@ -54,6 +87,17 @@ class TerminalEmulator:
         text = data.decode("utf-8", errors="replace")
         self._stream.feed(text)
         self._dirty = True
+
+    @property
+    def bell_count(self) -> int:
+        """Monotonically-increasing count of BEL characters received.
+
+        Widgets poll this alongside ``dirty`` to trigger a visual bell
+        when the value changes. Only standalone BEL characters count —
+        OSC string terminators (like ``\\e]0;title\\x07``) are
+        consumed by pyte's parser and do NOT advance this counter.
+        """
+        return self._screen.bell_count
 
     def get_lines(self) -> list[list[Cell]]:
         """Get the visible screen state as a grid of Cells.
@@ -150,6 +194,26 @@ class TerminalEmulator:
         """Resize the terminal screen."""
         self._screen.resize(rows, cols)
         self._dirty = True
+
+    def get_all_text(self) -> str:
+        """Return the full buffer — scrollback history + visible rows — as plain text.
+
+        Trailing blank lines are stripped so the result pastes cleanly.
+        Used by "Copy everything" actions where the visible selection
+        model (tied to screen rows) can't address historical lines.
+        """
+        rows: list[str] = []
+
+        for hist_line in self._screen.history.top:
+            rows.append(_line_to_str(hist_line, self._screen.columns).rstrip())
+
+        for row in range(self._screen.lines):
+            line = self._screen.buffer[row]
+            rows.append(_line_to_str(line, self._screen.columns).rstrip())
+
+        while rows and not rows[-1]:
+            rows.pop()
+        return "\n".join(rows)
 
     @property
     def dirty(self) -> bool:

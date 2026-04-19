@@ -170,10 +170,17 @@ def wire_project_events(
             window.statusBar().showMessage("Indexing project...")
             safe_task(_build_index(), name="build_index")
 
-        # Restart terminal in project dir
+        # Move the terminal into the new project directory. If a shell
+        # is already running, send ``cd`` instead of tearing it down —
+        # preserves scrollback, history, and any running processes the
+        # user had going. If no shell is running yet, start one fresh.
         terminal = window.terminal_panel
-        terminal.stop_terminal()
-        terminal.start_terminal(event_bus, shell=settings.get("terminal.shell"), cwd=project_path)
+        if terminal._pty and terminal._pty.is_running:
+            terminal.cd_to(project_path)
+        else:
+            terminal.start_terminal(
+                event_bus, shell=settings.get("terminal.shell"), cwd=project_path
+            )
         logger.info("Tools enabled for project: %s", path)
 
     event_bus.subscribe("project:opened", _on_project_opened)

@@ -47,10 +47,27 @@ class PtyProcess:
         pid, fd = pty.fork()
 
         if pid == 0:
-            # Child process
-            if cwd:
-                os.chdir(str(cwd))
-            os.execvpe(shell, [shell], env)
+            # Child process. Any exception here must end in _exit(), not
+            # raise — raising would let the Python runtime try to run
+            # cleanup that's meant to run in the parent. Print a clear
+            # error first so the user sees why the terminal is empty.
+            try:
+                if cwd:
+                    os.chdir(str(cwd))
+                os.execvpe(shell, [shell], env)
+            except FileNotFoundError:
+                os.write(
+                    2,
+                    f"\x1b[31mShell not found: {shell}\x1b[0m\r\n"
+                    "Check Settings → Terminal, or install the shell.\r\n".encode(),
+                )
+                os._exit(127)
+            except OSError as exc:
+                os.write(
+                    2,
+                    f"\x1b[31mFailed to start shell '{shell}': {exc}\x1b[0m\r\n".encode(),
+                )
+                os._exit(126)
         else:
             # Parent process
             self._master_fd = fd
