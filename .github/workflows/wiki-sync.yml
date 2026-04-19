@@ -1,0 +1,65 @@
+name: Sync wiki/ to GitHub Wiki
+
+# Keep the in-repo ``wiki/`` folder and the GitHub Wiki
+# (``<repo>.wiki.git``) in lock-step. The repo is the source of
+# truth; the wiki mirror is just a published view so the pages render
+# at github.com/<owner>/<repo>/wiki. Without this job, every edit to
+# wiki/ has to be manually ``git clone``-d, copied, committed, and
+# pushed to a second repository — which was how the two fell out of
+# sync before v0.10.0.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wiki/**'
+      - '.github/workflows/wiki-sync.yml'
+  workflow_dispatch:  # manual trigger — useful to backfill after the first install
+
+permissions:
+  contents: write  # needed so GITHUB_TOKEN can push to <repo>.wiki.git
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo (sparse — only wiki/)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            wiki
+          sparse-checkout-cone-mode: false
+
+      - name: Clone the GitHub Wiki repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" \
+            wiki-publish
+
+      - name: Mirror wiki/ into the wiki repo (excluding .git)
+        run: |
+          # --delete so that deleting a page in wiki/ also removes it
+          # from the published wiki. --exclude=.git protects the wiki
+          # repo's git metadata. Trailing slash on the source is load-
+          # bearing — it tells rsync to copy the CONTENTS, not the
+          # wiki/ directory itself.
+          rsync -a --delete --exclude='.git' wiki/ wiki-publish/
+
+      - name: Commit and push (no-op if nothing changed)
+        working-directory: wiki-publish
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki is already in sync — nothing to publish."
+            exit 0
+          fi
+          # Reference the source commit so the published wiki history
+          # points back to the engineering change that caused it.
+          git commit -m "Sync from main @ ${GITHUB_SHA::7}
+
+          Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          git push origin HEAD:master
