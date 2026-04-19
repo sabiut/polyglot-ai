@@ -130,10 +130,12 @@ class ResultChartWidget(QWidget):
     @staticmethod
     def _combo_style() -> str:
         # Reuse the same chevron-arrow style as the rest of the database
-        # panel so all dropdowns look identical.
-        from polyglot_ai.ui.panels.database_panel import _combo_dropdown_style
+        # panel so all dropdowns look identical. The helper now lives in
+        # database_dialogs (extracted from the panel monolith), under the
+        # public name ``combo_dropdown_style``.
+        from polyglot_ai.ui.panels.database_dialogs import combo_dropdown_style
 
-        return _combo_dropdown_style()
+        return combo_dropdown_style()
 
     # ── Public API ──────────────────────────────────────────────────
 

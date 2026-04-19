@@ -7,12 +7,16 @@ import logging
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtCore import QRectF
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QIcon
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels.git_dialogs import (
+    prompt_branch_name,
+    show_message,
+    validate_branch_name,
+)
+from polyglot_ai.ui.panels.git_icons import draw_branch_icon, draw_refresh_icon
 
 from PyQt6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -87,11 +91,11 @@ class GitPanel(QWidget):
         # Header buttons — painted QPixmap icons with per-button style
         # (parent QPushButton rules don't apply to objectName'd widgets
         # that set their own stylesheet). Same pattern as mcp_sidebar.
-        branch_btn = self._icon_button(self._draw_branch_icon(), "Create new branch")
+        branch_btn = self._icon_button(draw_branch_icon(), "Create new branch")
         branch_btn.clicked.connect(self._on_new_branch)
         header_layout.addWidget(branch_btn)
 
-        refresh_btn = self._icon_button(self._draw_refresh_icon(), "Refresh")
+        refresh_btn = self._icon_button(draw_refresh_icon(), "Refresh")
         refresh_btn.clicked.connect(self._refresh)
         header_layout.addWidget(refresh_btn)
 
@@ -276,42 +280,6 @@ class GitPanel(QWidget):
             "#gitHdrBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
         )
         return btn
-
-    def _draw_refresh_icon(self) -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
-        p.drawLine(12, 2, 12, 6)
-        p.drawLine(12, 6, 8, 6)
-        p.end()
-        return QIcon(pm)
-
-    def _draw_branch_icon(self) -> QIcon:
-        """Simple Git-style branch glyph: two parallel dots joined by a fork."""
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        # Trunk
-        p.drawLine(5, 3, 5, 13)
-        # Branch
-        p.drawLine(5, 7, 11, 10)
-        p.drawLine(11, 10, 11, 13)
-        # Node dots
-        p.setBrush(QColor("#cccccc"))
-        p.drawEllipse(3, 2, 4, 4)
-        p.drawEllipse(3, 12, 4, 4)
-        p.drawEllipse(9, 9, 4, 4)
-        p.end()
-        return QIcon(pm)
 
     def set_project_root(self, path: Path) -> None:
         self._project_root = path
@@ -518,7 +486,7 @@ class GitPanel(QWidget):
                 await self._run_git("checkout", target)
             except Exception as e:
                 logger.exception("git_panel: checkout %s failed", target)
-                _show_message(self, "Checkout failed", str(e), kind="error")
+                show_message(self, "Checkout failed", str(e), kind="error")
                 return
             self._task_branch_hint = None
             self._update_task_hint_label()
@@ -559,7 +527,7 @@ class GitPanel(QWidget):
     def _on_generate_pr(self) -> None:
         """Kick off AI PR summary generation on a background task."""
         if self._project_root is None:
-            _show_message(
+            show_message(
                 self,
                 "No project",
                 "Open a project first before generating a PR description.",
@@ -567,7 +535,7 @@ class GitPanel(QWidget):
             )
             return
         if self._review_engine is None:
-            _show_message(
+            show_message(
                 self,
                 "PR generator unavailable",
                 "Review engine is not wired. This is a setup bug — please report it.",
@@ -596,7 +564,7 @@ class GitPanel(QWidget):
         except Exception as e:
             logger.exception("git_panel: failed to get branch diff")
             self._reset_pr_button()
-            _show_message(
+            show_message(
                 self,
                 "Could not read git diff",
                 f"Failed to run `git diff` against main/master:\n\n{e}",
@@ -606,7 +574,7 @@ class GitPanel(QWidget):
 
         if not diff.strip():
             self._reset_pr_button()
-            _show_message(
+            show_message(
                 self,
                 "Nothing to summarise",
                 "No changes found between this branch and main/master. "
@@ -624,7 +592,7 @@ class GitPanel(QWidget):
         except Exception as e:
             logger.exception("git_panel: PR summary generation crashed")
             self._reset_pr_button()
-            _show_message(
+            show_message(
                 self,
                 "PR generation failed",
                 f"The AI request crashed:\n\n{e}",
@@ -677,7 +645,7 @@ class GitPanel(QWidget):
         equivalent to plain ``git push``.
         """
         if self._project_root is None:
-            _show_message(self, "No project", "Open a project first.", kind="info")
+            show_message(self, "No project", "Open a project first.", kind="info")
             return
         self._push_btn.setEnabled(False)
         self._push_btn.setText("⇡ Pushing…")
@@ -690,7 +658,7 @@ class GitPanel(QWidget):
             branch = (await self._run_git("branch", "--show-current")).strip()
             if not branch:
                 self._reset_push_button()
-                _show_message(
+                show_message(
                     self,
                     "Detached HEAD",
                     "You are not on a branch. Check out a branch before pushing.",
@@ -701,7 +669,7 @@ class GitPanel(QWidget):
         except Exception as e:
             logger.exception("git_panel: push failed")
             self._reset_push_button()
-            _show_message(self, "Push failed", str(e), kind="error")
+            show_message(self, "Push failed", str(e), kind="error")
             return
         self._reset_push_button()
         # Record on the active task so the timeline shows when the
@@ -718,7 +686,7 @@ class GitPanel(QWidget):
                     self._task_manager.update_active(branch=branch)
             except Exception:
                 logger.exception("git_panel: could not record push on task")
-        _show_message(
+        show_message(
             self,
             "Push succeeded",
             f"Pushed branch '{branch}' to origin.",
@@ -732,23 +700,23 @@ class GitPanel(QWidget):
     def _on_new_branch(self) -> None:
         """Prompt for a branch name and run `git checkout -b <name>`."""
         if self._project_root is None:
-            _show_message(
+            show_message(
                 self,
                 "No project",
                 "Open a project before creating a branch.",
                 kind="info",
             )
             return
-        name = _prompt_branch_name(self)
+        name = prompt_branch_name(self)
         if not name:
             return
 
         # Validate the name client-side so the user gets a friendly
         # error instead of git's cryptic "fatal: '<name>' is not a
         # valid branch name". Mirrors the rules from `git check-ref-format`.
-        invalid_reason = _validate_branch_name(name)
+        invalid_reason = validate_branch_name(name)
         if invalid_reason:
-            _show_message(
+            show_message(
                 self,
                 "Invalid branch name",
                 f"'{name}' is not a valid git branch name.\n\n{invalid_reason}",
@@ -773,7 +741,7 @@ class GitPanel(QWidget):
                 await self._run_git("checkout", "-b", name)
             except Exception as e:
                 logger.exception("git_panel: branch creation failed")
-                _show_message(self, "Branch creation failed", str(e), kind="error")
+                show_message(self, "Branch creation failed", str(e), kind="error")
                 return
             logger.info("git_panel: created branch %s", name)
             self._refresh()
@@ -1029,7 +997,7 @@ class GitPanel(QWidget):
             # cryptic commit failure (pre-commit hook crash, IO error,
             # signing failure) is possible from the logs.
             logger.exception("git_panel: commit failed")
-            _show_message(self, "Commit failed", str(e), kind="error")
+            show_message(self, "Commit failed", str(e), kind="error")
 
     def _record_commit_on_task(self, message: str, files: list[str]) -> None:
         """Append a 'committed' note to the active task and merge files
@@ -1097,166 +1065,3 @@ class GitPanel(QWidget):
         if args[0] in ("add", "restore"):
             QTimer.singleShot(200, self._refresh)
         return output
-
-
-def _prompt_branch_name(parent: QWidget) -> str:
-    """Show a custom-styled input dialog for a new branch name.
-
-    Replaces the native QInputDialog which picks up the OS GTK theme
-    (red/green emoji icons on some KDE/GNOME setups) and looks out of
-    place against the dark IDE theme.
-    """
-    dlg = QDialog(parent)
-    dlg.setWindowTitle("New branch")
-    dlg.setModal(True)
-    dlg.setMinimumWidth(360)
-    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
-
-    layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 14)
-    layout.setSpacing(10)
-
-    lbl = QLabel("Branch name:")
-    lbl.setStyleSheet("color: #ccc; font-size: 12px; font-weight: 600; background: transparent;")
-    layout.addWidget(lbl)
-
-    field = QLineEdit("feat/")
-    field.setStyleSheet(
-        "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-        "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
-        "QLineEdit:focus { border-color: #0e639c; }"
-    )
-    layout.addWidget(field)
-
-    hint = QLabel("Will run `git checkout -b <name>` in the project root.")
-    hint.setStyleSheet("color: #777; font-size: 11px; background: transparent;")
-    layout.addWidget(hint)
-
-    btn_row = QHBoxLayout()
-    btn_row.setSpacing(8)
-    btn_row.addStretch()
-
-    cancel_btn = QPushButton("Cancel")
-    cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    cancel_btn.setStyleSheet(
-        "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-        "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
-        "QPushButton:hover { background: #4a4a4a; }"
-    )
-    cancel_btn.clicked.connect(dlg.reject)
-    btn_row.addWidget(cancel_btn)
-
-    create_btn = QPushButton("Create")
-    create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    create_btn.setDefault(True)
-    create_btn.setStyleSheet(
-        "QPushButton { background: #0e639c; color: white; border: none; "
-        "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background: #1a8ae8; }"
-        "QPushButton:disabled { background: #355; color: #888; }"
-    )
-    create_btn.clicked.connect(dlg.accept)
-    btn_row.addWidget(create_btn)
-
-    layout.addLayout(btn_row)
-
-    # Submit on Enter
-    field.returnPressed.connect(dlg.accept)
-    field.setFocus()
-    field.selectAll()
-
-    if dlg.exec() != QDialog.DialogCode.Accepted:
-        return ""
-    return field.text().strip()
-
-
-def _validate_branch_name(name: str) -> str | None:
-    """Return None if ``name`` is a valid git ref, else a human-readable reason.
-
-    Implements a subset of the rules from `git check-ref-format`:
-    https://git-scm.com/docs/git-check-ref-format
-    """
-    if not name:
-        return "Branch name cannot be empty."
-    if " " in name:
-        return "Branch names cannot contain spaces. Use hyphens or slashes instead (e.g. feat/my-thing)."
-    if any(c in name for c in "~^:?*[\\"):
-        return "Branch names cannot contain any of: ~ ^ : ? * [ \\"
-    if name.startswith("-") or name.startswith("/") or name.startswith("."):
-        return "Branch names cannot start with -, /, or ."
-    if name.endswith("/") or name.endswith(".") or name.endswith(".lock"):
-        return "Branch names cannot end with /, ., or .lock"
-    if ".." in name or "@{" in name or "//" in name:
-        return "Branch names cannot contain .., @{, or //"
-    if name == "@":
-        return "Branch name cannot be just '@'."
-    return None
-
-
-def _show_message(
-    parent: QWidget,
-    title: str,
-    message: str,
-    kind: str = "info",
-) -> None:
-    """Show a dark-themed message dialog matching the rest of the IDE.
-
-    Replaces QMessageBox.{information,warning,critical}, which pick up
-    the OS native theme and look out of place against the dark UI.
-
-    ``kind`` is one of ``"info" | "warn" | "error"``.
-    """
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setModal(True)
-    dlg.setMinimumWidth(380)
-    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
-
-    layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(20, 18, 20, 14)
-    layout.setSpacing(12)
-
-    icon_map = {"info": "ℹ", "warn": "⚠", "error": "✕"}
-    colour_map = {"info": "#4ec9b0", "warn": "#e5a00d", "error": "#f48771"}
-    icon_char = icon_map.get(kind, "ℹ")
-    icon_colour = colour_map.get(kind, "#4ec9b0")
-
-    header = QHBoxLayout()
-    header.setSpacing(10)
-    icon_lbl = QLabel(icon_char)
-    icon_lbl.setStyleSheet(
-        f"color: {icon_colour}; font-size: 20px; font-weight: bold; background: transparent;"
-    )
-    icon_lbl.setFixedWidth(28)
-    header.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignTop)
-
-    title_lbl = QLabel(title)
-    title_lbl.setStyleSheet(
-        "color: #e0e0e0; font-size: 14px; font-weight: bold; background: transparent;"
-    )
-    header.addWidget(title_lbl, stretch=1)
-    layout.addLayout(header)
-
-    body = QLabel(message)
-    body.setWordWrap(True)
-    body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    body.setStyleSheet(
-        "color: #c0c0c0; font-size: 12px; background: transparent; padding-left: 38px;"
-    )
-    layout.addWidget(body)
-
-    btn_row = QHBoxLayout()
-    btn_row.addStretch()
-    ok_btn = QPushButton("OK")
-    ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    ok_btn.setDefault(True)
-    ok_btn.setStyleSheet(
-        "QPushButton { background: #0e639c; color: white; border: none; "
-        "border-radius: 4px; padding: 6px 22px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background: #1a8ae8; }"
-    )
-    ok_btn.clicked.connect(dlg.accept)
-    btn_row.addWidget(ok_btn)
-    layout.addLayout(btn_row)
-
-    dlg.exec()
