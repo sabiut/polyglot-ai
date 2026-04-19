@@ -113,6 +113,27 @@ provider, per model. Backed by the usage table in the main app DB.
 | `Ctrl+Enter` | Commit (in commit message field) |
 | `Ctrl+Shift+Enter` | Commit and push |
 
+### Terminal
+
+See **[Terminal panel](Editor-Terminal-Files#terminal-panel)** for full details.
+
+| Shortcut | Action |
+|---|---|
+| `` Ctrl+` `` | Toggle terminal visibility |
+| `Ctrl+Shift+C` | Copy selection (or full visible screen) |
+| `Ctrl+Shift+V` | Paste clipboard (bracket-paste mode) |
+| Middle-click | Paste X11 primary selection |
+| `Ctrl+=` / `Ctrl++` | Zoom in |
+| `Ctrl+-` | Zoom out |
+| `Ctrl+0` | Reset zoom to 11pt |
+| `Shift+PageUp` / `Shift+PageDown` | Scroll scrollback one page |
+| `Ctrl+C` / `Ctrl+D` / `Ctrl+Z` / `Ctrl+L` | Standard terminal control characters |
+| Double-click | Select word + copy |
+| Triple-click | Select line + copy |
+| Drag-drop file | Paste shell-quoted absolute path |
+| `Ctrl+click` URL | Open in default browser |
+| Right-click | Copy / Paste / Select All / Copy All (with Scrollback) / Send selection to AI… / Zoom |
+
 ### Tasks
 
 | Shortcut | Action |

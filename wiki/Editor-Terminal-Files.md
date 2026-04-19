@@ -32,15 +32,80 @@ supports side-by-side and unified modes.
 ## Terminal panel
 
 An integrated terminal at the bottom of the window. Toggle with `` Ctrl+` ``.
+It's a real PTY-backed shell (uses `pty.fork()`), so interactive programs
+like vim, ssh, htop, and `docker attach` work.
 
-- Spawns your preferred shell (configurable in **Settings → Terminal**).
-- Starts in the project directory when a project is open.
-- Each new project open restarts the terminal in the new directory.
-- Supports ANSI colours, scrollback, copy/paste (`Ctrl+Shift+C` / `Ctrl+Shift+V`).
-- You can run multiple terminals via the `+` button.
+### Basics
+- **Shell** — configurable in **Settings → Terminal**; defaults to
+  `/bin/bash`. If the configured shell doesn't exist, the terminal
+  prints a red error line instead of sitting blank.
+- **Starting directory** — when a project is open, the terminal starts
+  in that directory.
+- **Opening a different project** sends `cd <newpath>` to the running
+  shell rather than tearing it down — any running process, scrollback,
+  and shell history survive the switch. The `cd` command is submitted
+  with a leading space so bash/zsh `HISTCONTROL=ignorespace` keeps it
+  out of your recall history.
+- **Scrollback** — 5,000 lines of history. A slim indicator on the
+  right edge shows your position whenever the buffer has grown.
+- **Rendering** — ANSI/VT100 via pyte, with full 16-color, 256-color,
+  and SGR (bold/italic/underline/reverse) support. Honors the app's
+  dark/light theme for default foreground and background.
 
-The terminal is a real PTY, so interactive commands (vim, ssh, docker
-attach, etc.) work.
+### Copy / paste
+| Gesture | What it does |
+|---|---|
+| Click-drag | Select text; auto-copies to clipboard on release |
+| Double-click | Select word; auto-copies |
+| Triple-click | Select whole line; auto-copies |
+| `Ctrl+Shift+C` | Copy current selection (or full visible screen if none) |
+| `Ctrl+Shift+V` | Paste clipboard (bracket-paste mode — newlines don't auto-execute) |
+| Middle-click | Paste X11 primary selection (falls back to clipboard on Wayland) |
+| Drag-drop file | Pastes the shell-quoted absolute path at the cursor |
+| Right-click → **Copy All (with Scrollback)** | Copies the full history buffer + visible screen |
+
+### Navigation and scrollback
+| Gesture | Action |
+|---|---|
+| Mouse wheel | Scroll the scrollback view by 3 lines per tick |
+| `Shift+PageUp` / `Shift+PageDown` | Page through scrollback without sending keys to the shell |
+| Any other keystroke | Snaps the view back to the latest output |
+
+### Keyboard mappings
+- **Arrows / Home / End / PageUp / PageDown / Insert / Delete** — standard VT220 escape sequences
+- **F1–F4** — SS3-encoded (standard VT220)
+- **F5–F12** — CSI-encoded (xterm-compatible). Works with `htop`, `mc`, `nano`.
+- **Ctrl+C / Ctrl+D / Ctrl+Z / Ctrl+L** — standard terminal control
+- **Tab** — always sent to the shell (Qt focus-navigation is suppressed)
+
+### Font zoom
+| Shortcut | Action |
+|---|---|
+| `Ctrl+=` (or `Ctrl++`) | Zoom in one size |
+| `Ctrl+-` | Zoom out one size |
+| `Ctrl+0` | Reset to default (11pt) |
+
+Zoom range is clamped 7pt–24pt. Changing the font recalculates the
+grid dimensions and resizes the PTY, so programs running inside the
+shell see the updated geometry immediately (try it with `htop`).
+
+### Integration
+- **`Ctrl+click` a URL** in the visible output to open it in your
+  default browser. Matches `http(s)://…` and `file://…`.
+- **Right-click → Send selection to AI…** takes whatever you've
+  highlighted, frames it as terminal-output context, and prefills the
+  chat input with a prompt asking the AI to explain/debug it.
+  Great for stack traces, build errors, cryptic exit codes.
+- **Visual bell** — a brief red flash on genuine BEL (`\a`). Only
+  fires for real bells; the `\x07` used as an OSC string terminator
+  (e.g. bash's title-setting `PROMPT_COMMAND`) is handled silently by
+  the parser and does NOT flash.
+
+### Cursor
+- **Block cursor** with blink while the terminal has focus
+- **Hollow outline** when unfocused — the position is still visible
+  but the blink pauses so you're not distracted by motion in a panel
+  you're not typing into
 
 ## File Explorer
 

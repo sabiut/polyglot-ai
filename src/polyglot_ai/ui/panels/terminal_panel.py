@@ -80,6 +80,7 @@ KEY_MAP = {
     Qt.Key.Key_F12: b"\x1b[24~",
 }
 
+
 def _default_fg() -> str:
     return tc.get("text_primary")
 
@@ -207,7 +208,9 @@ class TerminalWidget(QWidget):
             self._last_bell_count = bc
             self._bell_flash_until_ms = int(_time.monotonic() * 1000) + 120
             self.update()
-        elif self._bell_flash_until_ms and int(_time.monotonic() * 1000) >= self._bell_flash_until_ms:
+        elif (
+            self._bell_flash_until_ms and int(_time.monotonic() * 1000) >= self._bell_flash_until_ms
+        ):
             self._bell_flash_until_ms = 0
             self.update()
 
@@ -349,9 +352,7 @@ class TerminalWidget(QWidget):
             offset_from_top = max(0, self._emulator.history_length - scroll_off)
             thumb_top = int(bar_h * offset_from_top / max(1, total))
             thumb_h = max(16, int(bar_h * self._emulator.rows / max(1, total)))
-            painter.fillRect(
-                bar_x, thumb_top, _SCROLLBAR_WIDTH, thumb_h, QColor(255, 255, 255, 80)
-            )
+            painter.fillRect(bar_x, thumb_top, _SCROLLBAR_WIDTH, thumb_h, QColor(255, 255, 255, 80))
 
         painter.end()
 
