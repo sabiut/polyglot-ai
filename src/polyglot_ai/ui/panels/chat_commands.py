@@ -88,9 +88,7 @@ def handle_slash_command(panel: "ChatPanel", text: str) -> bool:
         provider_count = (
             len(panel._provider_manager.get_all_providers()) if panel._provider_manager else 0
         )
-        msg_count = (
-            len(panel._current_conversation.messages) if panel._current_conversation else 0
-        )
+        msg_count = len(panel._current_conversation.messages) if panel._current_conversation else 0
         mcp_servers = panel._mcp_client.connected_servers if panel._mcp_client else []
         mcp_tools = len(panel._mcp_client.available_tools) if panel._mcp_client else 0
         panel._add_system_message(

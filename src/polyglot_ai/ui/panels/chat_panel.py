@@ -2773,7 +2773,6 @@ class ChatPanel(QWidget):
             "border: none; border-radius: 4px; font-weight: 600; }"
         )
 
-
     def prefill_input(self, text: str) -> None:
         """Public API: load text into the chat input box and focus it.
 
@@ -2827,7 +2826,6 @@ class ChatPanel(QWidget):
     @property
     def send_button(self) -> QPushButton:
         return self._send_btn
-
 
     def _open_project_from_menu(self) -> None:
         window = self.window()

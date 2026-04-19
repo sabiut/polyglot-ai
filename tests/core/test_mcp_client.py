@@ -310,9 +310,7 @@ def test_install_from_catalog_directory_field_becomes_trailing_arg(tmp_path, mon
     assert not cfg.env or "path" not in cfg.env
 
 
-def test_install_from_catalog_connection_string_goes_into_database_url_env(
-    tmp_path, monkeypatch
-):
+def test_install_from_catalog_connection_string_goes_into_database_url_env(tmp_path, monkeypatch):
     """Security-critical: connection strings must go via env (not CLI args
     where they'd be visible in ``ps`` output)."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -332,15 +330,13 @@ def test_install_from_catalog_connection_string_goes_into_database_url_env(
 
     fake = _FakeKeyring()
     monkeypatch.setitem(
-        __import__("sys").modules, "keyring", SimpleNamespace(
-            set_password=fake.set_password, get_password=fake.get_password
-        )
+        __import__("sys").modules,
+        "keyring",
+        SimpleNamespace(set_password=fake.set_password, get_password=fake.get_password),
     )
 
     client = MCPClient()
-    cfg = client.install_from_catalog(
-        "postgres", {"connection_string": "postgresql://u:p@h/db"}
-    )
+    cfg = client.install_from_catalog("postgres", {"connection_string": "postgresql://u:p@h/db"})
 
     assert "DATABASE_URL" in (cfg.env or {})
     # The raw connection string must NOT appear in args (command-line leak)
@@ -415,9 +411,7 @@ def test_load_mcp_config_restores_keyring_placeholders(tmp_path, monkeypatch):
     assert servers[0].env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "ghp_secret_token"
 
 
-def test_load_mcp_config_missing_keyring_entry_falls_back_to_empty_string(
-    tmp_path, monkeypatch
-):
+def test_load_mcp_config_missing_keyring_entry_falls_back_to_empty_string(tmp_path, monkeypatch):
     """If the keyring secret is gone (user cleared credentials), load
     the config without the secret rather than failing."""
     config_path = tmp_path / "mcp_servers.json"

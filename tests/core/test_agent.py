@@ -494,8 +494,7 @@ async def test_unsubscribes_after_run(bus, conv):
     assert loop._subscribed is False
     # Sanity: bus has no agent callback left (other subscribers are fine)
     assert all(
-        cb is not loop._on_approval
-        for cb in bus._subscribers.get(EVT_APPROVAL_RESPONSE, [])
+        cb is not loop._on_approval for cb in bus._subscribers.get(EVT_APPROVAL_RESPONSE, [])
     )
 
 

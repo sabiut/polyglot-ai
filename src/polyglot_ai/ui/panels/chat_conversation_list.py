@@ -85,9 +85,7 @@ def show_context_menu(panel: "ChatPanel", position) -> None:
 
 def rename(panel: "ChatPanel", item: QListWidgetItem, conv_id: int) -> None:
     """Prompt for a new title and persist it."""
-    new_name, ok = QInputDialog.getText(
-        panel, "Rename Conversation", "New name:", text=item.text()
-    )
+    new_name, ok = QInputDialog.getText(panel, "Rename Conversation", "New name:", text=item.text())
     if ok and new_name:
         item.setText(new_name)
         if panel._db:

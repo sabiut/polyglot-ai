@@ -168,9 +168,7 @@ async def _run_workflow_steps(panel: "ChatPanel", definition, inputs: dict[str, 
                 break
 
             # Show step header
-            panel._add_system_message(
-                f"**Step {i + 1}/{len(definition.steps)}: {step.name}**"
-            )
+            panel._add_system_message(f"**Step {i + 1}/{len(definition.steps)}: {step.name}**")
 
             # Render and inject the step prompt as a user message. The
             # autonomous-mode prefix tells the model not to stop for
@@ -209,8 +207,7 @@ def finish_workflow(
     status = "completed" if steps_completed == total else "partial"
 
     panel._add_system_message(
-        f"**⚡ Workflow finished: {definition.name}** — "
-        f"{steps_completed}/{total} steps {status}"
+        f"**⚡ Workflow finished: {definition.name}** — {steps_completed}/{total} steps {status}"
     )
 
     # Record on active task (best-effort — the run already finished)
@@ -250,9 +247,7 @@ def finish_workflow(
         logger.debug("Failed to publish workflow state", exc_info=True)
 
 
-def on_workflow_error(
-    panel: "ChatPanel", definition, inputs: dict, error: Exception
-) -> None:
+def on_workflow_error(panel: "ChatPanel", definition, inputs: dict, error: Exception) -> None:
     """Callback for workflow task failures — ensures cleanup happens."""
     panel._add_system_message(f"Workflow failed: {error}")
     finish_workflow(panel, definition, inputs, 0)
