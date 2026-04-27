@@ -72,7 +72,7 @@ class ProviderManager:
             ("claude_oauth", ("claude",)),  # Subscription preferred over API key
             ("anthropic", ("claude",)),
             ("google", ("gemini",)),
-            ("xai", ("grok",)),
+            ("deepseek", ("deepseek",)),
         ]
         for pname, prefixes in prefix_map:
             if any(model_id.startswith(p) for p in prefixes):

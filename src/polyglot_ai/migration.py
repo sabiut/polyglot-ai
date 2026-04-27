@@ -71,7 +71,7 @@ def _migrate_keyring() -> None:
 
     OLD_SERVICE = "codex-desktop"
     NEW_SERVICE = "polyglot-ai"
-    PROVIDER_KEYS = ["openai", "anthropic", "google", "xai"]
+    PROVIDER_KEYS = ["openai", "anthropic", "google", "deepseek"]
 
     for key_name in PROVIDER_KEYS:
         try:

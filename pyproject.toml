@@ -1,7 +1,7 @@
 [project]
 name = "polyglot-ai"
 version = "0.10.0"
-description = "AI-powered coding assistant desktop app for Linux — supports OpenAI, Anthropic, Google, xAI, and more"
+description = "AI-powered coding assistant desktop app for Linux — supports OpenAI, Anthropic, Google, DeepSeek, and more"
 requires-python = ">=3.11"
 license = {text = "LGPL-3.0-or-later"}
 authors = [{name = "Polyglot AI Contributors"}]

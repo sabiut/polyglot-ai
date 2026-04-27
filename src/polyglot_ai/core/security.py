@@ -99,7 +99,6 @@ _REDACT_PATTERNS = [
     re.compile(r"(ghp_)[a-zA-Z0-9]{36,}"),
     re.compile(r"(gho_)[a-zA-Z0-9]{36,}"),
     re.compile(r"(glpat-)[a-zA-Z0-9\-]{20,}"),
-    re.compile(r"(xai-)[a-zA-Z0-9]{20,}"),
 ]
 
 # ── Allowed MCP server commands ───────────────────────────────────
@@ -141,7 +140,6 @@ _CONTENT_SECRET_PATTERNS = [
     re.compile(r"ghp_[a-zA-Z0-9]{36,}"),  # GitHub PAT
     re.compile(r"gho_[a-zA-Z0-9]{36,}"),  # GitHub OAuth
     re.compile(r"glpat-[a-zA-Z0-9\-]{20,}"),  # GitLab PAT
-    re.compile(r"xai-[a-zA-Z0-9]{20,}"),  # xAI
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
     re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),  # Private keys
     re.compile(r"-----BEGIN\s+CERTIFICATE-----"),  # Certificates

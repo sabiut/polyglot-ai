@@ -11,40 +11,19 @@ at every call site.
 from __future__ import annotations
 
 MODEL_CAPS: dict[str, dict] = {
+    "gpt-5.5": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Latest flagship — most capable",
+    },
     "gpt-5.4": {
         "vision": True,
         "tools": True,
         "reasoning": False,
         "fast": False,
-        "desc": "Most capable for complex tasks",
-    },
-    "gpt-5.4-mini": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Balanced speed and capability",
-    },
-    "gpt-5.4-nano": {
-        "vision": False,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Fastest for quick answers",
-    },
-    "o3": {
-        "vision": False,
-        "tools": True,
-        "reasoning": True,
-        "fast": False,
-        "desc": "Advanced reasoning model",
-    },
-    "o3-mini": {
-        "vision": False,
-        "tools": True,
-        "reasoning": True,
-        "fast": True,
-        "desc": "Fast reasoning model",
+        "desc": "Previous flagship — still strong",
     },
     "o4-mini": {
         "vision": False,
@@ -53,12 +32,19 @@ MODEL_CAPS: dict[str, dict] = {
         "fast": True,
         "desc": "Efficient reasoning model",
     },
+    "claude-opus-4-7": {
+        "vision": True,
+        "tools": True,
+        "reasoning": True,
+        "fast": False,
+        "desc": "Latest Claude flagship",
+    },
     "claude-opus-4-6": {
         "vision": True,
         "tools": True,
         "reasoning": True,
         "fast": False,
-        "desc": "Most capable for ambitious work",
+        "desc": "Previous flagship — still strong",
     },
     "claude-sonnet-4-6": {
         "vision": True,
@@ -66,27 +52,6 @@ MODEL_CAPS: dict[str, dict] = {
         "reasoning": False,
         "fast": False,
         "desc": "Most efficient for everyday tasks",
-    },
-    "claude-haiku-4-5": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": True,
-        "desc": "Fastest for quick answers",
-    },
-    "claude-sonnet-4-5": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Strong balanced model",
-    },
-    "claude-sonnet-4-0": {
-        "vision": True,
-        "tools": True,
-        "reasoning": False,
-        "fast": False,
-        "desc": "Reliable everyday model",
     },
     "gemini-3.1-pro-preview": {
         "vision": True,
@@ -108,5 +73,19 @@ MODEL_CAPS: dict[str, dict] = {
         "reasoning": False,
         "fast": True,
         "desc": "Lightweight and fast",
+    },
+    "deepseek-v4-pro": {
+        "vision": False,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Flagship V4 — most capable",
+    },
+    "deepseek-v4-flash": {
+        "vision": False,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Fast V4 — lower cost, lower latency",
     },
 }

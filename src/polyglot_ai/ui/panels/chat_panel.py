@@ -44,6 +44,209 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Greetings / filler words that produce useless conversation titles when
+# they happen to be the user's first message. ``populate_conversations``
+# and the auto-title generator skip them in favour of the next real
+# sentence so the sidebar doesn't fill up with rows reading just "hey".
+_FILLER_FIRST_MESSAGES = frozenset(
+    {
+        "hi",
+        "hey",
+        "hello",
+        "yo",
+        "sup",
+        "hiya",
+        "ok",
+        "ack",
+        "thanks",
+        "thx",
+        "ty",
+        "test",
+        "testing",
+        "asdf",
+        ".",
+        "?",
+    }
+)
+
+
+def _format_relative_time(iso_ts: str | None) -> str:
+    """Render a SQLite ``datetime('now')`` timestamp as a human phrase.
+
+    Falls back to the raw string on any parse failure so a malformed
+    DB row never crashes the sidebar render. Output examples:
+        ``"just now"``, ``"5 minutes ago"``, ``"3 hours ago"``,
+        ``"yesterday at 14:32"``, ``"Apr 15, 2026"``.
+
+    Times older than ~6 days collapse to a date-only label since
+    "12 days ago" stops being useful at that distance.
+    """
+    if not iso_ts:
+        return ""
+    from datetime import datetime, timedelta
+
+    try:
+        # SQLite 'datetime(now)' returns naive UTC like "2026-04-19 22:30:45".
+        ts = datetime.fromisoformat(iso_ts.replace("T", " ").replace("Z", ""))
+    except (ValueError, TypeError):
+        return iso_ts
+    now = datetime.utcnow()
+    delta = now - ts
+    if delta < timedelta(seconds=45):
+        return "just now"
+    if delta < timedelta(minutes=2):
+        return "1 minute ago"
+    if delta < timedelta(hours=1):
+        return f"{int(delta.total_seconds() // 60)} minutes ago"
+    if delta < timedelta(hours=2):
+        return "1 hour ago"
+    if delta < timedelta(hours=24):
+        return f"{int(delta.total_seconds() // 3600)} hours ago"
+    if delta < timedelta(days=2):
+        return f"yesterday at {ts.strftime('%H:%M')}"
+    if delta < timedelta(days=7):
+        return f"{delta.days} days ago"
+    # Older — use a date so the user sees the actual point in time.
+    return ts.strftime("%b %-d, %Y") if hasattr(ts, "strftime") else str(ts)
+
+
+_CLASSIFIER_SYSTEM_PROMPT = (
+    "You are a strict classifier. Read the conversation and respond with EXACTLY one "
+    "lowercase word from this set: work, personal, research. No punctuation, no "
+    "explanation, no other words.\n\n"
+    "Definitions:\n"
+    "- work: software development, professional tasks, business, employment, debugging, "
+    "code review, IaC, deployment, anything done as part of a job\n"
+    "- personal: hobbies, daily life, relationships, casual chat, creative writing, "
+    "shopping, travel, entertainment\n"
+    "- research: deep technical investigation, academic study, learning a new field, "
+    "scientific or scholarly inquiry, exploring papers or theory\n\n"
+    "If genuinely ambiguous between two, prefer 'work' for code/tech, 'personal' for "
+    "everything else."
+)
+_CLASSIFIER_VALID = {"work", "personal", "research"}
+
+
+async def _classify_conversation_category(
+    messages: list,
+    provider,
+    model: str,
+) -> str | None:
+    """Ask an AI provider to bucket a conversation into work / personal / research.
+
+    Returns the chosen category or ``None`` on any failure (no provider,
+    network error, unparseable response, etc.). The caller treats
+    ``None`` as "leave the category as-is" — auto-classification is
+    best-effort, never destructive.
+
+    Only the first user + first assistant turn are sent to keep the
+    request small and cheap. The classifier prompt is constrained to
+    one-word output; we still validate the response against a
+    whitelist before returning, because the model occasionally adds
+    quotes or punctuation despite the instructions.
+    """
+    if provider is None or not model:
+        return None
+
+    snippets: list[str] = []
+    for msg in messages:
+        role = getattr(msg, "role", None)
+        if role not in ("user", "assistant"):
+            continue
+        content = (getattr(msg, "content", "") or "").strip()
+        if not content:
+            continue
+        # Cap each snippet so even a long first message can't blow the
+        # classification request budget. 600 chars is enough to read
+        # the topic of any reasonable opener.
+        snippet = content[:600]
+        snippets.append(f"[{role}]\n{snippet}")
+        if len(snippets) >= 2:
+            break
+    if not snippets:
+        return None
+
+    user_prompt = "Conversation:\n\n" + "\n\n".join(snippets) + "\n\nCategory:"
+
+    # Hold the async generator in a local so we can ``aclose()`` it on
+    # the early ``break``. Letting it fall through to GC means httpx /
+    # httpcore finalisers run outside the event loop, which triggers a
+    # sniffio ``AsyncLibraryNotFoundError`` cascade in the logs.
+    response_text = ""
+    stream_gen = provider.stream_chat(
+        messages=[
+            {"role": "system", "content": _CLASSIFIER_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        model=model,
+        temperature=0.0,
+        max_tokens=8,
+    )
+    try:
+        async for chunk in stream_gen:
+            if chunk.delta_content:
+                response_text += chunk.delta_content
+            if chunk.finish_reason:
+                break
+    except Exception:
+        logger.debug("Auto-classify: stream_chat failed", exc_info=True)
+        return None
+    finally:
+        # Idempotent close — safe to call after natural end-of-iteration
+        # too. Without this, ``break`` leaves the underlying httpx
+        # response open until garbage collection, which surfaces as
+        # "RuntimeError: no running event loop" inside httpcore's
+        # AsyncShieldCancellation finaliser.
+        await stream_gen.aclose()
+
+    # Tolerant parse — strip whitespace, quotes, periods; lowercase.
+    cleaned = response_text.strip().strip("\"'`. ").lower().split(maxsplit=1)
+    if not cleaned:
+        return None
+    candidate = cleaned[0]
+    if candidate not in _CLASSIFIER_VALID:
+        logger.debug("Auto-classify: ignoring out-of-set response %r", response_text[:100])
+        return None
+    return candidate
+
+
+def _auto_title_from_messages(messages: list, max_len: int = 60) -> str:
+    """Build a sensible conversation title from the first non-filler message.
+
+    Trims whitespace, skips greeting-only messages, capitalises the first
+    letter, collapses internal whitespace, and truncates with an ellipsis
+    so titles fit cleanly in the sidebar.
+    """
+
+    def _normalize(raw: str) -> str:
+        compact = " ".join(raw.split())
+        if not compact:
+            return ""
+        if len(compact) > max_len:
+            compact = compact[: max_len - 1].rstrip() + "…"
+        return compact[0].upper() + compact[1:] if compact else compact
+
+    for msg in messages:
+        if getattr(msg, "role", None) != "user":
+            continue
+        content = (getattr(msg, "content", "") or "").strip()
+        if not content:
+            continue
+        # Skip messages that are JUST a filler greeting; if a longer
+        # message just starts with one we still keep it.
+        first_word = content.split(maxsplit=1)[0].rstrip("!?.,").lower()
+        if first_word in _FILLER_FIRST_MESSAGES and len(content.split()) <= 2:
+            continue
+        return _normalize(content)
+
+    # Fallback: any user message at all, even if filler.
+    for msg in messages:
+        if getattr(msg, "role", None) == "user":
+            content = (getattr(msg, "content", "") or "").strip()
+            if content:
+                return _normalize(content)
+    return "New Chat"
+
 
 class ChatPanel(QWidget):
     """Chat interface with full conversation management, attachments, and streaming."""
@@ -199,16 +402,41 @@ class ChatPanel(QWidget):
         sidebar_layout.addWidget(cat_widget)
 
         self._conv_list = QListWidget()
+        # Force right-side ellipsis so long titles end with "…" rather
+        # than being clipped mid-word — the Qt default is to fade the
+        # rightmost glyphs, which looked accidental.
+        self._conv_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # Uniform row height makes the column read as a tidy list
+        # rather than a stack of variable-height rows.
+        self._conv_list.setUniformItemSizes(True)
+        self._conv_list.setSpacing(0)
+        # Tightened to match the Claude.ai history sidebar density:
+        # smaller vertical row padding (5px), zero margin between rows
+        # (relying on hover/select backgrounds for separation), reduced
+        # list-level padding. Result is roughly the same row height as
+        # claude.ai's "Recents" list — visibly more conversations on
+        # screen at once without feeling cramped.
         self._conv_list.setStyleSheet(f"""
             QListWidget {{
-                font-size: {tc.FONT_MD}px; background: {tc.get("bg_surface")}; border: none;
+                font-size: {tc.FONT_MD}px;
+                background: {tc.get("bg_surface")};
+                border: none;
                 outline: none;
+                padding: 2px 0;
             }}
             QListWidget::item {{
-                padding: 6px 8px; border-radius: {tc.RADIUS_SM}px; margin: 1px 4px;
+                padding: 5px 10px;
+                margin: 0px 4px;
+                border-radius: {tc.RADIUS_SM}px;
+                color: {tc.get("text_primary")};
             }}
-            QListWidget::item:selected {{ background: {tc.get("bg_active")}; }}
-            QListWidget::item:hover:!selected {{ background: {tc.get("bg_hover_subtle")}; }}
+            QListWidget::item:selected {{
+                background: {tc.get("bg_active")};
+                color: {tc.get("text_heading")};
+            }}
+            QListWidget::item:hover:!selected {{
+                background: {tc.get("bg_hover_subtle")};
+            }}
         """)
         self._conv_list.currentRowChanged.connect(self._on_conversation_selected)
         self._conv_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -530,31 +758,27 @@ class ChatPanel(QWidget):
 
     def _populate_default_models(self) -> None:
         self._default_grouped = {
-            "OpenAI": ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "o3-mini", "o4-mini"],
+            "OpenAI": ["gpt-5.5", "gpt-5.4", "o4-mini"],
             "Anthropic": [
+                "claude-opus-4-7",
                 "claude-opus-4-6",
                 "claude-sonnet-4-6",
-                "claude-haiku-4-5",
-                "claude-sonnet-4-5",
-                "claude-sonnet-4-0",
             ],
             "Google": [
                 "gemini-3.1-pro-preview",
                 "gemini-3-flash-preview",
                 "gemini-3.1-flash-lite-preview",
             ],
-            "xAI (Grok)": [
-                "grok-4.20-0309-reasoning",
-                "grok-4.20-0309-non-reasoning",
-                "grok-4-1-fast-reasoning",
-                "grok-4-1-fast-non-reasoning",
+            "DeepSeek": [
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
             ],
         }
         provider_data_map = {
             "OpenAI": "openai",
             "Anthropic": "anthropic",
             "Google": "google",
-            "xAI (Grok)": "xai",
+            "DeepSeek": "deepseek",
         }
         for provider_display, models in self._default_grouped.items():
             self._model_combo.addHeader(f"── {provider_display} ──")
@@ -563,8 +787,12 @@ class ChatPanel(QWidget):
                 desc = caps.get("desc", "")
                 full_id = f"{provider_data_map[provider_display]}:{m}"
                 self._model_combo.addItemWithDesc(m, desc, full_id)
+        # Pre-select the global default. Falls through silently if the
+        # default isn't in the dropdown (e.g. user removed the OpenAI
+        # provider) — the combo just stays on its first entry.
+        default_full_id = "openai:gpt-5.5"
         for i in range(self._model_combo.count()):
-            if self._model_combo.itemData(i) == "openai:gpt-5.4":
+            if self._model_combo.itemData(i) == default_full_id:
                 self._model_combo.setCurrentIndex(i)
                 break
 
@@ -1285,6 +1513,12 @@ class ChatPanel(QWidget):
         self._current_assistant_msg.on_regenerate = lambda: self._regenerate_last()
 
         full_content = ""
+        # Accumulated chain-of-thought from thinking-mode providers
+        # (DeepSeek's reasoner / V4-pro). Captured separately from
+        # ``full_content`` — it isn't shown to the user, but the
+        # provider's API requires it echoed back on the next turn,
+        # so it has to ride along on the persisted assistant Message.
+        full_reasoning = ""
         tool_calls_data: dict[int, dict] = {}
         usage_info = None
 
@@ -1306,6 +1540,9 @@ class ChatPanel(QWidget):
                     full_content += chunk.delta_content
                     self._current_assistant_msg.append_content(chunk.delta_content)
                     self._scroll_to_bottom()
+
+                if chunk.delta_reasoning:
+                    full_reasoning += chunk.delta_reasoning
 
                 if chunk.tool_calls:
                     for tc in chunk.tool_calls:
@@ -1363,6 +1600,7 @@ class ChatPanel(QWidget):
                 model=model_id,
                 tokens_in=usage_info.get("prompt_tokens") if usage_info else None,
                 tokens_out=usage_info.get("completion_tokens") if usage_info else None,
+                reasoning_content=full_reasoning if full_reasoning else None,
             )
             self._current_conversation.messages.append(assistant_msg)
 
@@ -1732,6 +1970,10 @@ class ChatPanel(QWidget):
         self._message_layout.addWidget(self._current_assistant_msg)
 
         full_content = ""
+        # See the matching comment in the first stream_chat consumer above —
+        # reasoning_content has to round-trip through the assistant Message
+        # so DeepSeek-class providers accept the next turn.
+        full_reasoning = ""
         tool_calls_data: dict[int, dict] = {}
         try:
             async for chunk in provider.stream_chat(
@@ -1744,6 +1986,8 @@ class ChatPanel(QWidget):
                     full_content += chunk.delta_content
                     self._current_assistant_msg.append_content(chunk.delta_content)
                     self._scroll_to_bottom()
+                if chunk.delta_reasoning:
+                    full_reasoning += chunk.delta_reasoning
                 if chunk.tool_calls:
                     for tc in chunk.tool_calls:
                         idx = tc["index"]
@@ -1792,6 +2036,7 @@ class ChatPanel(QWidget):
                     content=full_content if full_content else None,
                     tool_calls=tool_calls_list,
                     model=model_id,
+                    reasoning_content=full_reasoning if full_reasoning else None,
                 )
             )
 
@@ -1820,8 +2065,15 @@ class ChatPanel(QWidget):
             return
 
         conv = self._current_conversation
-        if conv.id is None:
-            title = conv.messages[0].content[:50] if conv.messages else "New Chat"
+        # ``just_created`` flips to True on the first persist for a
+        # conversation. We use it at the bottom of this function to
+        # schedule the AI auto-classifier exactly once per conversation
+        # lifetime — running it on every persist would be both wasteful
+        # and would let the AI overwrite a category the user manually
+        # set after the first turn.
+        just_created = conv.id is None
+        if just_created:
+            title = _auto_title_from_messages(conv.messages) if conv.messages else "New Chat"
             # If a task is active, prefix the conversation title so it's
             # easy to spot in the conversation list.
             if self._active_task is not None:
@@ -1831,6 +2083,7 @@ class ChatPanel(QWidget):
             conv.id = await self._db.create_conversation(title, conv.model)
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, conv.id)
+            item.setToolTip(title)
             self._conv_list.insertItem(0, item)
             # Bind this freshly-created conversation to the active task
             # so future activations of the same task land back here.
@@ -1861,6 +2114,7 @@ class ChatPanel(QWidget):
                 model=msg.model,
                 tokens_in=msg.tokens_in,
                 tokens_out=msg.tokens_out,
+                reasoning_content=msg.reasoning_content,
             )
         # Append a single rolled-up note per persist call so the task
         # timeline doesn't get spammed with one entry per token. We log
@@ -1877,6 +2131,73 @@ class ChatPanel(QWidget):
             except Exception:
                 logger.exception("chat_panel: could not record chat note on task")
         self._persisted_message_count = len(conv.messages)
+
+        # Auto-classify on first persist only. Gated on:
+        # - just_created (ensures we run at most once per conversation)
+        # - at least one user + one assistant message (so the AI has
+        #   real content to classify, not just a greeting)
+        # The classifier is fired-and-forgotten via ``safe_task`` so
+        # the AI call doesn't block the next user message.
+        if just_created:
+            has_user = any(m.role == "user" for m in conv.messages)
+            has_assistant = any(m.role == "assistant" for m in conv.messages)
+            if has_user and has_assistant:
+                from polyglot_ai.core.async_utils import safe_task
+
+                safe_task(
+                    self._auto_classify_new_conversation(conv.id, list(conv.messages)),
+                    name="auto_classify_conversation",
+                )
+
+    async def _auto_classify_new_conversation(self, conv_id: int, messages: list) -> None:
+        """Best-effort AI categorisation of a freshly-created conversation.
+
+        Re-checks the DB before writing so a user who manually picked a
+        category between the trigger and the model's reply doesn't get
+        overridden. Failures (no provider, network, parse error) are
+        swallowed at debug level — categorisation is a soft signal.
+        """
+        if not self._db:
+            return
+        # Don't override an explicit choice. ``set_category`` updates
+        # ``updated_at`` so a freshly-set category will still read as
+        # something other than ``"all"`` even within the same second.
+        try:
+            current = await self._db.get_conversation_category(conv_id)
+        except Exception:
+            logger.debug("Auto-classify: could not read current category", exc_info=True)
+            return
+        if current != "all":
+            return
+
+        provider, model = (None, "")
+        try:
+            full_id, _ = self._get_selected_model()
+            if full_id and self._provider_manager:
+                resolved = self._provider_manager.get_provider_for_model(full_id)
+                if resolved:
+                    provider, model = resolved
+        except Exception:
+            logger.debug("Auto-classify: could not resolve provider/model", exc_info=True)
+            return
+        if provider is None:
+            return
+
+        category = await _classify_conversation_category(messages, provider, model)
+        if not category:
+            return
+
+        # Race check again — user might have set a category while the
+        # AI was thinking.
+        try:
+            current = await self._db.get_conversation_category(conv_id)
+            if current != "all":
+                return
+            await self._db.set_conversation_category(conv_id, category)
+            logger.info("Auto-classified conversation %s as %s", conv_id, category)
+            await self.populate_conversations()
+        except Exception:
+            logger.debug("Auto-classify: persist failed", exc_info=True)
 
     def _record_chat_note(self, new_messages: list) -> None:
         """Append a single timeline note summarising the latest exchange."""
@@ -1917,21 +2238,57 @@ class ChatPanel(QWidget):
         safe_task(self.populate_conversations(), name="populate_conversations")
 
     async def populate_conversations(self) -> None:
+        """Render the conversation sidebar with cleaned-up titles.
+
+        Decisions for "professional" presentation:
+
+        * **Drop category emoji** (💼 / 👤 / 🔬) from the title — the
+          category filter tabs already convey which category the user
+          is viewing, so duplicating it in every row is visual noise.
+        * **Pin marker** stays but uses a small leading bullet ("• ")
+          rather than 📌 — fits better with the rest of the IDE chrome.
+          The full title (without the marker) goes into the tooltip so
+          the marker doesn't ever truncate the actual title.
+        * **Tooltip** carries the full title verbatim, since long
+          titles otherwise get clipped without recourse.
+        * **Whitespace** is collapsed and stripped so a title like
+          ``"\\n\\n  hey"`` doesn't render with a phantom blank line.
+        """
         if not self._db:
             return
         self._conv_list.clear()
         category = getattr(self, "_active_category", "all")
         conversations = await self._db.list_conversations(category=category)
         for conv in conversations:
-            title = conv["title"]
+            raw_title = (conv["title"] or "").strip() or "Untitled"
+            # Collapse internal whitespace so multi-line titles render
+            # as a single clean line in the row.
+            display_title = " ".join(raw_title.split())
             if conv.get("pinned"):
-                title = f"📌 {title}"
-            cat = conv.get("category", "all")
-            if cat and cat != "all":
-                cat_icons = {"work": "💼", "personal": "👤", "research": "🔬"}
-                title = f"{cat_icons.get(cat, '')} {title}"
-            item = QListWidgetItem(title)
+                # Subtle leading bullet instead of 📌 — communicates
+                # "pinned" without the visual weight of a coloured emoji.
+                display_title = f"• {display_title}"
+            item = QListWidgetItem(display_title)
             item.setData(Qt.ItemDataRole.UserRole, conv["id"])
+            # Build a multi-line tooltip:
+            #   <full title>
+            #   ──────────
+            #   Created: <relative>
+            #   Updated: <relative>
+            # Qt tooltips render simple HTML; using <hr> + <small> gives
+            # a clean separation between the title and the metadata.
+            created = _format_relative_time(conv.get("created_at"))
+            updated = _format_relative_time(conv.get("updated_at"))
+            tooltip_lines = [f"<b>{raw_title}</b>"]
+            meta_bits: list[str] = []
+            if created:
+                meta_bits.append(f"Created: {created}")
+            if updated and updated != created:
+                meta_bits.append(f"Updated: {updated}")
+            if meta_bits:
+                tooltip_lines.append("<hr>")
+                tooltip_lines.append("<small>" + "<br>".join(meta_bits) + "</small>")
+            item.setToolTip("".join(tooltip_lines))
             self._conv_list.addItem(item)
 
     def _new_conversation(self) -> None:
@@ -1971,7 +2328,7 @@ class ChatPanel(QWidget):
         conv_data = await self._db.fetchone(
             "SELECT model FROM conversations WHERE id = ?", (conv_id,)
         )
-        stored_model = conv_data["model"] if conv_data else "gpt-5.4"
+        stored_model = conv_data["model"] if conv_data else "gpt-5.5"
         messages = await self._db.get_messages(conv_id)
         self._clear_messages()
         self._welcome.hide()
@@ -2010,6 +2367,7 @@ class ChatPanel(QWidget):
                         model=msg_data.get("model"),
                         tokens_in=msg_data.get("tokens_in"),
                         tokens_out=msg_data.get("tokens_out"),
+                        reasoning_content=msg_data.get("reasoning_content"),
                     )
                 )
 

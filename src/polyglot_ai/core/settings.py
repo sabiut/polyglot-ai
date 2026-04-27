@@ -14,7 +14,7 @@ DEFAULTS = {
     "editor.tab_size": 4,
     "editor.show_line_numbers": True,
     "editor.word_wrap": False,
-    "ai.default_model": "openai:gpt-5.4",
+    "ai.default_model": "openai:gpt-5.5",
     "ai.temperature": 0.7,
     "ai.max_tokens": 4096,
     "ai.system_prompt": "",

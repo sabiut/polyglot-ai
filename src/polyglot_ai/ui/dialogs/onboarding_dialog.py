@@ -139,7 +139,7 @@ class OnboardingDialog(QDialog):
 
         # Feature highlights
         features = [
-            ("💬", "Chat with AI", "Multi-provider support — OpenAI, Claude, Gemini, Grok"),
+            ("💬", "Chat with AI", "Multi-provider support — OpenAI, Claude, Gemini, DeepSeek"),
             ("✏️", "Edit code safely", "AI proposes changes, you approve before they're applied"),
             ("🔍", "Review & plan", "Structured code review and step-by-step planning"),
             ("🔌", "Extensible", "Connect MCP servers for GitHub, databases, and more"),

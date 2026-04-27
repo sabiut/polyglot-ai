@@ -68,7 +68,7 @@ def _make_client(chunks):
     client._default_models = ["gpt-5.4"]
     client._model_filter = ("gpt-5",)
     client._enable_stream_options = True
-    client._reasoning_prefixes = ("o1", "o3", "o4")
+    client._reasoning_prefixes = ("o1", "o4")
     client._base_url = None
     client._client = _FakeOpenAISDK(chunks)
     return client, bus

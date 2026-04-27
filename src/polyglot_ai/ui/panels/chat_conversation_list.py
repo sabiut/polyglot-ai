@@ -70,6 +70,21 @@ def show_context_menu(panel: "ChatPanel", position) -> None:
     pin_act = menu.addAction("Pin / Unpin")
     pin_act.triggered.connect(lambda: pin(panel, conv_id))
 
+    # Move-to-category submenu. The four entries match the filter
+    # tabs at the top of the sidebar; "All" is the reset option that
+    # un-categorises a conversation.
+    move_menu = menu.addMenu("Move to category")
+    for label, value in (
+        ("All", "all"),
+        ("Work", "work"),
+        ("Personal", "personal"),
+        ("Research", "research"),
+    ):
+        # Bind ``value`` per iteration so each lambda captures its own
+        # category string instead of the loop's last value.
+        act = move_menu.addAction(label)
+        act.triggered.connect(lambda _checked=False, c=value: set_category(panel, conv_id, c))
+
     menu.addSeparator()
 
     export_act = menu.addAction("Export as text...")
@@ -81,6 +96,25 @@ def show_context_menu(panel: "ChatPanel", position) -> None:
     delete_act.triggered.connect(lambda: delete(panel, item, conv_id))
 
     menu.exec(panel._conv_list.viewport().mapToGlobal(position))
+
+
+def set_category(panel: "ChatPanel", conv_id: int, category: str) -> None:
+    """Persist a new category for a conversation and refresh the sidebar.
+
+    Triggers ``populate_conversations`` so the row immediately appears
+    under the right filter tab — without the refresh, the list keeps
+    showing the old position until the next reload.
+    """
+    if not panel._db:
+        return
+    from polyglot_ai.core.async_utils import safe_task
+
+    async def _do_set() -> None:
+        await panel._db.set_conversation_category(conv_id, category)
+        # Re-populate so the item moves to the right category bucket.
+        await panel.populate_conversations()
+
+    safe_task(_do_set(), name="db_set_category")
 
 
 def rename(panel: "ChatPanel", item: QListWidgetItem, conv_id: int) -> None:

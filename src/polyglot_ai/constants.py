@@ -56,18 +56,16 @@ EVT_CONVERSATION_FORKED = "conversation:forked"
 EVT_INDEX_READY = "index:ready"
 EVT_INDEX_UPDATED = "index:updated"
 
-# Model cost estimates (per 1K tokens)
+# Model cost estimates (per 1K tokens). Kept conservative — actual
+# pricing is set per-provider on their dashboard and may change; the
+# values here drive the in-app usage estimate, not billing truth.
 MODEL_COSTS = {
+    "gpt-5.5": {"input": 0.012, "output": 0.04},
     "gpt-5.4": {"input": 0.01, "output": 0.03},
-    "gpt-5.4-mini": {"input": 0.0004, "output": 0.0016},
-    "gpt-5.4-nano": {"input": 0.0001, "output": 0.0004},
-    "o3": {"input": 0.01, "output": 0.04},
-    "o3-mini": {"input": 0.001, "output": 0.004},
     "o4-mini": {"input": 0.001, "output": 0.004},
+    "claude-opus-4-7": {"input": 0.018, "output": 0.09},
     "claude-opus-4-6": {"input": 0.015, "output": 0.075},
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
-    "claude-haiku-4-5": {"input": 0.0008, "output": 0.004},
-    "claude-sonnet-4-5": {"input": 0.003, "output": 0.015},
     "gemini-3.1-pro-preview": {"input": 0.00125, "output": 0.005},
     "gemini-3-flash-preview": {"input": 0.0001, "output": 0.0004},
 }

@@ -53,23 +53,26 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
 
     _sync_provider("google", keyring_store.get_key("google"), lambda k: GoogleClient(k, event_bus))
 
-    _XAI_MODELS = [
-        "grok-4.20-0309-reasoning",
-        "grok-4.20-0309-non-reasoning",
-        "grok-4-1-fast-reasoning",
-        "grok-4-1-fast-non-reasoning",
+    # DeepSeek — OpenAI-compatible endpoint at api.deepseek.com.
+    # V4 lineup is two models: ``deepseek-v4-pro`` (flagship) and
+    # ``deepseek-v4-flash`` (fast/lightweight). Stream options are
+    # off because the DeepSeek endpoint does not honour
+    # ``include_usage`` in chunk metadata.
+    _DEEPSEEK_MODELS = [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
     ]
     _sync_provider(
-        "xai",
-        keyring_store.get_key("xai"),
+        "deepseek",
+        keyring_store.get_key("deepseek"),
         lambda k: OpenAIClient(
             k,
             event_bus,
-            base_url="https://api.x.ai/v1",
-            provider_name="xai",
-            provider_display_name="xAI (Grok)",
-            default_models=_XAI_MODELS,
-            model_filter=("grok",),
+            base_url="https://api.deepseek.com/v1",
+            provider_name="deepseek",
+            provider_display_name="DeepSeek",
+            default_models=_DEEPSEEK_MODELS,
+            model_filter=("deepseek",),
             enable_stream_options=False,
             reasoning_prefixes=(),
         ),

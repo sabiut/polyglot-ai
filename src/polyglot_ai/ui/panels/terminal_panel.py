@@ -359,6 +359,12 @@ class TerminalWidget(QWidget):
     # ── Drag-and-drop paths ─────────────────────────────────────────
 
     def dragEnterEvent(self, event) -> None:
+        # Only accept if the PTY is actually alive — accepting on a
+        # dead shell would make the cursor briefly say "drop OK" then
+        # silently swallow the input.
+        if not self._pty or not self._pty.is_running:
+            event.ignore()
+            return
         if event.mimeData().hasUrls() or event.mimeData().hasText():
             event.acceptProposedAction()
 
@@ -387,8 +393,11 @@ class TerminalWidget(QWidget):
 
     # Cursor-blink timer is paused on focus-out and resumed on focus-in.
     def focusInEvent(self, event) -> None:
-        if not self._blink_timer.isActive():
-            self._blink_timer.start(500)
+        # Restart the timer (not just check isActive) so the blink
+        # phase resets to a fresh 500ms cycle from "now". Otherwise
+        # an unfocus that happened mid-cycle leaves the cursor with
+        # an asymmetric on/off rhythm on refocus.
+        self._blink_timer.start(500)
         self._cursor_visible = True
         self.update()
         super().focusInEvent(event)
@@ -441,10 +450,14 @@ class TerminalWidget(QWidget):
             return ""
         (r1, c1), (r2, c2) = sel
         if r1 == r2:
-            # Single line selection
+            # Single line selection. Strip trailing space-fill from the
+            # row so a triple-click that selects a whole 80-column row
+            # doesn't paste 60 trailing spaces of nothing — pyte fills
+            # unset cells with " " so a naive join yields the full
+            # column width every time.
             line = self._lines[r1] if r1 < len(self._lines) else []
             chars = "".join(line[c].char for c in range(c1, min(c2, len(line))))
-            return chars
+            return chars.rstrip() if c2 >= len(line) else chars
         # Multi-line selection
         result = []
         for r in range(r1, r2 + 1):
@@ -509,7 +522,12 @@ class TerminalWidget(QWidget):
             self._last_click_time_ms = now_ms
 
             if self._consecutive_clicks >= 3:
-                # Triple click — select the whole current row
+                # Triple click — select the whole current row.
+                # Reset the counter immediately so a 4th rapid click
+                # starts a fresh selection at that point instead of
+                # re-firing the line-select path again.
+                self._consecutive_clicks = 0
+                self._last_click_time_ms = 0
                 row, _ = self._pos_to_cell(event.pos())
                 if self._lines and row < len(self._lines):
                     self._sel_start = (row, 0)
@@ -627,7 +645,29 @@ class TerminalWidget(QWidget):
         zoom_reset_action.triggered.connect(self._zoom_reset)
         menu.addAction(zoom_reset_action)
 
+        # "Restart" only matters when the shell has exited (or is hung);
+        # when running normally the user can just type ``exit`` and the
+        # terminal handles re-spawn elsewhere. Show it always for
+        # discoverability — no harm in restarting a healthy shell.
+        menu.addSeparator()
+        restart_action = QAction("Restart Terminal", self)
+        restart_action.triggered.connect(self._restart_terminal_from_menu)
+        menu.addAction(restart_action)
+
         menu.exec(event.globalPos())
+
+    def _restart_terminal_from_menu(self) -> None:
+        """Walk up to the TerminalPanel and ask it to restart the shell.
+
+        Falls back silently if the lookup fails so the menu action
+        never errors visibly — the worst case is "menu does nothing".
+        """
+        window = self.window()
+        panel = getattr(window, "terminal_panel", None)
+        if panel is None or not hasattr(panel, "restart_terminal"):
+            logger.debug("Restart Terminal: panel unavailable")
+            return
+        panel.restart_terminal()
 
     def _send_selection_to_ai(self) -> None:
         """Send the current selection to the chat panel as context.
@@ -677,23 +717,72 @@ class TerminalWidget(QWidget):
         self.update()
 
     def event(self, event) -> bool:
-        """Override event() to intercept Tab before Qt uses it for focus navigation."""
+        """Intercept events that Qt would otherwise handle before us.
+
+        Two collisions to deal with:
+
+        * **Tab** — Qt uses Tab for focus traversal. We need it as a key
+          to forward to the shell.
+        * **Ctrl+C / Ctrl+D / Ctrl+Z / Ctrl+L** — the main window's
+          edit menu registers ``QKeySequence.StandardKey.Copy`` (= Ctrl+C)
+          as a window-wide ``QAction``. By default Qt routes those
+          shortcuts to the action *before* keyPressEvent fires, so the
+          terminal would never get to translate Ctrl+C into the SIGINT
+          byte ``\\x03``. ``ShortcutOverride`` is Qt's hook for "this
+          widget wants this combo" — accepting it tells Qt to skip the
+          action and deliver the keypress to us instead.
+        """
         if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Tab:
             self.keyPressEvent(event)
             return True
+
+        if event.type() == QEvent.Type.ShortcutOverride:
+            modifiers = event.modifiers()
+            ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+            shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+            # Plain Ctrl+ for terminal control characters that the menu
+            # bar would otherwise eat. Ctrl+Shift+C/V are also claimed
+            # so they reach our copy/paste handlers (the menu binds
+            # plain Ctrl+C to Copy, but a stray Shift modifier still
+            # falls into the same dispatch path on some Qt versions).
+            if (
+                ctrl
+                and not shift
+                and event.key()
+                in (
+                    Qt.Key.Key_C,
+                    Qt.Key.Key_D,
+                    Qt.Key.Key_Z,
+                    Qt.Key.Key_L,
+                )
+            ):
+                event.accept()
+                return True
+            if ctrl and shift and event.key() in (Qt.Key.Key_C, Qt.Key.Key_V):
+                event.accept()
+                return True
+
         return super().event(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        """Scroll through terminal history with mouse wheel."""
+        """Scroll through terminal history with mouse wheel.
+
+        Selection is cleared on scroll because the selection model is
+        keyed by visible-row index — leaving it in place would make
+        the highlight follow whatever content scrolls into those row
+        positions, which is misleading. Users can re-select after
+        scrolling if they still want to copy.
+        """
         if not self._emulator:
             return
         delta = event.angleDelta().y()
         if delta > 0:
-            # Scroll up (into history)
             self._emulator.scroll_up(3)
         elif delta < 0:
-            # Scroll down (toward current)
             self._emulator.scroll_down(3)
+        else:
+            return
+        self._clear_selection()
         self.update_screen()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -832,7 +921,10 @@ class TerminalWidget(QWidget):
         self._pty.write(b"\x1b[200~")
         self._pty.write(text.encode("utf-8"))
         self._pty.write(b"\x1b[201~")
-        self.update_screen()
+        # No update_screen() here — the shell's echo of the pasted
+        # text will arrive via EVT_TERMINAL_OUTPUT and the paint timer
+        # will pick it up. Calling update_screen() now would just
+        # repaint the pre-paste state.
 
 
 class TerminalPanel(QWidget):
@@ -885,7 +977,19 @@ class TerminalPanel(QWidget):
             self._emulator.feed(data)
 
     def _on_exited(self, **kwargs) -> None:
+        """Print a visible exit notice into the emulator and freeze input.
+
+        Without this the user typed into a dead PTY in silence — the
+        shell had exited but the terminal still painted, blinked, and
+        accepted keystrokes that went nowhere. Feeding a coloured line
+        into the emulator surfaces the exit and "Right-click → Restart"
+        becomes the obvious next step.
+        """
         logger.info("Terminal process exited")
+        if self._emulator:
+            self._emulator.feed(
+                "\r\n\x1b[33m[process exited — right-click to restart]\x1b[0m\r\n".encode()
+            )
 
     def stop_terminal(self) -> None:
         if self._pty:

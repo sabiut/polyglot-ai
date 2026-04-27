@@ -33,6 +33,15 @@ class Message:
     tokens_in: int | None = None
     tokens_out: int | None = None
     attachments: list[Attachment] | None = None
+    # ``reasoning_content`` carries the chain-of-thought emitted by
+    # thinking-mode models (DeepSeek's deepseek-reasoner / V4-pro,
+    # potentially others). DeepSeek's API REQUIRES this be echoed back
+    # on the assistant message in subsequent turns — sending the
+    # conversation without it causes the API to reject the request:
+    #   "The reasoning_content in the thinking mode must be passed
+    #    back to the API."
+    # We never display it in the UI; it's purely a round-trip payload.
+    reasoning_content: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     def to_api_dict(self, include_images: bool = False) -> dict:
@@ -88,6 +97,13 @@ class Message:
             ]
         if self.tool_call_id:
             msg["tool_call_id"] = self.tool_call_id
+        # Echo back reasoning_content on assistant turns. Required by
+        # DeepSeek's thinking mode; OpenAI silently ignores unknown
+        # fields so this is safe to always include when present.
+        # Anthropic uses a different shape (extended-thinking blocks
+        # inside ``content``), handled by anthropic_client.py.
+        if self.role == "assistant" and self.reasoning_content:
+            msg["reasoning_content"] = self.reasoning_content
         return msg
 
 
@@ -95,7 +111,7 @@ class Message:
 class Conversation:
     id: int | None = None
     title: str = "New Conversation"
-    model: str = "gpt-4o"
+    model: str = "gpt-5.5"
     messages: list[Message] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -108,6 +124,12 @@ class Conversation:
 @dataclass
 class StreamChunk:
     delta_content: str | None = None
+    # Delta of the model's chain-of-thought, when the provider exposes
+    # one (e.g. DeepSeek's ``reasoning_content`` field). Accumulated
+    # alongside ``delta_content`` in the agent loop and persisted on
+    # the assistant ``Message`` so it can be echoed back on the next
+    # turn — DeepSeek's API enforces this round-trip strictly.
+    delta_reasoning: str | None = None
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
     usage: dict | None = None

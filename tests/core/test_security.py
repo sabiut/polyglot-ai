@@ -104,11 +104,6 @@ class TestScanContentForSecrets:
         findings = scan_content_for_secrets(content)
         assert len(findings) > 0
 
-    def test_xai_key(self):
-        content = "XAI_KEY=xai-abcdefghijklmnopqrstuvwx"
-        findings = scan_content_for_secrets(content)
-        assert len(findings) > 0
-
     def test_clean_content(self):
         content = "def hello():\n    print('hello world')\n"
         findings = scan_content_for_secrets(content)

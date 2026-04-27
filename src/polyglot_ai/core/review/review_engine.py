@@ -108,7 +108,7 @@ class ReviewEngine:
 
         Args:
             diff_text: Raw unified diff output (from git diff).
-            model_id: Provider-qualified model ID (e.g. "openai:gpt-5.4").
+            model_id: Provider-qualified model ID (e.g. "openai:gpt-5.5").
             context_files: Optional dict of {path: content} for extra context.
         """
         # Parse diff

@@ -53,7 +53,12 @@ PROVIDERS = [
         "placeholder": "AIza...",
         "url": "aistudio.google.com/apikey",
     },
-    {"name": "xai", "display": "xAI (Grok)", "placeholder": "xai-...", "url": "console.x.ai"},
+    {
+        "name": "deepseek",
+        "display": "DeepSeek",
+        "placeholder": "sk-...",
+        "url": "platform.deepseek.com/api_keys",
+    },
 ]
 
 # ── Shared Styles ────────────────────────────────────────────────
@@ -406,6 +411,38 @@ class SettingsDialog(QDialog):
             self._api_inputs[provider["name"]] = key_input
             row.addWidget(key_input, stretch=1)
 
+            # "Get key" button — opens the provider's dashboard URL in
+            # the user's default browser. The actual API key still has
+            # to be pasted into the field on the left; this is just a
+            # discovery/convenience shortcut. We expose it for every
+            # provider that has a ``url`` entry in ``PROVIDERS`` so the
+            # dashboard for OpenAI / Anthropic / Google / DeepSeek is
+            # one click away regardless of which one the user picks.
+            url_path = provider.get("url", "")
+            if url_path:
+                full_url = url_path if url_path.startswith("http") else f"https://{url_path}"
+                get_key_btn = QPushButton("Get key")
+                get_key_btn.setFixedWidth(70)
+                get_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                get_key_btn.setToolTip(f"Open {url_path} in your browser")
+                get_key_btn.setStyleSheet(
+                    f"QPushButton {{ background: transparent; color: {tc.get('accent_primary')}; "
+                    f"  border: 1px solid {tc.get('border_input')}; "
+                    f"  border-radius: {tc.RADIUS_SM}px; padding: 5px; "
+                    f"  font-size: {tc.FONT_SM}px; }}"
+                    f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+                    f"  border-color: {tc.get('accent_primary')}; }}"
+                )
+
+                def _open_url(_=False, u=full_url):
+                    from PyQt6.QtCore import QUrl
+                    from PyQt6.QtGui import QDesktopServices
+
+                    QDesktopServices.openUrl(QUrl(u))
+
+                get_key_btn.clicked.connect(_open_url)
+                row.addWidget(get_key_btn)
+
             # Test button
             test_btn = QPushButton("Test")
             test_btn.setFixedWidth(55)
@@ -508,15 +545,16 @@ class SettingsDialog(QDialog):
         self._default_model.setEditable(True)
         self._default_model.addItems(
             [
+                "gpt-5.5",
                 "gpt-5.4",
-                "gpt-5.4-mini",
-                "gpt-5.4-nano",
+                "o4-mini",
+                "claude-opus-4-7",
                 "claude-opus-4-6",
                 "claude-sonnet-4-6",
-                "claude-haiku-4-5",
                 "gemini-3.1-pro-preview",
                 "gemini-3-flash-preview",
-                "grok-4.20-0309-reasoning",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
             ]
         )
         self._default_model.setCurrentText(self._settings.get("ai.default_model"))
@@ -991,15 +1029,15 @@ class SettingsDialog(QDialog):
                     from polyglot_ai.core.ai.google_client import GoogleClient
 
                     client = GoogleClient(api_key, bus)
-                elif provider_name == "xai":
+                elif provider_name == "deepseek":
                     from polyglot_ai.core.ai.client import OpenAIClient as _OAI
 
                     client = _OAI(
                         api_key,
                         bus,
-                        base_url="https://api.x.ai/v1",
-                        provider_name="xai",
-                        provider_display_name="xAI (Grok)",
+                        base_url="https://api.deepseek.com/v1",
+                        provider_name="deepseek",
+                        provider_display_name="DeepSeek",
                     )
                 else:
                     label.setText("Unknown")

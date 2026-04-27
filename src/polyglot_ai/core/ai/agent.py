@@ -128,6 +128,12 @@ class AgentLoop:
 
                 # Stream response
                 full_content = ""
+                # Accumulated chain-of-thought from thinking-mode
+                # providers (DeepSeek). Captured separately from
+                # ``full_content`` so the visible message stays clean
+                # but the reasoning can be echoed back next turn —
+                # DeepSeek's API rejects the request if it isn't.
+                full_reasoning = ""
                 tool_calls_data: dict[int, dict] = {}
                 finish_reason = None
 
@@ -138,6 +144,8 @@ class AgentLoop:
                 ):
                     if chunk.delta_content:
                         full_content += chunk.delta_content
+                    if chunk.delta_reasoning:
+                        full_reasoning += chunk.delta_reasoning
 
                     if chunk.tool_calls:
                         for tc in chunk.tool_calls:
@@ -175,6 +183,7 @@ class AgentLoop:
                     content=full_content if full_content else None,
                     tool_calls=tool_calls_list,
                     model=conversation.model,
+                    reasoning_content=full_reasoning if full_reasoning else None,
                 )
                 conversation.messages.append(assistant_msg)
 

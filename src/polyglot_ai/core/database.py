@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS prompt_templates (
 """
 
 # Latest schema version
-LATEST_VERSION = 4
+LATEST_VERSION = 5
 
 
 class Database:
@@ -106,6 +106,7 @@ class Database:
             2: self._migrate_v2,
             3: self._migrate_v3,
             4: self._migrate_v4,
+            5: self._migrate_v5,
         }
         assert max(migration_steps) == LATEST_VERSION, (
             f"LATEST_VERSION ({LATEST_VERSION}) != max migration ({max(migration_steps)})"
@@ -158,6 +159,19 @@ class Database:
             "ALTER TABLE conversations ADD COLUMN category TEXT NOT NULL DEFAULT 'all'",
         ),
     ]
+    _V5_ALTERS = [
+        # ``reasoning_content`` carries the chain-of-thought emitted
+        # by thinking-mode models (DeepSeek's deepseek-reasoner /
+        # V4-pro). Stored on the assistant turn so it can be echoed
+        # back to the API on the next request — DeepSeek rejects the
+        # request otherwise. Nullable: only a few model families
+        # populate it.
+        (
+            "messages",
+            "reasoning_content",
+            "ALTER TABLE messages ADD COLUMN reasoning_content TEXT",
+        ),
+    ]
 
     async def _migrate_v2(self) -> None:
         """Add attachments table and conversation columns."""
@@ -179,6 +193,12 @@ class Database:
             if not await self._column_exists(table, column):
                 await self._conn.execute(stmt)
 
+    async def _migrate_v5(self) -> None:
+        """Add reasoning_content column for thinking-mode models (DeepSeek R1, V4-pro)."""
+        for table, column, stmt in self._V5_ALTERS:
+            if not await self._column_exists(table, column):
+                await self._conn.execute(stmt)
+
     # Tables and columns that may be referenced in _column_exists().
     # Only these identifiers are allowed in the PRAGMA query.
     _VALID_TABLES = frozenset(
@@ -193,7 +213,14 @@ class Database:
         }
     )
     _VALID_COLUMNS = frozenset(
-        {"pinned", "archived", "parent_conversation_id", "fork_point_message_id", "category"}
+        {
+            "pinned",
+            "archived",
+            "parent_conversation_id",
+            "fork_point_message_id",
+            "category",
+            "reasoning_content",
+        }
     )
 
     async def _column_exists(self, table: str, column: str) -> bool:
@@ -298,14 +325,25 @@ class Database:
         model: str | None = None,
         tokens_in: int | None = None,
         tokens_out: int | None = None,
+        reasoning_content: str | None = None,
     ) -> int:
         tc_json = json.dumps(tool_calls) if tool_calls else None
         cursor = await self.execute(
             """INSERT INTO messages
                (conversation_id, role, content, tool_calls, tool_call_id,
-                model, tokens_in, tokens_out)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (conversation_id, role, content, tc_json, tool_call_id, model, tokens_in, tokens_out),
+                model, tokens_in, tokens_out, reasoning_content)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                conversation_id,
+                role,
+                content,
+                tc_json,
+                tool_call_id,
+                model,
+                tokens_in,
+                tokens_out,
+                reasoning_content,
+            ),
         )
         await self.execute(
             "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
@@ -349,6 +387,40 @@ class Database:
             "UPDATE conversations SET pinned = ? WHERE id = ?",
             (1 if pinned else 0, conv_id),
         )
+
+    # Whitelisted category values — anything outside this set is a bug
+    # somewhere up-stack and we'd rather not write it to the DB.
+    _ALLOWED_CATEGORIES = frozenset({"all", "work", "personal", "research"})
+
+    async def set_conversation_category(self, conv_id: int, category: str) -> None:
+        """Update a conversation's category.
+
+        Accepts "all" (the reset-to-default value) plus the three
+        category buckets the sidebar filters by. Invalid values are
+        coerced to "all" rather than raising — categorisation is a
+        soft signal, not a constraint, so a stray value shouldn't lock
+        a user out of their conversation.
+        """
+        if category not in self._ALLOWED_CATEGORIES:
+            logger.warning(
+                "set_conversation_category: invalid category %r — coercing to 'all'",
+                category,
+            )
+            category = "all"
+        await self.execute(
+            "UPDATE conversations SET category = ?, updated_at = datetime('now') WHERE id = ?",
+            (category, conv_id),
+        )
+
+    async def get_conversation_category(self, conv_id: int) -> str:
+        """Return the stored category for a conversation, or "all" if unknown.
+
+        Used by the auto-classifier to gate on "is this still default?"
+        — we only want the AI to set a category once, and never
+        override an explicit user choice.
+        """
+        row = await self.fetchone("SELECT category FROM conversations WHERE id = ?", (conv_id,))
+        return row["category"] if row else "all"
 
     async def insert_attachment(
         self,

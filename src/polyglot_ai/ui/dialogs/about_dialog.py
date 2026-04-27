@@ -30,7 +30,7 @@ class AboutDialog(QDialog):
         desc = QLabel(
             "AI-powered coding assistant desktop app\n"
             "for Debian Linux.\n\n"
-            "Supports OpenAI, Anthropic, Google, and xAI.\n"
+            "Supports OpenAI, Anthropic, Google, and DeepSeek.\n"
             "Built with PyQt6 and QScintilla."
         )
         desc.setStyleSheet("font-size: 13px;")

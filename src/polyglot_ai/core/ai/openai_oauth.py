@@ -33,10 +33,8 @@ OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 DEFAULT_MODELS = [
+    "gpt-5.5",
     "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5.3-codex",
 ]
 
 
@@ -121,12 +119,32 @@ class OpenAIOAuthClient(AIProvider):
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    self._access_token = data.get("access_token")
+                    new_access = data.get("access_token")
+                    # Validate before mutating state — a 200 with a
+                    # missing or empty ``access_token`` would otherwise
+                    # leave us with ``self._access_token = None`` and
+                    # a returned ``True``, causing the caller to send
+                    # ``Authorization: Bearer None`` on its next retry.
+                    if not isinstance(new_access, str) or not new_access:
+                        logger.warning("Token refresh returned 200 without a usable access_token")
+                        return False
+                    self._access_token = new_access
                     if data.get("refresh_token"):
                         self._refresh_token = data["refresh_token"]
                     self._save_tokens()
                     logger.info("Refreshed OpenAI access token")
                     return True
+                # Non-200 — log status + sanitized body so an expired
+                # or revoked refresh token (most common cause of 400/
+                # 401) is diagnosable without trawling the OAuth
+                # provider's logs. Without this, refresh failures were
+                # silent and looked indistinguishable from network
+                # errors to the caller.
+                logger.warning(
+                    "OpenAI token refresh failed %d: %s",
+                    resp.status_code,
+                    sanitize_error(resp.text[:500]),
+                )
                 return False
         except Exception:
             logger.exception("Token refresh error")
@@ -154,17 +172,35 @@ class OpenAIOAuthClient(AIProvider):
 
     @staticmethod
     def run_codex_login() -> bool:
+        # Note: ``capture_output=False`` is intentional — codex login is
+        # interactive and prints its OAuth URL/PIN to the terminal.
+        # Capturing would hide that prompt from the user. We pay for
+        # that with no stderr to log on failure; instead, surface the
+        # exit code so the UI can hint at "see the terminal where you
+        # launched the app" if it's non-zero. ``is_codex_available()``
+        # should be called before this to catch the broken-npx case
+        # cheaply; if you got here, npx was working a moment ago but
+        # the login itself failed.
         try:
             result = subprocess.run(
                 ["npx", "-y", "@openai/codex@latest", "login"],
                 timeout=180,
                 capture_output=False,
             )
-            return result.returncode == 0
+            if result.returncode != 0:
+                logger.warning(
+                    "codex login exited with code %d — see the terminal where you "
+                    "launched the app for details (the login command prints to stderr "
+                    "interactively, so we can't relay it here).",
+                    result.returncode,
+                )
+                return False
+            return True
         except FileNotFoundError:
             logger.error("npx not found. Install Node.js: sudo apt install nodejs npm")
             return False
         except subprocess.TimeoutExpired:
+            logger.warning("codex login timed out after 180s")
             return False
         except Exception:
             logger.exception("Codex login failed")
@@ -172,15 +208,29 @@ class OpenAIOAuthClient(AIProvider):
 
     @staticmethod
     def is_codex_available() -> bool:
-        """Return True iff ``npx`` is on PATH and answers within 10s.
+        """Return True iff ``npx`` is on PATH, answers within 10s, AND
+        exits cleanly.
 
-        Narrow catch: ``OSError`` covers the "npx missing / not executable"
-        cases (FileNotFoundError, PermissionError) and
+        The previous implementation only checked that ``subprocess.run``
+        didn't raise — but a broken Node install (missing modules, bad
+        npm config, permission errors on the cache dir) causes ``npx``
+        to print to stderr and exit non-zero. Reporting "Codex
+        available" in that state misled the UI.
+
+        Narrow catch: ``OSError`` covers the "npx missing / not
+        executable" cases (FileNotFoundError, PermissionError) and
         ``TimeoutExpired`` covers a hung invocation. Any other exception
         is a bug and should surface.
         """
         try:
-            subprocess.run(["npx", "--version"], capture_output=True, timeout=10)
+            result = subprocess.run(["npx", "--version"], capture_output=True, timeout=10)
+            if result.returncode != 0:
+                logger.debug(
+                    "npx --version exited %d: %s",
+                    result.returncode,
+                    result.stderr[:200].decode(errors="replace") if result.stderr else "",
+                )
+                return False
             return True
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.debug("npx availability check failed: %s", exc)
@@ -198,7 +248,7 @@ class OpenAIOAuthClient(AIProvider):
     async def stream_chat(
         self,
         messages: list[dict],
-        model: str = "gpt-5.4-mini",
+        model: str = "gpt-5.5",
         tools: list[dict] | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
@@ -238,16 +288,33 @@ class OpenAIOAuthClient(AIProvider):
                             "content": [{"type": "output_text", "text": str(content)}],
                         }
                     )
-                for tc in msg["tool_calls"]:
+                for tc_idx, tc in enumerate(msg["tool_calls"]):
                     fn = tc.get("function", {})
-                    call_id = tc.get("id", "")
-                    # Responses API: 'id' must start with 'fc_',
-                    # 'call_id' is the call_xxx identifier.
-                    fc_id = (
-                        call_id.replace("call_", "fc_", 1)
-                        if call_id.startswith("call_")
-                        else call_id
-                    )
+                    call_id = tc.get("id", "") or ""
+                    # Responses API requires ``id`` to start with
+                    # ``fc_`` and ``call_id`` to be the original
+                    # ``call_...`` identifier. Normalise defensively
+                    # for ids that don't match either prefix (custom
+                    # provider ids, persisted conversations from older
+                    # builds, empty strings from malformed messages).
+                    if call_id.startswith("fc_"):
+                        fc_id = call_id
+                    elif call_id.startswith("call_"):
+                        fc_id = "fc_" + call_id[len("call_") :]
+                    elif call_id:
+                        fc_id = f"fc_{call_id}"
+                    else:
+                        # Empty call_id — synthesize unique stable ids
+                        # using the loop index so multiple
+                        # missing-id tool calls in the same message
+                        # don't collapse onto the same ``fc_unknown_…``
+                        # value. Both ``id`` and ``call_id`` get the
+                        # synthetic so the function_call_output that
+                        # references this call later in the
+                        # conversation can match by ``call_id``.
+                        fn_name = fn.get("name", "tool")
+                        fc_id = f"fc_unknown_{fn_name}_{tc_idx}"
+                        call_id = f"call_unknown_{fn_name}_{tc_idx}"
                     input_messages.append(
                         {
                             "type": "function_call",
@@ -261,14 +328,31 @@ class OpenAIOAuthClient(AIProvider):
             if role in ("user", "assistant"):
                 # Responses API requires structured content items
                 if isinstance(content, list):
-                    # Already multimodal (text + images) — convert each part
+                    # Already multimodal (text + images) — convert each part.
+                    # Skip non-dict entries defensively: persisted or
+                    # provider-generated messages occasionally contain raw
+                    # strings, ``None``, or other shapes inside the list,
+                    # and ``.get()`` on those would raise AttributeError
+                    # and surface as a generic "streaming failed" instead
+                    # of a recognisable malformed-message error.
                     parts = []
                     for part in content:
+                        if not isinstance(part, dict):
+                            continue
                         if part.get("type") == "text":
                             ct = "input_text" if role == "user" else "output_text"
                             parts.append({"type": ct, "text": part.get("text", "")})
-                        elif part.get("type") == "image_url":
-                            # Convert OpenAI image_url format to Responses API input_image
+                        elif part.get("type") == "image_url" and role == "user":
+                            # Convert OpenAI image_url to Responses API
+                            # ``input_image``. Only emitted for user
+                            # messages — assistant content blocks should
+                            # never carry incoming images, and the
+                            # Responses API rejects ``input_*`` types
+                            # under an ``assistant`` role item. If a
+                            # legacy stored conversation has an image
+                            # part on an assistant message, we drop it
+                            # silently rather than emit an invalid
+                            # request.
                             url = part.get("image_url", {}).get("url", "")
                             parts.append({"type": "input_image", "image_url": url})
                     input_messages.append({"role": role, "content": parts})
@@ -312,6 +396,24 @@ class OpenAIOAuthClient(AIProvider):
                 payload["tools"] = responses_tools
 
         max_retries = 3
+        # Refresh-once flag: on a 401 we attempt a token refresh and
+        # retry within this loop. We deliberately do NOT recurse into
+        # ``stream_chat()`` (the previous implementation), because if
+        # the refreshed token also returned 401 the call would recurse
+        # again on the same code path, producing an unbounded retry
+        # cycle that ate the stack rather than failing cleanly.
+        refresh_attempted = False
+        # Track the cause of the most-recent failure so the
+        # all-retries-exhausted error reflects what *actually* went
+        # wrong on the final attempt. The previous version used a
+        # sticky boolean that latched True on any 429 — a 429-then-
+        # connection-error sequence would still report "rate limited"
+        # at the end even though the real final failure was the
+        # network. Possible values:
+        #   - None: no failure yet
+        #   - "rate_limited": the last attempt returned 429
+        #   - "connection": the last attempt raised a httpx network error
+        last_failure: str | None = None
 
         for attempt in range(max_retries):
             try:
@@ -324,17 +426,13 @@ class OpenAIOAuthClient(AIProvider):
                         json=payload,
                     ) as resp:
                         if resp.status_code == 401:
-                            if await self._refresh_access_token():
-                                async for chunk in self.stream_chat(
-                                    messages,
-                                    model,
-                                    tools,
-                                    temperature,
-                                    max_tokens,
-                                    system_prompt,
-                                ):
-                                    yield chunk
-                                return
+                            # Try refreshing the token at most once. If
+                            # the next attempt is still 401, fall
+                            # through to the "session expired" message
+                            # rather than retrying forever.
+                            if not refresh_attempted and await self._refresh_access_token():
+                                refresh_attempted = True
+                                continue
                             yield StreamChunk(
                                 delta_content="\n\n**Error:** Session expired. "
                                 "Please sign in again via Settings."
@@ -342,9 +440,15 @@ class OpenAIOAuthClient(AIProvider):
                             return
 
                         if resp.status_code == 429:
-                            wait = 5 * (attempt + 1)
-                            logger.warning("Rate limited, retrying in %ds...", wait)
-                            await asyncio.sleep(wait)
+                            last_failure = "rate_limited"
+                            # Don't sleep on the final attempt — we'd
+                            # just wait then immediately fall through to
+                            # the all-retries-exhausted error, wasting
+                            # the user's time.
+                            if attempt < max_retries - 1:
+                                wait = 5 * (attempt + 1)
+                                logger.warning("Rate limited, retrying in %ds...", wait)
+                                await asyncio.sleep(wait)
                             continue
 
                         if resp.status_code != 200:
@@ -377,6 +481,14 @@ class OpenAIOAuthClient(AIProvider):
                         item_id_to_call_id: dict[str, str] = {}
                         # Track which calls got their args via deltas vs done
                         call_id_has_deltas: set[str] = set()
+                        # Track which calls have already emitted their full
+                        # arguments — separate from "had deltas" so the
+                        # ``arguments.done`` and ``output_item.done`` branches
+                        # don't double-emit when neither delta arrived. The
+                        # agent loop accumulates by index, so a duplicate
+                        # emission produces ``{"path":"x"}{"path":"x"}`` and
+                        # breaks JSON parsing on the tool call.
+                        call_id_args_emitted: set[str] = set()
                         next_tool_idx = 0
 
                         async for line in resp.aiter_lines():
@@ -409,21 +521,36 @@ class OpenAIOAuthClient(AIProvider):
                                 if item.get("type") == "function_call":
                                     call_id = item.get("call_id", "")
                                     item_id = item.get("id", "")
+                                    # Use ``item_id`` as a fallback key
+                                    # when the API didn't send a
+                                    # ``call_id`` yet. Without this,
+                                    # multiple partial events with empty
+                                    # ``call_id`` would all collide on
+                                    # the same dict slot ("") and the
+                                    # agent would see them merged into
+                                    # one tool call with corrupted args.
+                                    call_key = call_id or item_id
+                                    if not call_key:
+                                        logger.warning(
+                                            "Responses API: output_item.added without "
+                                            "call_id or id; skipping"
+                                        )
+                                        continue
                                     name = item.get("name", "")
                                     # Map item_id to call_id for delta events
                                     if item_id and call_id:
                                         item_id_to_call_id[item_id] = call_id
-                                    if call_id and call_id not in call_id_to_idx:
-                                        call_id_to_idx[call_id] = next_tool_idx
+                                    if call_key not in call_id_to_idx:
+                                        call_id_to_idx[call_key] = next_tool_idx
                                         next_tool_idx += 1
                                     if name:
-                                        call_id_names[call_id] = name
-                                    tidx = call_id_to_idx.get(call_id, 0)
+                                        call_id_names[call_key] = name
+                                    tidx = call_id_to_idx[call_key]
                                     yield StreamChunk(
                                         tool_calls=[
                                             {
                                                 "index": tidx,
-                                                "id": call_id,
+                                                "id": call_id or call_key,
                                                 "function": {
                                                     "name": name,
                                                     "arguments": "",
@@ -435,20 +562,29 @@ class OpenAIOAuthClient(AIProvider):
                             elif event_type == "response.function_call_arguments.delta":
                                 # Delta events use item_id, not call_id
                                 item_id = data.get("item_id", "")
-                                call_id = data.get("call_id") or item_id_to_call_id.get(
-                                    item_id, item_id
+                                call_key = (
+                                    data.get("call_id")
+                                    or item_id_to_call_id.get(item_id)
+                                    or item_id
                                 )
-                                if call_id not in call_id_to_idx:
-                                    call_id_to_idx[call_id] = next_tool_idx
+                                if not call_key:
+                                    logger.warning(
+                                        "Responses API: function_call_arguments.delta "
+                                        "without call_id or item_id; skipping"
+                                    )
+                                    continue
+                                if call_key not in call_id_to_idx:
+                                    call_id_to_idx[call_key] = next_tool_idx
                                     next_tool_idx += 1
-                                tidx = call_id_to_idx[call_id]
-                                name = data.get("name") or call_id_names.get(call_id)
-                                call_id_has_deltas.add(call_id)
+                                tidx = call_id_to_idx[call_key]
+                                name = data.get("name") or call_id_names.get(call_key)
+                                call_id_has_deltas.add(call_key)
+                                call_id_args_emitted.add(call_key)
                                 yield StreamChunk(
                                     tool_calls=[
                                         {
                                             "index": tidx,
-                                            "id": call_id,
+                                            "id": call_key,
                                             "function": {
                                                 "name": name,
                                                 "arguments": data.get("delta", ""),
@@ -461,21 +597,33 @@ class OpenAIOAuthClient(AIProvider):
                                 # Complete arguments for one call. If we
                                 # already got deltas, skip (they accumulated).
                                 # If no deltas arrived, use this as the source.
+                                # Mark args as emitted so the later
+                                # ``output_item.done`` event doesn't re-yield
+                                # the same arguments and corrupt the JSON.
                                 item_id = data.get("item_id", "")
-                                call_id = data.get("call_id") or item_id_to_call_id.get(
-                                    item_id, item_id
+                                call_key = (
+                                    data.get("call_id")
+                                    or item_id_to_call_id.get(item_id)
+                                    or item_id
                                 )
-                                if call_id not in call_id_has_deltas:
-                                    if call_id not in call_id_to_idx:
-                                        call_id_to_idx[call_id] = next_tool_idx
+                                if not call_key:
+                                    logger.warning(
+                                        "Responses API: function_call_arguments.done "
+                                        "without call_id or item_id; skipping"
+                                    )
+                                    continue
+                                if call_key not in call_id_args_emitted:
+                                    if call_key not in call_id_to_idx:
+                                        call_id_to_idx[call_key] = next_tool_idx
                                         next_tool_idx += 1
-                                    tidx = call_id_to_idx[call_id]
-                                    name = data.get("name") or call_id_names.get(call_id, "")
+                                    tidx = call_id_to_idx[call_key]
+                                    name = data.get("name") or call_id_names.get(call_key, "")
+                                    call_id_args_emitted.add(call_key)
                                     yield StreamChunk(
                                         tool_calls=[
                                             {
                                                 "index": tidx,
-                                                "id": call_id,
+                                                "id": call_key,
                                                 "function": {
                                                     "name": name,
                                                     "arguments": data.get("arguments", ""),
@@ -488,42 +636,47 @@ class OpenAIOAuthClient(AIProvider):
                                 item = data.get("item", {})
                                 if item.get("type") == "function_call":
                                     call_id = item.get("call_id", "")
-                                    name = item.get("name", "") or call_id_names.get(call_id, "")
-                                    # If we never got deltas OR done for this
-                                    # call, use the complete item as fallback
-                                    if call_id not in call_id_has_deltas:
-                                        if call_id not in call_id_to_idx:
-                                            call_id_to_idx[call_id] = next_tool_idx
-                                            next_tool_idx += 1
-                                        tidx = call_id_to_idx[call_id]
-                                        yield StreamChunk(
-                                            tool_calls=[
-                                                {
-                                                    "index": tidx,
-                                                    "id": call_id,
-                                                    "function": {
-                                                        "name": name,
-                                                        "arguments": item.get("arguments", ""),
-                                                    },
-                                                }
-                                            ],
-                                            finish_reason="tool_calls",
+                                    item_id = item.get("id", "")
+                                    call_key = call_id or item_id
+                                    if not call_key:
+                                        logger.warning(
+                                            "Responses API: output_item.done function_call "
+                                            "without call_id or id; skipping"
                                         )
+                                        continue
+                                    name = item.get("name", "") or call_id_names.get(call_key, "")
+                                    if call_key not in call_id_to_idx:
+                                        call_id_to_idx[call_key] = next_tool_idx
+                                        next_tool_idx += 1
+                                    tidx = call_id_to_idx[call_key]
+                                    # Two cases, both must yield ``finish_reason``
+                                    # so the agent loop sees the tool-call
+                                    # completion signal:
+                                    # - args NOT yet emitted → emit them now
+                                    #   from the item payload (last-resort
+                                    #   fallback when no delta and no
+                                    #   ``arguments.done`` arrived)
+                                    # - args already emitted → emit an empty
+                                    #   args chunk just to carry the
+                                    #   finish_reason without duplicating
+                                    if call_key not in call_id_args_emitted:
+                                        call_id_args_emitted.add(call_key)
+                                        args_payload = item.get("arguments", "")
                                     else:
-                                        tidx = call_id_to_idx.get(call_id, 0)
-                                        yield StreamChunk(
-                                            tool_calls=[
-                                                {
-                                                    "index": tidx,
-                                                    "id": call_id,
-                                                    "function": {
-                                                        "name": name,
-                                                        "arguments": "",
-                                                    },
-                                                }
-                                            ],
-                                            finish_reason="tool_calls",
-                                        )
+                                        args_payload = ""
+                                    yield StreamChunk(
+                                        tool_calls=[
+                                            {
+                                                "index": tidx,
+                                                "id": call_id or call_key,
+                                                "function": {
+                                                    "name": name,
+                                                    "arguments": args_payload,
+                                                },
+                                            }
+                                        ],
+                                        finish_reason="tool_calls",
+                                    )
 
                             elif event_type == "response.completed":
                                 usage = data.get("response", {}).get("usage", {})
@@ -546,6 +699,7 @@ class OpenAIOAuthClient(AIProvider):
                 httpx.ReadError,
                 httpx.RemoteProtocolError,
             ) as e:
+                last_failure = "connection"
                 if attempt < max_retries - 1:
                     wait = 3 * (attempt + 1)
                     logger.warning(
@@ -566,44 +720,73 @@ class OpenAIOAuthClient(AIProvider):
                 yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg}")
                 return
 
-        # All retries exhausted
-        error_msg = (
-            f"Connection timed out after {max_retries} attempts. "
-            "Check your internet connection or try again."
-        )
+        # All retries exhausted. The error message reflects the cause
+        # of the LAST failure, not whatever happened earlier in the
+        # sequence — this matches what the user will hit if they retry
+        # immediately.
+        if last_failure == "rate_limited":
+            error_msg = (
+                f"Rate limited after {max_retries} attempts. "
+                "Wait a moment before trying again, or reduce request frequency."
+            )
+        else:
+            error_msg = (
+                f"Connection timed out after {max_retries} attempts. "
+                "Check your internet connection or try again."
+            )
         self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
         yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg}")
 
     async def test_connection(self) -> tuple[bool, str]:
         if not self._access_token:
             return False, "Not logged in"
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                async with client.stream(
-                    "POST",
-                    CODEX_RESPONSES_URL,
-                    headers=self._get_headers(),
-                    json={
-                        "model": "gpt-5.4-mini",
-                        "instructions": "Be brief.",
-                        "input": [
-                            {"role": "user", "content": [{"type": "input_text", "text": "Say ok"}]}
-                        ],
-                        "store": False,
-                        "stream": True,
-                    },
-                ) as resp:
-                    if resp.status_code == 200:
-                        return True, "Connected via ChatGPT subscription"
-                    body = await resp.aread()
-                    logger.error(
-                        "OpenAI test_connection failed %d: %s",
-                        resp.status_code,
-                        sanitize_error(body.decode(errors="replace")[:500]),
-                    )
-                    return False, f"HTTP {resp.status_code}: Connection test failed"
-        except Exception as e:
-            return False, sanitize_error(str(e))
+        # Try once, refresh-and-retry once on 401. Without the refresh
+        # path the Settings UI would report "connection failed" for any
+        # user whose access token expired even though streaming would
+        # have succeeded after a quick refresh.
+        #
+        # Explicit flag instead of ``for x in (False, True)`` so the
+        # control flow is obvious: at most two attempts, and the
+        # second is only reached after a successful refresh.
+        refresh_attempted = False
+        for _attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    async with client.stream(
+                        "POST",
+                        CODEX_RESPONSES_URL,
+                        headers=self._get_headers(),
+                        json={
+                            "model": "gpt-5.5",
+                            "instructions": "Be brief.",
+                            "input": [
+                                {
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": "Say ok"}],
+                                }
+                            ],
+                            "store": False,
+                            "stream": True,
+                        },
+                    ) as resp:
+                        if resp.status_code == 200:
+                            return True, "Connected via ChatGPT subscription"
+                        if resp.status_code == 401 and not refresh_attempted:
+                            refresh_attempted = True
+                            if await self._refresh_access_token():
+                                continue  # retry once with fresh token
+                            return False, "Session expired. Please sign in again."
+                        body = await resp.aread()
+                        logger.error(
+                            "OpenAI test_connection failed %d: %s",
+                            resp.status_code,
+                            sanitize_error(body.decode(errors="replace")[:500]),
+                        )
+                        return False, f"HTTP {resp.status_code}: Connection test failed"
+            except Exception as e:
+                return False, sanitize_error(str(e))
+        # Fall-through: refresh succeeded once but the retry still 401'd.
+        return False, "Session expired. Please sign in again."
 
     def logout(self, clear_disk: bool = True) -> str:
         """Clear tokens from memory and optionally from disk.

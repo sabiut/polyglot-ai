@@ -1,13 +1,13 @@
 # Polyglot AI
 
-AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI, Anthropic, Google, and xAI support.
+AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI, Anthropic, Google, and DeepSeek support.
 
 ![Polyglot AI Screenshot](docs/images/screenshot.png)
 
 ## Features
 
 ### Core
-- **Multi-provider AI chat** — OpenAI, Anthropic (Claude), Google (Gemini), xAI (Grok) with streaming responses
+- **Multi-provider AI chat** — OpenAI, Anthropic (Claude), Google (Gemini), DeepSeek with streaming responses
 - **Integrated code editor** — Syntax highlighting via QScintilla, multi-tab editing
 - **Built-in terminal** — Full PTY terminal with mouse text selection, copy/paste, and right-click context menu
 - **AI tool calling** — File read/write/search, shell execution, git operations
@@ -81,6 +81,24 @@ pip install -e ".[dev]"
 polyglot-ai
 ```
 
+### With Nix (devshell)
+
+If you have [Nix](https://nixos.org/download.html) with flakes enabled,
+you don't need to install Python, Qt, or any system libraries manually:
+
+```bash
+git clone https://github.com/sabiut/polyglot-ai.git
+cd polyglot-ai
+nix develop          # drops you into a shell with everything ready
+polyglot-ai          # launches the app
+```
+
+The first `nix develop` creates a `.venv` and runs `pip install -e ".[dev]"`
+inside it, using Qt6 / asyncpg / aiomysql from nixpkgs and the rest from
+PyPI. Subsequent shells reuse the venv. If you use [direnv](https://direnv.net)
+with [nix-direnv](https://github.com/nix-community/nix-direnv), the shell
+auto-activates on `cd` thanks to the included `.envrc`.
+
 ## Configuration
 
 1. Launch the app and open **Settings** (gear icon)
@@ -88,7 +106,7 @@ polyglot-ai
    - OpenAI API key
    - Anthropic API key
    - Google AI API key
-   - xAI API key
+   - DeepSeek API key
 3. Or sign in with your existing subscription (OpenAI/Claude)
 
 ## Requirements

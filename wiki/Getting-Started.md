@@ -26,6 +26,25 @@ pip install -e .
 > The project uses `pyproject.toml` with an entry point called `polyglot-ai`.
 > After `pip install -e .` the command is on your `PATH` inside the venv.
 
+### Alternative: Nix devshell
+
+If you have [Nix](https://nixos.org/download.html) with flakes enabled,
+the repo ships a `flake.nix` with everything wired up — Qt6, Python 3.11,
+Node.js (for `npx` MCP servers), `uv` (for `uvx`), `ruff`, `pre-commit`,
+`gh`, and the project itself in editable mode:
+
+```bash
+git clone https://github.com/<you>/polyglot-ai.git
+cd polyglot-ai
+nix develop          # drops you into a fully-set-up shell
+polyglot-ai          # launches the app
+```
+
+The first `nix develop` creates `.venv` and runs `pip install -e ".[dev]"`
+once. Later shells reuse it. With [direnv](https://direnv.net) +
+[nix-direnv](https://github.com/nix-community/nix-direnv) the shell
+auto-activates on `cd` (the repo includes an `.envrc`).
+
 ## Launch
 
 From the project root:
