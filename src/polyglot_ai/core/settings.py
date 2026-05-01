@@ -30,6 +30,12 @@ DEFAULTS = {
     # AI features
     "editor.ai_completions": True,
     "ai.auto_context": True,
+    # Notifications — see core/notifications.py for the policy.
+    # ``ai_long_response_seconds`` controls the threshold below which a
+    # successfully-finished AI stream is considered "fast enough that
+    # the user doesn't need a notification".
+    "notifications.enabled": True,
+    "notifications.ai_long_response_seconds": 8,
 }
 
 

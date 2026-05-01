@@ -99,11 +99,67 @@ class CICDPanel(QWidget):
 
     def set_project_root(self, path: Path | str) -> None:
         self._project_root = Path(path) if isinstance(path, str) else path
+        # When the project changes, clear the runs table and re-evaluate
+        # so a freshly-opened non-git folder doesn't keep showing the
+        # previous project's pipeline runs.
+        if hasattr(self, "_runs_table"):
+            self._runs_table.setRowCount(0)
+            self._runs_data = []
+        if self.isVisible():
+            self._refresh_runs()
 
     def _auto_refresh(self) -> None:
         """Silent auto-refresh — only if we have a project and the tab is visible."""
         if self._project_root and self.isVisible():
             self._refresh_runs()
+
+    # ── Repo capability checks ──────────────────────────────────────
+    #
+    # The CI/CD panel only makes sense for git-tracked projects with a
+    # GitHub remote. Without these checks, opening a brand-new Arduino
+    # sketch (or any non-git folder) used to surface ``gh``'s raw
+    # ``fatal: not a git repository`` error in the panel — not useful
+    # to anyone. We probe up front and render a friendly empty state
+    # instead.
+
+    def _is_git_repo(self) -> bool:
+        """Return True when the project root is inside a git working tree."""
+        if self._project_root is None:
+            return False
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=self._project_root,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def _has_github_remote(self) -> bool:
+        """Return True when at least one configured remote points at GitHub.
+
+        We accept both ``github.com`` (public) and ``ghe.<corp>.com``
+        style hosts so users on GitHub Enterprise see CI runs too.
+        """
+        if self._project_root is None:
+            return False
+        try:
+            result = subprocess.run(
+                ["git", "remote", "-v"],
+                cwd=self._project_root,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if result.returncode != 0:
+            return False
+        text = result.stdout.lower()
+        return "github.com" in text or "github.io" in text or "ghe." in text
 
     # ── UI Setup ────────────────────────────────────────────────────
 
@@ -288,7 +344,24 @@ class CICDPanel(QWidget):
 
     def _refresh_runs(self) -> None:
         if not self._project_root:
-            self._status_label.setText("  Open a project first")
+            self._set_empty_state("  Open a project first")
+            return
+
+        # Friendly empty states *before* we shell out — these guard
+        # against the "fatal: not a git repository" stderr that
+        # otherwise leaked into the status bar when a non-git
+        # project was open.
+        if not self._is_git_repo():
+            self._set_empty_state(
+                "  This project isn't a git repository — CI/CD only works for git-tracked projects."
+            )
+            return
+        if not self._has_github_remote():
+            self._set_empty_state(
+                "  No GitHub remote configured for this project. Add "
+                "one with: git remote add origin "
+                "git@github.com:<you>/<repo>.git"
+            )
             return
 
         self._refresh_btn.setEnabled(False)
@@ -305,6 +378,21 @@ class CICDPanel(QWidget):
             ]
         )
         self._on_runs_loaded(output, code)
+
+    def _set_empty_state(self, message: str) -> None:
+        """Clear the runs table and show ``message`` as the status.
+
+        Centralises the "we have nothing to show, here's why" path so
+        every guard branch reaches the same end state — table empty,
+        refresh button re-enabled, status text explanatory.
+        """
+        if hasattr(self, "_runs_table"):
+            self._runs_table.setRowCount(0)
+        self._runs_data = []
+        if hasattr(self, "_refresh_btn"):
+            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("⟳ Refresh")
+        self._status_label.setText(message)
 
     def _on_runs_loaded(self, output: str, code: int) -> None:
         self._refresh_btn.setEnabled(True)

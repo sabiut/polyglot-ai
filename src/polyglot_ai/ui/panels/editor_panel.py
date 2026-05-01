@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from polyglot_ai.core.coverage import CoverageReport
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
@@ -142,6 +146,10 @@ class EditorPanel(QTabWidget):
             tab.editor.modificationChanged.connect(
                 lambda _: self._update_tab_title(self.indexOf(tab))
             )
+            # If a coverage report is already in memory from a previous
+            # test run, apply it to this freshly-opened tab so the
+            # user doesn't have to re-run tests after every navigation.
+            self._apply_coverage_to_tab(tab)
         elif isinstance(tab, DocumentTab):
             tab.source_editor.textChanged.connect(lambda: self._update_tab_title(self.indexOf(tab)))
 
@@ -260,3 +268,41 @@ class EditorPanel(QTabWidget):
             tab = self.widget(i)
             if isinstance(tab, EditorTab):
                 tab.set_ai_services(provider_manager, settings)
+
+    # ── Test coverage gutter ──────────────────────────────────────
+
+    def apply_coverage(self, report: "CoverageReport") -> None:
+        """Paint coverage markers in every open editor tab.
+
+        Files in the report that aren't currently open are stashed
+        so a tab opened later picks up the data — that's
+        :py:meth:`_apply_coverage_to_tab` doing the lookup. Files
+        without coverage data simply have their markers cleared.
+        """
+        self._coverage_report = report
+        for i in range(self.count()):
+            tab = self.widget(i)
+            if isinstance(tab, EditorTab):
+                self._apply_coverage_to_tab(tab)
+
+    def clear_coverage(self) -> None:
+        """Remove the stashed report and clear gutters in every tab."""
+        self._coverage_report = None
+        for i in range(self.count()):
+            tab = self.widget(i)
+            if isinstance(tab, EditorTab):
+                tab.clear_coverage()
+
+    def _apply_coverage_to_tab(self, tab: EditorTab) -> None:
+        """Look up the open tab's path in the latest report and paint."""
+        report = getattr(self, "_coverage_report", None)
+        if report is None or tab.file_path is None:
+            return
+        key = str(tab.file_path.resolve())
+        fc = report.files.get(key)
+        if fc is None:
+            # The current report covered other files; clear any stale
+            # markers on this tab so a re-run doesn't keep ghost data.
+            tab.clear_coverage()
+        else:
+            tab.set_coverage(fc)

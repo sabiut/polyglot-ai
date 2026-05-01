@@ -14,7 +14,10 @@ from pathlib import Path
 
 from PyQt6.QtCore import QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from typing import TYPE_CHECKING
+
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -36,6 +39,10 @@ from polyglot_ai.core.test_collector import (
     run_tests,
 )
 
+if TYPE_CHECKING:  # pragma: no cover
+    from polyglot_ai.core.coverage import CoverageReport
+    from polyglot_ai.ui.panels.editor_panel import EditorPanel
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +58,7 @@ class TestPanel(QWidget):
     _result_received = pyqtSignal(str, str)  # node_id, status
     _output_line = pyqtSignal(str)
     _run_finished = pyqtSignal()
+    _coverage_received = pyqtSignal(object)  # CoverageReport
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,11 +74,17 @@ class TestPanel(QWidget):
         self._run_counters: dict[str, int] = {"passed": 0, "failed": 0, "skipped": 0}
         # Set later in set_event_bus() once init_task_manager has run.
         self._task_manager = None
+        # Coverage wiring — the editor panel is set externally via
+        # :py:meth:`set_editor_panel` so the test panel itself has no
+        # hard dependency on the editor (helps tests stay isolated).
+        self._editor_panel: EditorPanel | None = None
+        self._latest_coverage: CoverageReport | None = None
 
         self._collect_done.connect(self._apply_collect)
         self._result_received.connect(self._apply_result)
         self._output_line.connect(self._append_output)
         self._run_finished.connect(self._on_run_finished)
+        self._coverage_received.connect(self._apply_coverage)
 
         self._setup_ui()
 
@@ -102,6 +116,32 @@ class TestPanel(QWidget):
         )
         h.addWidget(self._summary_label)
         h.addStretch()
+
+        # Coverage toggle — opt-in because pytest-cov is a separate
+        # install in the project's venv and adds 10–30% to run time.
+        # Persists for the session only; we don't bother round-tripping
+        # to settings since "did the user just click it" is the only
+        # state that matters.
+        self._coverage_check = QCheckBox("Coverage")
+        self._coverage_check.setToolTip(
+            "Run pytest with --cov and paint hit/miss bars in the editor gutter.\n"
+            "Requires pytest-cov in the project's venv."
+        )
+        self._coverage_check.setStyleSheet(
+            "QCheckBox { color: #c8c8c8; font-size: 11px; background: transparent; }"
+            "QCheckBox::indicator { width: 12px; height: 12px; }"
+        )
+        h.addWidget(self._coverage_check)
+
+        # Header coverage % — only shows after a coverage run completes.
+        # Hidden by default; ``_apply_coverage`` populates and reveals it.
+        self._coverage_label = QLabel("")
+        self._coverage_label.setStyleSheet(
+            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
+        )
+        self._coverage_label.setToolTip("Last coverage run summary")
+        self._coverage_label.hide()
+        h.addWidget(self._coverage_label)
 
         run_btn = self._icon_btn(self._draw_play_icon(), "Run all tests")
         run_btn.clicked.connect(self._on_run_all)
@@ -263,6 +303,26 @@ class TestPanel(QWidget):
             self._task_manager = get_task_manager()
         except Exception:
             logger.exception("test_panel: could not bind task manager")
+
+    def set_editor_panel(self, editor_panel: "EditorPanel") -> None:
+        """Wire the editor panel that should receive coverage markers.
+
+        Optional — without it, runs still work (and the coverage label
+        in the header still updates), they just don't paint gutter
+        bars in the editor. Tests of the test-panel internals therefore
+        don't need a real EditorPanel fixture.
+        """
+        self._editor_panel = editor_panel
+
+    def _apply_coverage(self, report: "CoverageReport") -> None:
+        """Slot for the ``_coverage_received`` cross-thread signal."""
+        self._latest_coverage = report
+        # Update the inline header label so the user sees overall %
+        # without having to look at the output pane.
+        self._coverage_label.setText(f"{report.overall_pct:.0f}% covered")
+        self._coverage_label.show()
+        if self._editor_panel is not None:
+            self._editor_panel.apply_coverage(report)
 
     def _maybe_refresh_after_save(self, kwargs: dict) -> None:
         path = kwargs.get("path", "")
@@ -604,10 +664,19 @@ class TestPanel(QWidget):
         self._run_counters = {"passed": 0, "failed": 0, "skipped": 0}
 
     async def _do_run(self, node_id: str | None) -> None:
+        # Snapshot the checkbox state at the start of the run so a
+        # mid-run toggle doesn't half-apply coverage. ``isChecked`` is
+        # GUI-thread-only but we're entering this coroutine from the
+        # GUI thread so the read here is safe.
+        with_cov = self._coverage_check.isChecked()
         try:
-            async for event in run_tests(self._project_root, node_id=node_id):
+            async for event in run_tests(
+                self._project_root, node_id=node_id, with_coverage=with_cov
+            ):
                 if event.kind == "result":
                     self._result_received.emit(event.node_id, event.status)
+                elif event.kind == "coverage" and event.payload is not None:
+                    self._coverage_received.emit(event.payload)
                 self._output_line.emit(event.text)
         except Exception as e:
             logger.exception("test_panel: run crashed")
@@ -616,6 +685,10 @@ class TestPanel(QWidget):
             self._run_finished.emit()
 
     async def _do_run_multi(self, node_ids: list[str]) -> None:
+        # Coverage is only meaningful when running the whole suite or
+        # at least a contiguous subset; per-node multi-runs would
+        # produce N partial reports. Disable coverage in that path
+        # until we have an aggregator.
         try:
             for nid in node_ids:
                 async for event in run_tests(self._project_root, node_id=nid):

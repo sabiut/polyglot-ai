@@ -142,6 +142,22 @@ def main() -> None:
     window.bridge = bridge
     window.theme_manager = theme_manager
 
+    # Notifications: wire here so the Notifier exists before any panel
+    # has a chance to emit. ``install_notifications`` attaches the
+    # toast manager + tray hook to ``window`` and connects the
+    # delivery callback. Failure here must not block app startup —
+    # the worst case is "no notifications", not a crashed window.
+    try:
+        from polyglot_ai.startup.notifications_setup import install_notifications
+
+        install_notifications(window, event_bus, settings)
+    except Exception:  # pragma: no cover — best-effort wiring
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Notification system failed to install — continuing without it"
+        )
+
     # MCP
     mcp_client = MCPClient()
     window._mcp_client = mcp_client

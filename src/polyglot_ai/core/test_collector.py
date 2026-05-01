@@ -19,9 +19,10 @@ import logging
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -238,14 +239,18 @@ class TestRunEvent:
     """Streamed line from a running pytest invocation.
 
     ``kind`` is ``"line"`` for normal output, ``"result"`` when a single
-    test's pass/fail status can be parsed from the line, and ``"summary"``
-    for the final ``= N passed in 0.5s =`` line.
+    test's pass/fail status can be parsed from the line, ``"summary"``
+    for the final ``= N passed in 0.5s =`` line, and ``"coverage"``
+    once after the run when ``with_coverage=True`` was passed and a
+    Cobertura XML report could be parsed. The coverage payload is
+    attached to ``payload`` to keep the dataclass backwards-compatible.
     """
 
-    kind: str  # "line" | "result" | "summary"
+    kind: str  # "line" | "result" | "summary" | "coverage"
     text: str
     node_id: str = ""
     status: str = ""  # for kind="result"
+    payload: Any = None  # CoverageReport when kind="coverage"
 
 
 # Matches pytest's verbose progress lines:
@@ -258,6 +263,7 @@ async def run_tests(
     project_root: Path,
     node_id: str | None = None,
     extra_args: list[str] | None = None,
+    with_coverage: bool = False,
 ) -> AsyncIterator[TestRunEvent]:
     """Run pytest and yield :class:`TestRunEvent` for each output line.
 
@@ -265,6 +271,15 @@ async def run_tests(
     when ``None``, runs the entire suite. Lines that match a per-test
     result get a ``kind="result"`` event so the panel can flip its
     status icon as soon as each test completes.
+
+    When ``with_coverage`` is true we ask pytest to emit a Cobertura
+    XML report into a temp file and parse it after the run. A final
+    ``kind="coverage"`` event carries the parsed
+    :class:`~polyglot_ai.core.coverage.CoverageReport` on its
+    ``payload`` field. Coverage requires ``pytest-cov`` to be
+    installed in the *project's* venv; if it isn't, pytest exits
+    with a usage error and we surface that as a summary line —
+    no ``kind="coverage"`` event is emitted in that case.
     """
     if not project_root.is_dir():
         yield TestRunEvent(kind="line", text=f"Project root does not exist: {project_root}")
@@ -279,6 +294,30 @@ async def run_tests(
         return
 
     cmd = [*pytest_cmd, "-v", "--no-header", "--color=no", "-rN"]
+
+    # Coverage XML goes to a per-run temp file. We don't reuse the
+    # default ``coverage.xml`` because the user may run a parallel
+    # ``pytest --cov`` from the terminal and we'd race on the file.
+    cov_xml_path: Path | None = None
+    if with_coverage:
+        # ``delete=False`` so the file survives close(); we clean up
+        # in the finally block. mkstemp would also work but
+        # NamedTemporaryFile keeps the path-handling consistent.
+        tmp = tempfile.NamedTemporaryFile(prefix="polyglot-cov-", suffix=".xml", delete=False)
+        tmp.close()
+        cov_xml_path = Path(tmp.name)
+        cmd.extend(
+            [
+                "--cov",
+                str(project_root),
+                f"--cov-report=xml:{cov_xml_path}",
+                # Suppress the terminal report — we already stream
+                # pytest's normal output line-by-line and an extra
+                # tabular summary just adds noise.
+                "--cov-report=",
+            ]
+        )
+
     if extra_args:
         cmd.extend(extra_args)
     if node_id:
@@ -348,3 +387,38 @@ async def run_tests(
             kind="summary",
             text=f"pytest exited with non-zero status {rc}",
         )
+
+    # Coverage post-processing. Done after rc is known so we don't
+    # try to parse a half-written XML file when the user cancels mid-run.
+    if cov_xml_path is not None:
+        try:
+            if rc in (0, 1, 5) and cov_xml_path.is_file() and cov_xml_path.stat().st_size > 0:
+                # Local import — keeps coverage parsing optional
+                # for callers that don't pass ``with_coverage=True``,
+                # and avoids a circular import with editor wiring.
+                from polyglot_ai.core.coverage import (
+                    CoverageParseError,
+                    parse_coverage_xml,
+                )
+
+                try:
+                    report = parse_coverage_xml(cov_xml_path, project_root)
+                except CoverageParseError as e:
+                    yield TestRunEvent(
+                        kind="summary",
+                        text=f"Coverage parsing failed: {e}",
+                    )
+                else:
+                    yield TestRunEvent(
+                        kind="coverage",
+                        text=f"Coverage: {report.overall_pct:.1f}% across {len(report.files)} file(s)",
+                        payload=report,
+                    )
+        finally:
+            try:
+                cov_xml_path.unlink(missing_ok=True)
+            except OSError:
+                # Temp file cleanup is best-effort — the OS will reap
+                # /tmp eventually. Worth a debug log so we notice if
+                # something is keeping the file alive.
+                logger.debug("test_collector: could not delete coverage XML temp file")

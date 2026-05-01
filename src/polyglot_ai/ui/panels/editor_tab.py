@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from polyglot_ai.core.coverage import FileCoverage
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QColor, QFont
@@ -137,6 +141,19 @@ class EditorTab(QWidget):
         editor.setMarginWidth(0, "00000")
         editor.setMarginsForegroundColor(QColor(DARK_COLORS["margin_fg"]))
         editor.setMarginsBackgroundColor(QColor(DARK_COLORS["margin_bg"]))
+
+        # Coverage gutter (margin 1) — shows test-coverage hit/miss bars
+        # when a coverage report has been applied via ``set_coverage``.
+        # Stays at 0 width until coverage data lands so the editor
+        # looks identical to before for users who never run with --cov.
+        # Margin type is "symbol" so we can attach markers per line;
+        # the actual marker glyphs are configured in
+        # :py:meth:`_setup_coverage_markers` once we know which marker
+        # IDs are free (QScintilla allocates a small fixed pool).
+        editor.setMarginType(1, QsciScintilla.MarginType.SymbolMargin)
+        editor.setMarginWidth(1, 0)
+        editor.setMarginSensitivity(1, False)
+        self._setup_coverage_markers()
 
         # Code folding (margin 2)
         editor.setFolding(QsciScintilla.FoldStyle.BoxedTreeFoldStyle)
@@ -385,6 +402,91 @@ class EditorTab(QWidget):
     def get_cursor_position(self) -> tuple[int, int]:
         line, col = self._editor.getCursorPosition()
         return line + 1, col + 1  # 1-indexed for display
+
+    # ── Test coverage gutter ──────────────────────────────────────
+    #
+    # Public surface:
+    #   - set_coverage(file_coverage):  paint hit/miss/partial bars in
+    #     margin 1 and widen the margin to make them visible
+    #   - clear_coverage():             remove all coverage markers and
+    #     collapse the margin back to zero width
+    #
+    # Implementation notes:
+    #   - We use three marker IDs: HIT, MISS, PARTIAL. Marker IDs are
+    #     a small pool (max 32) shared across all uses of the editor;
+    #     reserving three at the top of the pool keeps them out of
+    #     the way of any future debugger/breakpoint markers.
+    #   - The marker shape is ``RoundRectangle`` rather than a thin
+    #     vertical line because QScintilla's line-style markers don't
+    #     honour foreground colour reliably across themes — the
+    #     filled rect always renders.
+
+    _MARKER_HIT = 29
+    _MARKER_MISS = 30
+    _MARKER_PARTIAL = 28
+    _COVERAGE_MARGIN_WIDTH = 6  # pixels — wide enough to read, narrow enough not to crowd
+
+    def _setup_coverage_markers(self) -> None:
+        """Define the three coverage-gutter markers. Idempotent."""
+        editor = self._editor
+        # ``RoundRectangle`` is a built-in marker shape; we colour it
+        # via setMarkerForegroundColor (used for the border) and
+        # setMarkerBackgroundColor (used for the fill).
+        for marker_id, fill in (
+            (self._MARKER_HIT, "#4caf50"),  # green — line was executed
+            (self._MARKER_MISS, "#d9534f"),  # red — line was not executed
+            (self._MARKER_PARTIAL, "#e0a23a"),  # amber — branch only partly covered
+        ):
+            editor.markerDefine(QsciScintilla.MarkerSymbol.FullRectangle, marker_id)
+            editor.setMarkerForegroundColor(QColor(fill), marker_id)
+            editor.setMarkerBackgroundColor(QColor(fill), marker_id)
+
+    def set_coverage(self, file_coverage: "FileCoverage") -> None:
+        """Apply hit/miss/partial markers from a parsed coverage report.
+
+        Idempotent — calling this twice (e.g. after a re-run) clears
+        old markers first so stale data never lingers. Lines outside
+        the file's range are silently skipped; QScintilla rejects
+        out-of-range markerAdd calls anyway, but doing the bound
+        check ourselves keeps the warning log clean.
+        """
+        self._clear_coverage_markers()
+        editor = self._editor
+        last_line = max(0, editor.lines() - 1)
+
+        # Partial first, hit second, miss last so a multi-marker line
+        # paints in priority order. (QScintilla overlays markers in
+        # the order they're added per line.)
+        for lineno in file_coverage.partial_lines:
+            zero_based = lineno - 1
+            if 0 <= zero_based <= last_line:
+                editor.markerAdd(zero_based, self._MARKER_PARTIAL)
+        for lineno in file_coverage.hit_lines:
+            if lineno in file_coverage.partial_lines:
+                continue  # already painted as partial
+            zero_based = lineno - 1
+            if 0 <= zero_based <= last_line:
+                editor.markerAdd(zero_based, self._MARKER_HIT)
+        for lineno in file_coverage.miss_lines:
+            zero_based = lineno - 1
+            if 0 <= zero_based <= last_line:
+                editor.markerAdd(zero_based, self._MARKER_MISS)
+
+        editor.setMarginWidth(1, self._COVERAGE_MARGIN_WIDTH)
+
+    def clear_coverage(self) -> None:
+        """Remove every coverage marker and collapse the gutter."""
+        self._clear_coverage_markers()
+        self._editor.setMarginWidth(1, 0)
+
+    def _clear_coverage_markers(self) -> None:
+        editor = self._editor
+        # ``markerDeleteAll`` accepts a marker ID — clear each of our
+        # three. Passing -1 would also work but would nuke any
+        # markers a future feature might add.
+        editor.markerDeleteAll(self._MARKER_HIT)
+        editor.markerDeleteAll(self._MARKER_MISS)
+        editor.markerDeleteAll(self._MARKER_PARTIAL)
 
     # ── AI inline completions ─────────────────────────────────────
 
