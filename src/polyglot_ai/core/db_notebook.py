@@ -57,13 +57,20 @@ class DBNotebookStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
         # Harden file permissions — notebook may contain SQL with
-        # embedded credentials or sensitive query patterns.
+        # embedded credentials or sensitive query patterns. Failure
+        # here usually means a non-POSIX filesystem or unusual mount
+        # (e.g. tmpfs with restrictive options); log so the user can
+        # see why hardening didn't apply rather than failing silently.
         try:
             import os
 
             os.chmod(self._path, 0o600)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning(
+                "db_notebook: could not chmod %s to 0600: %s — file may be readable by other users",
+                self._path,
+                exc,
+            )
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -117,14 +124,19 @@ class DBNotebookStore:
         sql = sql.strip()
         if not sql:
             return
-        # Redact SQL that contains embedded secrets before persisting
+        # Redact SQL that contains embedded secrets before persisting.
+        # If the scan itself raises (import error, regex failure on
+        # exotic input), redact defensively rather than recording the
+        # raw SQL — a silent ``pass`` here would write unscanned
+        # credentials to disk.
         try:
             from polyglot_ai.core.security import scan_content_for_secrets
 
             if scan_content_for_secrets(sql):
                 sql = f"[REDACTED: SQL contained potential secrets] {sql[:40]}..."
         except Exception:
-            pass
+            logger.exception("db_notebook: secret scan failed; redacting SQL conservatively")
+            sql = f"[REDACTED: secret scan failed] {sql[:40]}..."
         try:
             with self._conn() as c:
                 c.execute(

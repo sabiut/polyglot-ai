@@ -743,6 +743,196 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_get_state",
+            "description": (
+                "Read the Arduino panel's current state as JSON: the loaded "
+                "project (entry file, language, code preview), the connected "
+                "board (display name, FQBN, port), upload-readiness, and the "
+                "full list of currently-detected boards. The system prompt's "
+                "PANEL STATE block already shows the most important parts; "
+                "use this tool when you need a fresh re-read mid-conversation "
+                "(e.g. after the user says they just plugged a board in) or "
+                "when you need to enumerate all attached boards rather than "
+                "the single preferred one."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_list_boards",
+            "description": (
+                "Enumerate every microcontroller board currently connected "
+                "over USB. Returns plain text — board name, FQBN, and serial "
+                "port for each. Useful when the user has multiple boards "
+                "plugged in and you need to confirm which one to target."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_compile",
+            "description": (
+                "Compile the C++ Arduino sketch currently loaded in the "
+                "Arduino panel using arduino-cli. Reads the project from the "
+                "panel's published state — DO NOT pass file paths; the panel "
+                "is the source of truth. The board's FQBN is taken from the "
+                "panel too, but you can override with the ``fqbn`` argument "
+                "(e.g. when the panel hasn't detected the board yet but the "
+                "user told you what they have). Returns plain-language status "
+                "plus, on failure, the first 4 KB of compiler output. This "
+                "tool requires user approval before it runs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fqbn": {
+                        "type": "string",
+                        "description": (
+                            "Optional Fully-Qualified Board Name override "
+                            "(e.g. ``arduino:avr:uno``, ``esp32:esp32:esp32``). "
+                            "When omitted, uses whatever the panel detected."
+                        ),
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_list_starters",
+            "description": (
+                "Return the bundled starter project catalogue as JSON: "
+                "slug, name, blurb, language, and supported boards. "
+                "Use this to recommend a starter to the user before "
+                "calling arduino_load_starter."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_load_starter",
+            "description": (
+                "Copy one of the bundled starter projects into a folder "
+                "and load it as the current Arduino-panel project. Use "
+                "this when the user asks 'set up a Blink project' or "
+                "similar. Call arduino_list_starters first if you need "
+                "to know the available slugs. Side effects: creates "
+                "files inside ``<target_dir>/<starter-name>/``. The "
+                "panel updates so the next message's PANEL STATE shows "
+                "the new project. Requires user approval."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": (
+                            "Starter slug (e.g. ``blink-cpp``, "
+                            "``hello-serial-cpp``, ``rgb-rainbow-circuitpython``)."
+                        ),
+                    },
+                    "target_dir": {
+                        "type": "string",
+                        "description": (
+                            "Optional parent folder for the new project. "
+                            "Defaults to the current project root's "
+                            "parent, or the user's home directory."
+                        ),
+                    },
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_create_blank",
+            "description": (
+                "Scaffold a blank Arduino project with minimal "
+                "boilerplate (empty ``setup()`` / ``loop()`` for C++; a "
+                "single ``print()`` for Python). Use this when the user "
+                "wants to write their own code from scratch rather "
+                "than start from a sample. Refuses to overwrite an "
+                "existing entry file. Requires user approval."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Project name. Used as the folder name "
+                            "and (for C++) the .ino filename. Spaces "
+                            "become underscores; punctuation is stripped."
+                        ),
+                    },
+                    "language": {
+                        "type": "string",
+                        "enum": ["cpp", "micropython", "circuitpython"],
+                        "description": "The target language.",
+                    },
+                    "target_dir": {
+                        "type": "string",
+                        "description": "Optional parent folder; same default as arduino_load_starter.",
+                    },
+                },
+                "required": ["name", "language"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arduino_upload",
+            "description": (
+                "Upload the loaded project to the connected microcontroller. "
+                "Branches by language: C++ projects compile then upload via "
+                "arduino-cli, MicroPython projects copy via mpremote and "
+                "soft-reset, CircuitPython projects copy ``code.py`` to the "
+                "CIRCUITPY USB drive. Reads project / board / port from the "
+                "panel's published state — pass arguments only to override. "
+                "Returns plain-language status; on failure, includes the "
+                "first 4 KB of toolchain output. Requires user approval."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fqbn": {
+                        "type": "string",
+                        "description": "Override the FQBN (C++ only).",
+                    },
+                    "port": {
+                        "type": "string",
+                        "description": (
+                            "Override the serial port (C++ / MicroPython). "
+                            "e.g. ``/dev/ttyUSB0`` on Linux, ``COM3`` on "
+                            "Windows."
+                        ),
+                    },
+                    "drive": {
+                        "type": "string",
+                        "description": (
+                            "Path to the CIRCUITPY USB drive (CircuitPython "
+                            "only). e.g. ``/run/media/USER/CIRCUITPY``."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # Tool approval policy — explicit categorization.
@@ -788,6 +978,11 @@ AUTO_APPROVE = {
     "db_get_schema",
     # Panel state (read-only snapshot of UI state)
     "get_review_findings",
+    # Arduino — read-only state inspection. No filesystem writes,
+    # no subprocess that mutates anything.
+    "arduino_get_state",
+    "arduino_list_boards",
+    "arduino_list_starters",
 }
 REQUIRES_APPROVAL = {
     # ``shell_exec`` and ``git_commit`` stay on approval because they
@@ -817,4 +1012,13 @@ REQUIRES_APPROVAL = {
     # sees the exact SQL before it runs.
     "db_query",
     "db_execute",
+    # Arduino — compile shells out to ``arduino-cli`` and upload
+    # writes flash to a physical board. Both run user-visible
+    # subprocesses and should be confirmed.
+    "arduino_compile",
+    "arduino_upload",
+    # Scaffold tools — they mutate the filesystem, so the user
+    # should see exactly what's about to be created.
+    "arduino_load_starter",
+    "arduino_create_blank",
 }

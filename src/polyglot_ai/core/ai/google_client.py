@@ -44,15 +44,24 @@ class GoogleClient(AIProvider):
 
     async def list_models(self) -> list[str]:
         async def _fetch() -> list[str]:
-            # genai's list() is sync; iterate inline (the outer cache
-            # ensures this only runs at most once per TTL window).
-            models: list[str] = []
-            for model in self._client.models.list():
-                model_id = model.name
-                if model_id.startswith("models/"):
-                    model_id = model_id[7:]
-                if "gemini" in model_id:
-                    models.append(model_id)
+            # genai's models.list() is a synchronous, blocking iterator.
+            # Run it on a worker thread so we don't stall the event
+            # loop (network latency on a cold call has been observed
+            # at ~1s, which freezes the UI). The outer cache still
+            # ensures this only runs at most once per TTL window.
+            import asyncio as _asyncio
+
+            def _list_sync() -> list[str]:
+                models: list[str] = []
+                for model in self._client.models.list():
+                    model_id = model.name
+                    if model_id.startswith("models/"):
+                        model_id = model_id[7:]
+                    if "gemini" in model_id:
+                        models.append(model_id)
+                return models
+
+            models = await _asyncio.to_thread(_list_sync)
             # De-duplicate before the cache sorts. The cache sorts a
             # list; a set would change iteration order per run, so we
             # normalise here.

@@ -141,7 +141,12 @@ def _fetch_page_text(url: str, max_chars: int = 6000) -> str:
             text = text[:max_chars] + "..."
         return text
     except Exception as e:
-        return f"(Could not fetch page: {e})"
+        # Exception text on urllib failures can leak socket addresses,
+        # internal hostnames, or credentials embedded in URLs. Run it
+        # through sanitize_error before returning to the model.
+        from polyglot_ai.core.security import sanitize_error
+
+        return f"(Could not fetch page: {sanitize_error(str(e))})"
 
 
 async def web_search(args: dict) -> str:
@@ -195,6 +200,8 @@ async def web_search(args: dict) -> str:
 
             return "\n".join(parts)
         except Exception as e:
-            return f"Search error: {e}"
+            from polyglot_ai.core.security import sanitize_error
+
+            return f"Search error: {sanitize_error(str(e))}"
 
     return await asyncio.to_thread(_do_search)

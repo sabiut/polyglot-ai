@@ -1,0 +1,7 @@
+name: Blink a light (CircuitPython)
+blurb: Flash the LED with CircuitPython — easiest way to write Python on a board.
+emoji: 💡
+language: circuitpython
+boards: [pico, pico-w, circuitplayground-express, feather-m4]
+entry_file: code.py
+suggested_project_name: blink

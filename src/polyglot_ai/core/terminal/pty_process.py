@@ -1,4 +1,18 @@
-"""PTY process management — fork, read, write, resize."""
+"""PTY process management — fork, read, write, resize.
+
+Threading
+---------
+``_read_loop`` runs on a background thread and invokes the ``on_output``
+and ``on_exited`` callbacks supplied by the caller. Those callbacks
+**will be called from the reader thread**, so callers that need GUI
+work (e.g. updating Qt widgets, emitting on the EventBus) MUST marshal
+back onto the GUI thread themselves.
+
+The expected pattern is to wire a ``pyqtSignal`` to the relevant slot
+and pass ``signal.emit`` as the callback — Qt's auto-connection
+between threads gives queued, thread-safe delivery without coupling
+this module to Qt.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +25,8 @@ import signal
 import struct
 import termios
 import threading
+from collections.abc import Callable
 from pathlib import Path
-
-from polyglot_ai.constants import EVT_TERMINAL_EXITED, EVT_TERMINAL_OUTPUT
-from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +34,13 @@ logger = logging.getLogger(__name__)
 class PtyProcess:
     """Manages a PTY subprocess for terminal emulation."""
 
-    def __init__(self, event_bus: EventBus) -> None:
-        self._event_bus = event_bus
+    def __init__(
+        self,
+        on_output: Callable[[bytes], None],
+        on_exited: Callable[[], None],
+    ) -> None:
+        self._on_output = on_output
+        self._on_exited = on_exited
         self._master_fd: int | None = None
         self._pid: int | None = None
         self._reader_thread: threading.Thread | None = None
@@ -87,7 +104,11 @@ class PtyProcess:
             logger.info("PTY started: pid=%d, shell=%s", pid, shell)
 
     def _read_loop(self) -> None:
-        """Background thread reading PTY output."""
+        """Background thread reading PTY output.
+
+        Callbacks are invoked from this thread; the caller is responsible
+        for marshaling onto the GUI thread. See module docstring.
+        """
         while self._running:
             fd = self._master_fd
             if fd is None:
@@ -98,7 +119,10 @@ class PtyProcess:
                     try:
                         data = os.read(fd, 65536)
                         if data:
-                            self._event_bus.emit(EVT_TERMINAL_OUTPUT, data=data)
+                            try:
+                                self._on_output(data)
+                            except Exception:
+                                logger.exception("PTY on_output callback failed")
                         else:
                             # EOF — process exited
                             break
@@ -108,7 +132,10 @@ class PtyProcess:
                 break
 
         self._running = False
-        self._event_bus.emit(EVT_TERMINAL_EXITED)
+        try:
+            self._on_exited()
+        except Exception:
+            logger.exception("PTY on_exited callback failed")
         logger.info("PTY reader loop ended")
 
     def write(self, data: bytes) -> None:

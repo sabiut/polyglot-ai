@@ -1,0 +1,7 @@
+name: Press a button to light up
+blurb: Wire a button to pin 2 — press it and the LED turns on.
+emoji: 🔘
+language: cpp
+boards: []
+entry_file: button.ino
+suggested_project_name: button

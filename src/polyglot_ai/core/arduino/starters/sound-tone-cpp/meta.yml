@@ -1,0 +1,7 @@
+name: Play a tune
+blurb: Play notes on a piezo buzzer wired to pin 8.
+emoji: 🎵
+language: cpp
+boards: []
+entry_file: tune.ino
+suggested_project_name: tune

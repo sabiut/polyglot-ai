@@ -1,0 +1,108 @@
+name: Build & upload Arduino sketch (C++)
+description: >-
+  Compile a C++ Arduino sketch with arduino-cli, upload it to the
+  connected board, and optionally watch the serial output. Use this
+  when the user asks the agent to build / flash / run an Arduino
+  project from the chat panel — the kid-friendly Arduino panel is
+  faster for click-driven flows.
+
+inputs:
+  - name: sketch
+    description: Path to the sketch directory or its .ino file
+    required: true
+  - name: fqbn
+    description: Fully-Qualified Board Name, e.g. arduino:avr:uno
+    required: true
+  - name: port
+    description: Serial port to upload to (auto-detect if omitted)
+    required: false
+    default: ""
+  - name: monitor
+    description: After upload, stream serial output for N seconds (0 = skip)
+    required: false
+    default: "0"
+  - name: baud
+    description: Serial monitor baud rate
+    required: false
+    default: "9600"
+
+steps:
+  - name: Verify the toolchain is ready
+    prompt: |
+      Check the user's environment with shell_exec:
+
+      1. Run `arduino-cli version`. If it errors with "command not
+         found", stop and tell the user how to install arduino-cli
+         (point them at https://arduino.github.io/arduino-cli/latest/installation/).
+      2. Run `arduino-cli core list` and check whether the core for
+         FQBN {{fqbn}} is installed. The core name is the first two
+         segments of the FQBN, joined by a colon (e.g.
+         `arduino:avr:uno` → core `arduino:avr`).
+      3. If the core is missing, install it with
+         `arduino-cli core install <core-id>`. Tell the user this is
+         a one-time install and how big the download is roughly.
+      4. If the core is present, just confirm and move on.
+
+      Report each check briefly. Don't dump full stdout unless an
+      error happens — keep the chat readable.
+
+  - name: Find the board's port if needed
+    prompt: |
+      Port input was: "{{port}}".
+
+      - If the port string is empty, run
+        `arduino-cli board list --format json` and find a connected
+        board whose FQBN matches {{fqbn}} (or whose USB IDs map to
+        that family). Use that port for the upload step. If multiple
+        candidates show up, ask the user which one to use rather than
+        guessing.
+      - If a port was supplied, just confirm it shows up in the
+        ``board list`` output and skip ahead.
+      - If no boards are detected at all, stop and tell the user to
+        plug their board in with the USB cable, then re-run the
+        workflow.
+
+  - name: Compile
+    prompt: |
+      Run:
+
+          arduino-cli compile --fqbn {{fqbn}} {{sketch}}
+
+      If it succeeds, just say "Compiled cleanly." and move on.
+      If it fails, copy the *first error block only* into the chat
+      (not the full output), explain what's wrong in plain language,
+      and offer a fix. Wait for the user to apply changes before
+      moving to upload — never push broken code at the board.
+
+  - name: Upload
+    prompt: |
+      Use the port resolved earlier. Run:
+
+          arduino-cli upload --fqbn {{fqbn}} --port <port> {{sketch}}
+
+      If the upload fails with a permission error on Linux, tell the
+      user to add themselves to the ``dialout`` group (or run with
+      ``sudo`` once for testing), and stop. Don't loop on retries.
+
+  - name: (Optional) Stream serial output
+    prompt: |
+      If "{{monitor}}" is greater than 0, attach the serial monitor:
+
+          arduino-cli monitor -p <port> -c baudrate={{baud}}
+
+      Stream for {{monitor}} seconds, then stop. Quote the lines you
+      see back to the user under a "What it said:" heading. If
+      "{{monitor}}" is 0 (the default), skip this step entirely and
+      tell the user how to attach the monitor manually if they want
+      to.
+
+  - name: Wrap up
+    prompt: |
+      Summarise in three short lines:
+
+      - **Board:** {{fqbn}} on the resolved port
+      - **Sketch:** {{sketch}}
+      - **Result:** Uploaded ✅ / Compile failed / Upload failed
+
+      If anything failed, suggest the single most likely fix —
+      not a checklist of ten possibilities.

@@ -1,0 +1,7 @@
+name: Blink a light
+blurb: Make the little LED on your Arduino flash on and off.
+emoji: 💡
+language: cpp
+boards: []  # works on every C++ board
+entry_file: blink.ino
+suggested_project_name: blink

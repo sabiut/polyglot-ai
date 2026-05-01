@@ -36,7 +36,10 @@ async def git_diff(sandbox, args: dict) -> str:
             base = "main" if rc == 0 else "master"
         else:
             base = "main"
-        command = f"git diff {base}...HEAD"
+        # ``base`` is currently hard-coded, but shlex-quote it so a
+        # future change that lets callers (or rev-parse output) feed
+        # this branch can't smuggle shell syntax into the command.
+        command = f"git diff {shlex.quote(base)}...HEAD"
     else:
         command = "git diff"
 

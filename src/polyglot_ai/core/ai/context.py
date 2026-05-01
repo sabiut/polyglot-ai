@@ -308,6 +308,74 @@ class ContextBuilder:
             )
             return True
 
+    def _render_arduino_block(self, arduino: dict) -> list[str]:
+        """Render the Arduino-panel slice of ``--- PANEL STATE ---``.
+
+        Compact by design: the AI gets enough to answer "what's
+        loaded / what's wrong / fix this code" but not raw serial
+        output or the full toolchain detection record.
+        """
+        lines: list[str] = ["Arduino panel:"]
+
+        if not arduino.get("loaded"):
+            lines.append("- No project loaded yet.")
+            board = arduino.get("board")
+            if board:
+                lines.append(
+                    f"- Board detected: {board.get('display_name', 'Unknown')} "
+                    f"on {board.get('port', '?')}"
+                )
+            return lines
+
+        entry = arduino.get("entry_file") or "?"
+        lang = arduino.get("language_display") or arduino.get("language") or "?"
+        lines.append(f"- Project: {entry}  ({lang})")
+
+        board = arduino.get("board")
+        if board:
+            port = board.get("port") or "?"
+            lines.append(f"- Connected board: {board.get('display_name', 'Unknown')} on {port}")
+        else:
+            lines.append("- Connected board: none yet (the user hasn't plugged in a board)")
+
+        if arduino.get("ready_to_upload"):
+            lines.append("- Status: ready to upload")
+        else:
+            blocker = arduino.get("blocker") or "not ready"
+            lines.append(f"- Status: not ready — {blocker}")
+
+        code = arduino.get("code") or ""
+        if code.strip():
+            lines.append("")
+            source = arduino.get("code_source") or "disk"
+            if source == "buffer":
+                lines.append(
+                    f"Current code in {entry}  "
+                    "(open in the editor with unsaved changes — "
+                    "this is the live buffer, not what's on disk):"
+                )
+            else:
+                lines.append(f"Current code in {entry}:")
+            lines.append("```")
+            lines.append(code.rstrip())
+            lines.append("```")
+            if source == "buffer":
+                lines.append("")
+                lines.append(
+                    "Note: arduino_compile / arduino_upload read from "
+                    "disk. If the user has unsaved edits, remind them "
+                    "to save (Ctrl+S) before uploading or the build "
+                    "will use the old version."
+                )
+
+        lines.append("")
+        lines.append(
+            "When the user asks about Arduino code, debugging, board "
+            "behaviour, or upload errors, refer to this state — they "
+            "can see this panel themselves and don't need to paste."
+        )
+        return lines
+
     def _render_panel_state_block(self) -> str:
         """Render a compact ``--- PANEL STATE ---`` block.
 
@@ -335,10 +403,19 @@ class ContextBuilder:
 
         review = panel_state.get_last_review()
         workflow = panel_state.get_last_workflow_run()
-        if not review and not workflow:
+        arduino = panel_state.get_last_arduino_state()
+        if not review and not workflow and not arduino:
             return ""
 
         lines: list[str] = ["--- PANEL STATE ---", ""]
+
+        # Arduino panel goes first when present — for users in the
+        # middle of an MCU project it's almost always what they're
+        # asking about ("why won't this compile", "fix this code"),
+        # so leading with it cuts straight to the relevant context.
+        if arduino:
+            lines.extend(self._render_arduino_block(arduino))
+            lines.append("")
 
         # Workflow run (if any)
         if workflow:

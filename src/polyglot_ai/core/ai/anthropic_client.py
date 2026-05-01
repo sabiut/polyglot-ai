@@ -170,10 +170,16 @@ class AnthropicClient(AIProvider):
                     )
                 kwargs["tools"] = anthropic_tools
 
-            # Map Anthropic content block index → our tool call index
             # Anthropic numbers ALL content blocks (text + tool_use),
-            # but we only care about tool_use blocks for indexing.
+            # but we only care about tool_use blocks for indexing. We
+            # key by the tool_use **id** (canonical, stable) and keep
+            # the block-index map only as a lookup hint for delta
+            # events, which carry ``index`` but not ``id``. Duplicate
+            # ``content_block_start`` events for the same id reuse
+            # the existing tidx instead of re-assigning, which would
+            # otherwise concatenate two tools' partial JSON together.
             block_to_tool_idx: dict[int, int] = {}
+            id_to_tool_idx: dict[str, int] = {}
             next_tool_idx = 0
 
             async with self._client.messages.stream(**kwargs) as stream:
@@ -188,21 +194,39 @@ class AnthropicClient(AIProvider):
                     if event_type == "content_block_start" and hasattr(event, "index"):
                         if hasattr(event.content_block, "type"):
                             if event.content_block.type == "tool_use":
-                                tidx = next_tool_idx
-                                block_to_tool_idx[event.index] = tidx
-                                next_tool_idx += 1
-                                yield self._tool_call_start_chunk(
-                                    tidx,
-                                    event.content_block.id,
-                                    event.content_block.name,
-                                )
+                                tool_use_id = event.content_block.id
+                                if tool_use_id in id_to_tool_idx:
+                                    # Duplicate start for the same tool — reuse
+                                    # the existing index and refresh the block
+                                    # mapping, but don't emit a second start.
+                                    tidx = id_to_tool_idx[tool_use_id]
+                                    block_to_tool_idx[event.index] = tidx
+                                else:
+                                    tidx = next_tool_idx
+                                    id_to_tool_idx[tool_use_id] = tidx
+                                    block_to_tool_idx[event.index] = tidx
+                                    next_tool_idx += 1
+                                    yield self._tool_call_start_chunk(
+                                        tidx,
+                                        tool_use_id,
+                                        event.content_block.name,
+                                    )
 
                     elif event_type == "content_block_delta" and hasattr(event, "index"):
                         delta = event.delta
                         if hasattr(delta, "text"):
                             yield self._emit_text_delta(delta.text)
                         elif hasattr(delta, "partial_json"):
-                            tidx = block_to_tool_idx.get(event.index, 0)
+                            # Skip orphan deltas (no matching start) rather
+                            # than misroute their JSON onto tool 0 — the
+                            # old default would corrupt that tool's args.
+                            tidx = block_to_tool_idx.get(event.index)
+                            if tidx is None:
+                                logger.warning(
+                                    "Anthropic stream: dropping partial_json for unknown block index %d",
+                                    event.index,
+                                )
+                                continue
                             yield self._tool_call_args_chunk(tidx, delta.partial_json)
 
                     elif event_type == "message_delta":

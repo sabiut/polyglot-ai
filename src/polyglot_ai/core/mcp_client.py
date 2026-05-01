@@ -471,10 +471,32 @@ class MCPClient:
         # also fire so sidebar / chat panel reflect state immediately.
         self._notify_connection_change()
 
-    async def disconnect_all(self) -> None:
-        """Disconnect from all servers."""
+    async def disconnect_all(self, per_server_timeout: float = 5.0) -> None:
+        """Disconnect from all servers.
+
+        Each per-server disconnect is wrapped in a timeout so a single
+        misbehaving stdio server cannot hang application shutdown.
+        Errors are logged and swallowed — we still attempt the rest.
+        """
+        import asyncio as _asyncio
+
         for name in list(self._connected):
-            await self.disconnect(name)
+            try:
+                await _asyncio.wait_for(self.disconnect(name), timeout=per_server_timeout)
+            except _asyncio.TimeoutError:
+                logger.warning(
+                    "MCP '%s': disconnect timed out after %.1fs; subprocess may be orphaned",
+                    name,
+                    per_server_timeout,
+                )
+                # Drop bookkeeping so a retry isn't blocked by stale state.
+                self._sessions.pop(name, None)
+                self._transports.pop(name, None)
+                self._connected.discard(name)
+            except _asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("MCP '%s': disconnect failed: %s", name, e)
 
     def get_tool_definitions(self) -> list[dict]:
         """Get OpenAI function-calling format definitions for all MCP tools."""

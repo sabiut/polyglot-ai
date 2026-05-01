@@ -1,0 +1,7 @@
+name: Hello, world!
+blurb: Send a friendly message from your Arduino to the screen.
+emoji: 💬
+language: cpp
+boards: []
+entry_file: hello.ino
+suggested_project_name: hello

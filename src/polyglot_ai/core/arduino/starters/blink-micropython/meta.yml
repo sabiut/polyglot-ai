@@ -1,0 +1,7 @@
+name: Blink a light (Python)
+blurb: Make the little LED flash on and off using MicroPython.
+emoji: 💡
+language: micropython
+boards: [esp32, esp32-s3, esp8266, pico, pico-w]
+entry_file: main.py
+suggested_project_name: blink

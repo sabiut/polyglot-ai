@@ -38,6 +38,7 @@ from typing import Any
 _lock = Lock()
 _last_review: dict[str, Any] | None = None
 _last_workflow_run: dict[str, Any] | None = None
+_last_arduino_state: dict[str, Any] | None = None
 
 
 def set_last_review(snapshot: dict[str, Any] | None) -> None:
@@ -76,9 +77,31 @@ def get_last_workflow_run() -> dict[str, Any] | None:
         return dict(_last_workflow_run) if _last_workflow_run is not None else None
 
 
+def set_last_arduino_state(snapshot: dict[str, Any] | None) -> None:
+    """Publish a compact snapshot of the Arduino panel.
+
+    Read by :meth:`ContextBuilder.build_system_prompt` so the AI
+    knows what project is loaded, what board is connected, and what
+    the entry-file code looks like. The snapshot is intentionally
+    compact (project metadata + a clipped code preview, not raw
+    serial output) so it stays under token budget without losing
+    the bits the model actually needs to help.
+    """
+    global _last_arduino_state
+    with _lock:
+        _last_arduino_state = snapshot
+
+
+def get_last_arduino_state() -> dict[str, Any] | None:
+    """Return a shallow copy of the Arduino panel snapshot, or ``None``."""
+    with _lock:
+        return dict(_last_arduino_state) if _last_arduino_state is not None else None
+
+
 def clear() -> None:
     """Reset all panel state. Primarily used by tests."""
-    global _last_review, _last_workflow_run
+    global _last_review, _last_workflow_run, _last_arduino_state
     with _lock:
         _last_review = None
         _last_workflow_run = None
+        _last_arduino_state = None

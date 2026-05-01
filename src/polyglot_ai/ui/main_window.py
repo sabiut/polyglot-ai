@@ -30,7 +30,8 @@ from polyglot_ai.ui.panels.review_panel import ReviewPanel
 from polyglot_ai.ui.panels.usage_panel import UsagePanel
 from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
-from polyglot_ai.ui.panels.terminal_panel import TerminalPanel
+from polyglot_ai.ui.panels.terminal_panel import TerminalPanel, TerminalWidget
+from polyglot_ai.ui.panels.arduino_panel import ArduinoPanel, ArduinoWindow
 from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 from polyglot_ai.ui.panels.test_panel import TestPanel
 from polyglot_ai.ui.panels.today_panel import TodayPanel
@@ -73,7 +74,13 @@ class MainWindow(QMainWindow):
         self._test_panel = TestPanel()
         self._tasks_panel = TasksPanel()
         self._today_panel = TodayPanel()
+        self._arduino_panel = ArduinoPanel()
         self._editor_panel = EditorPanel()
+        # Wire the editor panel into the test panel so coverage runs
+        # paint hit/miss bars in the editor gutter. This is the only
+        # cross-panel dependency for the coverage feature; everything
+        # else flows through the EventBus.
+        self._test_panel.set_editor_panel(self._editor_panel)
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
         self._cicd_panel = CICDPanel()
@@ -95,7 +102,17 @@ class MainWindow(QMainWindow):
         self._sidebar_stack.addWidget(self._test_panel)  # 7: tests
         self._sidebar_stack.addWidget(self._tasks_panel)  # 8: tasks
         self._sidebar_stack.addWidget(self._today_panel)  # 9: today
+        # Note: ``_arduino_panel`` is intentionally NOT added to the
+        # sidebar stack. The chip icon and Ctrl+Shift+A pop it as a
+        # standalone window via ``_show_arduino_window`` — the four-
+        # step wizard is too tall to be useful in the 200 px pane.
         self._sidebar_stack.setMinimumWidth(200)
+
+        # Lazy-created on first ``_show_arduino_window`` call. Stored
+        # so subsequent opens raise the existing window (preserving
+        # chosen starter, status feed, etc.) instead of spawning a
+        # blank one.
+        self._arduino_window: ArduinoWindow | None = None
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
         from PyQt6.QtWidgets import QTabWidget
@@ -183,6 +200,13 @@ class MainWindow(QMainWindow):
                 self._action_settings.trigger()
             return
 
+        # Arduino is the one panel that lives in its own window
+        # rather than the sidebar — the wizard layout needs the
+        # space and a separate window is more inviting for kids.
+        if view_name == "arduino":
+            self._show_arduino_window()
+            return
+
         view_map = {
             "files": 0,
             "search": 1,
@@ -206,6 +230,19 @@ class MainWindow(QMainWindow):
             self._sidebar_stack.show()
             self._sidebar_visible = True
             self._last_sidebar_view = view_name
+
+    def _show_arduino_window(self) -> None:
+        """Open the Arduino panel as a standalone top-level window.
+
+        Lazily constructs the window the first time it's requested
+        and stores it on ``self`` so re-clicks raise the same window
+        instead of spawning a fresh blank one — the kid keeps their
+        starter selection, language toggle, and status feed across
+        opens.
+        """
+        if self._arduino_window is None:
+            self._arduino_window = ArduinoWindow(self._arduino_panel, self)
+        self._arduino_window.show_and_raise()
 
     def _show_cicd_tab(self) -> None:
         """Switch to the CI/CD tab in the right panel."""
@@ -355,6 +392,11 @@ class MainWindow(QMainWindow):
         self._action_toggle_today.triggered.connect(lambda: self._on_activity_changed("today"))
         view_menu.addAction(self._action_toggle_today)
 
+        self._action_toggle_arduino = QAction("&Arduino", self)
+        self._action_toggle_arduino.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        self._action_toggle_arduino.triggered.connect(lambda: self._on_activity_changed("arduino"))
+        view_menu.addAction(self._action_toggle_arduino)
+
         view_menu.addSeparator()
 
         self._action_toggle_terminal = QAction("&Terminal", self)
@@ -435,12 +477,38 @@ class MainWindow(QMainWindow):
         if not tab:
             return None
         if hasattr(tab, "editor"):
-            return tab.editor  # EditorTab (QScintilla)
+            return tab.editor  # QScintilla
         if hasattr(tab, "source_editor"):
             return tab.source_editor  # DocumentTab (QPlainTextEdit)
         return None
 
+    def _focused_terminal(self) -> "TerminalWidget | None":
+        """Return the focused TerminalWidget if any.
+
+        Edit-menu QActions for Ctrl+C/X/V/Z fire as window-level
+        shortcuts, which means they consume the key event before any
+        focused child widget sees it. When the focus is a terminal,
+        a plain Ctrl+C should send SIGINT, not "copy" — so we detect
+        that case here and forward the control byte to the PTY.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        widget = QApplication.focusWidget()
+        if isinstance(widget, TerminalWidget):
+            return widget
+        return None
+
+    def _terminal_write(self, term: "TerminalWidget", data: bytes) -> None:
+        pty = getattr(term, "_pty", None)
+        if pty is not None and getattr(pty, "is_running", False):
+            pty.write(data)
+
     def _forward_undo(self) -> None:
+        # Ctrl+Z in a terminal sends SIGTSTP (suspend foreground job).
+        term = self._focused_terminal()
+        if term is not None:
+            self._terminal_write(term, b"\x1a")
+            return
         w = self._get_edit_widget()
         if w:
             w.undo()
@@ -451,16 +519,36 @@ class MainWindow(QMainWindow):
             w.redo()
 
     def _forward_cut(self) -> None:
+        # Ctrl+X in readline-style shells is the start of a key
+        # sequence (e.g. ``C-x C-e`` to edit the command line); pass
+        # it through verbatim instead of calling cut().
+        term = self._focused_terminal()
+        if term is not None:
+            self._terminal_write(term, b"\x18")
+            return
         w = self._get_edit_widget()
         if w:
             w.cut()
 
     def _forward_copy(self) -> None:
+        # Ctrl+C in a terminal sends SIGINT. Use Ctrl+Shift+C for
+        # clipboard copy (handled inside TerminalWidget.keyPressEvent).
+        term = self._focused_terminal()
+        if term is not None:
+            self._terminal_write(term, b"\x03")
+            return
         w = self._get_edit_widget()
         if w:
             w.copy()
 
     def _forward_paste(self) -> None:
+        # Ctrl+V in readline is "verbatim insert" (next key is taken
+        # literally). Forward as a control byte; users who want to
+        # paste clipboard text should use Ctrl+Shift+V.
+        term = self._focused_terminal()
+        if term is not None:
+            self._terminal_write(term, b"\x16")
+            return
         w = self._get_edit_widget()
         if w:
             w.paste()
@@ -483,6 +571,7 @@ class MainWindow(QMainWindow):
             return
         self._file_explorer.set_root(path)
         self._search_panel.set_project_root(path)
+        self._arduino_panel.set_project_root(path)
         self.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
         self.statusBar().showMessage(f"Project: {path}")
 

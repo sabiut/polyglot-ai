@@ -90,10 +90,19 @@ _STRING_LITERAL_RE = re.compile(
 
 
 def _strip_comments_and_strings(sql: str) -> str:
-    """Remove SQL comments and string literals for keyword scanning."""
+    """Remove SQL comments and string literals for keyword scanning.
+
+    Strings are stripped **before** line comments because a ``--``
+    sequence is valid content inside a quoted string (e.g.
+    ``SELECT '"; DROP TABLE x--' AS s``). Stripping comments first
+    would consume everything from the inline ``--`` to end-of-line,
+    leaving the opening quote of the literal dangling so the literal
+    no longer matches the string regex — and the bare ``DROP`` then
+    leaks into the keyword scan.
+    """
     sql = _BLOCK_COMMENT_RE.sub(" ", sql)
-    sql = _LINE_COMMENT_RE.sub(" ", sql)
     sql = _STRING_LITERAL_RE.sub("''", sql)
+    sql = _LINE_COMMENT_RE.sub(" ", sql)
     return sql
 
 

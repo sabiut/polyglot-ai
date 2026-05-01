@@ -1,0 +1,7 @@
+name: Read the temperature
+blurb: Print how warm it is using the chip's built-in sensor.
+emoji: 🌡️
+language: micropython
+boards: [pico, pico-w, esp32, esp32-s3]
+entry_file: main.py
+suggested_project_name: temperature

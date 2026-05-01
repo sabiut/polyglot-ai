@@ -1,0 +1,7 @@
+name: Rainbow lights
+blurb: Cycle through the rainbow on the on-board NeoPixels.
+emoji: 🌈
+language: circuitpython
+boards: [circuitplayground-express, feather-m4]
+entry_file: code.py
+suggested_project_name: rainbow

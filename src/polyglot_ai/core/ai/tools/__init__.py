@@ -57,6 +57,16 @@ _STANDALONE_TOOL_NAMES = frozenset(
         "db_execute",
         # Panel state (reads in-process dict, no sandbox needed)
         "get_review_findings",
+        # Arduino — read panel state and run arduino-cli / mpremote.
+        # Standalone-safe: the service uses subprocess directly, not
+        # the sandbox / file-ops layer.
+        "arduino_get_state",
+        "arduino_list_boards",
+        "arduino_list_starters",
+        "arduino_compile",
+        "arduino_upload",
+        "arduino_load_starter",
+        "arduino_create_blank",
     }
 )
 
@@ -114,16 +124,53 @@ class ToolRegistry:
     def _is_bootstrap_approved(self, tool_name: str, args: dict | None = None) -> bool:
         """Return True if bootstrap mode approves this specific invocation.
 
-        Only ``shell_exec`` calls whose command starts with a safelisted
-        prefix qualify. Everything else — including shell_exec with
-        unrecognised commands — still requires normal approval.
+        Approval is granted only when the parsed argv matches an entry
+        in ``_BOOTSTRAP_SAFE_ARGVS``. Prefix matching on the raw string
+        is intentionally avoided because it would let a flag like
+        ``npm install --script-shell=/bin/bash`` slip through — the
+        flag changes how post-install scripts are executed and turns
+        a "safe" install into arbitrary code execution.
         """
         if tool_name != "shell_exec" or not self.is_bootstrap_active():
             return False
         if args is None:
             return False
         cmd = (args.get("command") or "").strip()
-        return any(cmd.startswith(p) for p in self._BOOTSTRAP_SAFE_PREFIXES)
+        if not cmd:
+            return False
+
+        import shlex
+
+        try:
+            argv = shlex.split(cmd)
+        except ValueError:
+            return False
+        if not argv:
+            return False
+
+        from pathlib import Path as _Path
+
+        base = _Path(argv[0]).name
+        rule = self._BOOTSTRAP_SAFE_ARGVS.get(base)
+        if rule is None:
+            return False
+
+        required_subcmds, banned_flag_substrings = rule
+        if required_subcmds:
+            if len(argv) < 2 or argv[1] not in required_subcmds:
+                return False
+
+        # Reject any flag whose name (the part before ``=``) contains a
+        # banned substring. Catches both ``--foo`` and ``--foo=bar``
+        # forms without needing per-tool flag whitelists.
+        for token in argv[1:]:
+            if not token.startswith("-"):
+                continue
+            head = token.split("=", 1)[0]
+            if any(b in head for b in banned_flag_substrings):
+                return False
+
+        return True
 
     # ── Bootstrap mode ──────────────────────────────────────────────
     #
@@ -140,33 +187,60 @@ class ToolRegistry:
     # enough that an idle toggle doesn't linger dangerously.
     BOOTSTRAP_DEFAULT_SECONDS = 15 * 60
 
-    # Command prefixes that are auto-approved during bootstrap mode.
-    # Only dependency-install and inert scaffold commands qualify.
-    # Deliberately excludes execution commands:
-    #   - npx/yarn dlx/pnpm dlx (download + execute arbitrary packages)
-    #   - cargo run/cargo script (execute compiled code)
-    #   - bare yarn/pnpm (match yarn run, pnpm exec, etc.)
-    _BOOTSTRAP_SAFE_PREFIXES = (
-        "npm install",
-        "npm ci",
-        "yarn install",
-        "yarn add",
-        "pnpm install",
-        "pnpm add",
-        "pip install",
-        "pip3 install",
-        "python -m pip",
-        "go mod ",
-        "cargo build",
-        "cargo new",
-        "cargo init",
-        "cargo fetch",
-        "cargo add",
-        "bundle install",
-        "composer install",
-        "mkdir ",
-        "touch ",
-    )
+    # argv-level safelist for bootstrap mode. Each entry maps the
+    # parsed ``argv[0]`` (basename) to ``(allowed subcommands,
+    # banned flag substrings)``. An empty subcommand set means the
+    # base command takes no subcommand (e.g. ``mkdir``). Banned flag
+    # substrings are checked against the part of any flag before
+    # ``=`` so both ``--foo`` and ``--foo=value`` forms are caught.
+    #
+    # Deliberately excluded — these are code-execution primitives:
+    #   - npx, yarn dlx, pnpm dlx
+    #   - cargo run, cargo script
+    #   - bare ``yarn`` / ``pnpm`` (would match yarn run, pnpm exec)
+    #   - ``pip install -e`` from arbitrary paths runs setup.py code,
+    #     but we accept the existing risk: the sandbox already
+    #     contains it inside the project root.
+    _BOOTSTRAP_SAFE_ARGVS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+        # npm: --script-shell, --ignore-scripts=false, --foreground-scripts
+        # all influence how lifecycle scripts run; the safe shape is to
+        # use defaults only.
+        "npm": (
+            frozenset({"install", "i", "ci"}),
+            frozenset({"--script-shell", "--foreground-scripts", "--ignore-scripts"}),
+        ),
+        "yarn": (
+            frozenset({"install", "add"}),
+            frozenset({"--script-shell"}),
+        ),
+        "pnpm": (
+            frozenset({"install", "i", "add"}),
+            frozenset({"--script-shell", "--shell-emulator"}),
+        ),
+        "pip": (
+            frozenset({"install"}),
+            # ``--prefix`` / ``--target`` / ``--root`` could redirect
+            # writes outside the project; ``--index-url`` / ``--extra-index-url``
+            # let the model swap in an attacker-controlled registry.
+            frozenset({"--prefix", "--target", "--root", "--index-url", "--extra-index-url"}),
+        ),
+        "pip3": (
+            frozenset({"install"}),
+            frozenset({"--prefix", "--target", "--root", "--index-url", "--extra-index-url"}),
+        ),
+        "go": (
+            frozenset({"mod"}),
+            frozenset(),
+        ),
+        "cargo": (
+            frozenset({"build", "new", "init", "fetch", "add"}),
+            frozenset(),
+        ),
+        "bundle": (frozenset({"install"}), frozenset()),
+        "composer": (frozenset({"install"}), frozenset()),
+        "mkdir": (frozenset(), frozenset()),
+        "touch": (frozenset(), frozenset()),
+    }
 
     def enable_bootstrap_mode(self, duration_seconds: int | None = None) -> float:
         """Relax ``shell_exec`` approval for up to ``duration_seconds``.
@@ -422,6 +496,36 @@ class ToolRegistry:
                 from .panel_tools import get_review_findings
 
                 return await get_review_findings(args)
+
+            # Arduino panel tools
+            elif tool_name == "arduino_get_state":
+                from .arduino_tools import arduino_get_state
+
+                return await arduino_get_state(args)
+            elif tool_name == "arduino_list_boards":
+                from .arduino_tools import arduino_list_boards
+
+                return await arduino_list_boards(args)
+            elif tool_name == "arduino_compile":
+                from .arduino_tools import arduino_compile
+
+                return await arduino_compile(args)
+            elif tool_name == "arduino_upload":
+                from .arduino_tools import arduino_upload
+
+                return await arduino_upload(args)
+            elif tool_name == "arduino_list_starters":
+                from .arduino_tools import arduino_list_starters
+
+                return await arduino_list_starters(args)
+            elif tool_name == "arduino_load_starter":
+                from .arduino_tools import arduino_load_starter
+
+                return await arduino_load_starter(args)
+            elif tool_name == "arduino_create_blank":
+                from .arduino_tools import arduino_create_blank
+
+                return await arduino_create_blank(args)
 
             # MCP tools
             elif self._mcp_client and tool_name.startswith("mcp_"):

@@ -1,0 +1,89 @@
+name: Flash Python to a microcontroller
+description: >-
+  Upload a Python script to a microcontroller running MicroPython or
+  CircuitPython. Handles both common cases: copy + soft-reset for
+  MicroPython via mpremote, and atomic copy onto the CIRCUITPY drive
+  for CircuitPython.
+
+inputs:
+  - name: script
+    description: Path to the Python file to upload (main.py / code.py)
+    required: true
+  - name: variant
+    description: 'micropython | circuitpython'
+    required: false
+    default: micropython
+  - name: port
+    description: Serial port (MicroPython only; auto-detect if omitted)
+    required: false
+    default: ""
+  - name: drive
+    description: CIRCUITPY mount path (CircuitPython only; auto-detect if omitted)
+    required: false
+    default: ""
+
+steps:
+  - name: Pick the right path
+    prompt: |
+      The user wants to upload {{script}} as a {{variant}} project.
+
+      Branch on {{variant}}:
+
+      - **micropython** → use mpremote. Confirm with
+        `mpremote --version`. If missing, tell the user:
+        ``pip install mpremote esptool``.
+      - **circuitpython** → no Python tool needed; the board
+        appears as a USB drive named CIRCUITPY. Use the supplied
+        ``{{drive}}``, or scan common mount points (``/run/media``,
+        ``/media``, ``/Volumes``, ``D:\``) for a ``CIRCUITPY``
+        directory.
+
+      If you can't find the tool / drive, stop and tell the user
+      what to install or plug in. Don't attempt the next steps.
+
+  - name: Find the port (MicroPython only)
+    prompt: |
+      If {{variant}} is not "micropython", skip this step.
+
+      Port input was: "{{port}}".
+
+      - If empty, run `mpremote connect list` and pick the single
+        attached board. If more than one appears, ask the user which
+        one to flash — guessing wrong could overwrite a different
+        project.
+      - If supplied, confirm it shows up in the listing.
+
+  - name: Upload
+    prompt: |
+      Branch on {{variant}}:
+
+      **micropython:**
+
+          mpremote connect <port> fs cp {{script}} :main.py
+          mpremote connect <port> reset
+
+      The reset is best-effort — if it fails, the file is still on
+      the board and will run on the next power cycle. Tell the user
+      that explicitly so they don't think the upload failed.
+
+      **circuitpython:**
+
+      Copy the script onto the CIRCUITPY drive **as code.py**, using
+      a temp-file + rename pattern (write to ``code.py.tmp``, then
+      rename to ``code.py``). CircuitPython watches the file and
+      reboots the moment it changes — a partial write triggers a
+      flashing-LED error sequence on the board.
+
+  - name: Confirm
+    prompt: |
+      Tell the user the upload is done in plain language.
+
+      For CircuitPython: mention that the board has already
+      restarted and is running their code now.
+
+      For MicroPython: say the board has been reset. If they want
+      to see ``print()`` output, suggest:
+
+          mpremote connect <port> repl
+
+      and how to exit (Ctrl+] in mpremote).

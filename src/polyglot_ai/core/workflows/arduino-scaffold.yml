@@ -1,0 +1,63 @@
+name: Start a new Arduino project
+description: >-
+  Scaffold a new Arduino / MCU project from one of the bundled
+  starters (Blink, Hello world, Button-to-LED, Tune, Rainbow,
+  Temperature). Use this when the user asks the agent to "make a
+  new Arduino project" or "scaffold something I can flash".
+
+inputs:
+  - name: starter
+    description: >-
+      Slug from the bundled catalog (e.g. blink-cpp, blink-micropython,
+      blink-circuitpython, hello-serial-cpp, button-led-cpp,
+      sound-tone-cpp, rgb-rainbow-circuitpython,
+      temperature-micropython)
+    required: true
+  - name: target
+    description: Folder to create the project in
+    required: false
+    default: .
+
+steps:
+  - name: Confirm the starter exists
+    prompt: |
+      Check that "{{starter}}" is one of the slugs listed above. If
+      it isn't, list the valid slugs and ask the user to pick one —
+      do not invent a starter folder from scratch.
+
+      Otherwise read the starter's ``meta.yml`` from
+      ``src/polyglot_ai/core/arduino/starters/{{starter}}/`` to learn
+      its language, entry filename, and suggested project name.
+
+  - name: Copy the starter into the project
+    prompt: |
+      Drop the starter into "{{target}}":
+
+      - **C++ (.ino) starters** must live in a folder that shares
+        the .ino's name. Create
+        ``{{target}}/<suggested_project_name>/`` and copy every file
+        from the starter directory into it (skipping ``meta.yml``).
+        Rename the entry file to
+        ``<suggested_project_name>.ino`` if it isn't already.
+      - **MicroPython** starters land flat in ``{{target}}`` — the
+        ``main.py`` file plus any helper modules.
+      - **CircuitPython** starters land flat in ``{{target}}`` as
+        ``code.py`` plus any helpers.
+
+      If a destination file already exists, ask the user before
+      overwriting.
+
+  - name: Tell the user what to do next
+    prompt: |
+      Briefly summarise:
+
+      1. Where the new project lives.
+      2. The starter's blurb (one line — what it does).
+      3. The exact next command to run, depending on the language:
+         - C++ → recommend running the **Build & upload Arduino
+           sketch (C++)** workflow with the new sketch path and the
+           user's FQBN.
+         - MicroPython / CircuitPython → recommend the **Flash
+           Python to a microcontroller** workflow.
+
+      Don't list every other workflow — pick the right next step.

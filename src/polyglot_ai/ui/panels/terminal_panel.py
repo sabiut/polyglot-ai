@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QTimer, Qt
+from PyQt6.QtCore import QEvent, QPoint, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QAction,
     QColor,
@@ -128,8 +128,10 @@ class TerminalWidget(QWidget):
         self._last_click_time_ms = 0
         self._consecutive_clicks = 0
 
-        # Cursor blink timer
-        self._blink_timer = QTimer()
+        # Cursor blink timer. Parented to ``self`` so Qt deletes the
+        # underlying QTimer when this widget is destroyed, even if we
+        # somehow miss the closeEvent path.
+        self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._toggle_cursor)
         self._blink_timer.start(500)
 
@@ -137,7 +139,7 @@ class TerminalWidget(QWidget):
         # idle CPU compared to the previous 60fps poll. A future pass
         # could move to a signal-driven model; for now this is the
         # zero-risk improvement.
-        self._paint_timer = QTimer()
+        self._paint_timer = QTimer(self)
         self._paint_timer.timeout.connect(self._check_dirty)
         self._paint_timer.start(33)
 
@@ -406,6 +408,17 @@ class TerminalWidget(QWidget):
         self._blink_timer.stop()
         self.update()
         super().focusOutEvent(event)
+
+    def closeEvent(self, event) -> None:
+        """Stop timers explicitly on close.
+
+        Parenting the timers to ``self`` already covers the normal
+        teardown path, but stopping them up front avoids one final
+        ``timeout`` after the widget is on its way out.
+        """
+        self._blink_timer.stop()
+        self._paint_timer.stop()
+        super().closeEvent(event)
 
     # ── Mouse selection ────────────────────────────────────────────
 
@@ -930,6 +943,13 @@ class TerminalWidget(QWidget):
 class TerminalPanel(QWidget):
     """Embedded terminal emulator panel."""
 
+    # PtyProcess invokes its callbacks from a background reader thread.
+    # We pass these signals' ``.emit`` as the callbacks: Qt's queued
+    # auto-connection delivers them on the GUI thread, which is the
+    # only thread allowed to touch the emulator and EventBus.
+    _pty_output = pyqtSignal(bytes)
+    _pty_exited = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -943,6 +963,10 @@ class TerminalPanel(QWidget):
         self._event_bus: EventBus | None = None
         self._pty: PtyProcess | None = None
         self._emulator: TerminalEmulator | None = None
+
+        # GUI-thread slots for the cross-thread PTY signals.
+        self._pty_output.connect(self._on_output)
+        self._pty_exited.connect(self._on_exited)
 
     def start_terminal(
         self,
@@ -958,25 +982,30 @@ class TerminalPanel(QWidget):
         cols = max(cols, 80)
 
         self._emulator = TerminalEmulator(rows, cols)
-        self._pty = PtyProcess(event_bus)
+        # Pass bound signal emitters as thread-safe callbacks. The signal
+        # is connected to GUI-thread slots above, so cross-thread
+        # delivery is queued automatically by Qt.
+        self._pty = PtyProcess(
+            on_output=self._pty_output.emit,
+            on_exited=self._pty_exited.emit,
+        )
 
         self._terminal_widget.set_emulator(self._emulator)
         self._terminal_widget.set_pty(self._pty)
 
-        # Subscribe to terminal events (unsubscribe first to avoid duplicates on restart)
-        event_bus.unsubscribe(EVT_TERMINAL_OUTPUT, self._on_output)
-        event_bus.unsubscribe(EVT_TERMINAL_EXITED, self._on_exited)
-        event_bus.subscribe(EVT_TERMINAL_OUTPUT, self._on_output)
-        event_bus.subscribe(EVT_TERMINAL_EXITED, self._on_exited)
-
         self._pty.start(shell=shell, cwd=cwd, rows=rows, cols=cols)
         logger.info("Terminal started: %dx%d", cols, rows)
 
-    def _on_output(self, data: bytes = b"", **kwargs) -> None:
+    def _on_output(self, data: bytes) -> None:
         if self._emulator:
             self._emulator.feed(data)
+        # Re-broadcast on the bus on the GUI thread for any other
+        # subscribers (currently none, but kept to preserve the public
+        # event contract documented in constants.py).
+        if self._event_bus is not None:
+            self._event_bus.emit(EVT_TERMINAL_OUTPUT, data=data)
 
-    def _on_exited(self, **kwargs) -> None:
+    def _on_exited(self) -> None:
         """Print a visible exit notice into the emulator and freeze input.
 
         Without this the user typed into a dead PTY in silence — the
@@ -990,6 +1019,8 @@ class TerminalPanel(QWidget):
             self._emulator.feed(
                 "\r\n\x1b[33m[process exited — right-click to restart]\x1b[0m\r\n".encode()
             )
+        if self._event_bus is not None:
+            self._event_bus.emit(EVT_TERMINAL_EXITED)
 
     def stop_terminal(self) -> None:
         if self._pty:

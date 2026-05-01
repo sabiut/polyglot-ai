@@ -31,6 +31,12 @@ dependencies = [
     "aiomysql>=0.2",
     "qasync>=0.27",
     "PyYAML>=6.0",
+    # USB serial-port enumeration for the Arduino panel's board
+    # detection. Pure-Python wheel (no native build), so adding it
+    # here costs nothing on install. Without it the panel can only
+    # see boards arduino-cli identifies — Pi Pico, CH340 clones,
+    # generic ESP boards in bootloader mode are missed.
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]

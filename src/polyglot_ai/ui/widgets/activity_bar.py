@@ -107,6 +107,8 @@ class ActivityBarButton(QWidget):
             self._draw_tasks_icon(painter, ox, oy)
         elif self._icon_type == "today":
             self._draw_today_icon(painter, ox, oy)
+        elif self._icon_type == "arduino":
+            self._draw_arduino_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -294,6 +296,30 @@ class ActivityBarButton(QWidget):
         p.setPen(pen)
         p.drawLine(QPointF(ox + 7, oy + 14), QPointF(ox + 17, oy + 14))
 
+    def _draw_arduino_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Arduino — microchip glyph (square body with leg-pins on each side).
+
+        Eight pins per side reads as "chip" without becoming a 24-pin
+        DIP that crowds the 24×24 canvas. The inner notch is the
+        traditional orientation marker.
+        """
+        # Chip body
+        body = QRectF(ox + 6, oy + 6, 12, 12)
+        p.drawRect(body)
+        # Pins — four per side
+        pen = p.pen()
+        pen.setWidthF(1.4)
+        p.setPen(pen)
+        for i in range(4):
+            y = oy + 8 + i * 3
+            p.drawLine(QPointF(ox + 4, y), QPointF(ox + 6, y))  # left
+            p.drawLine(QPointF(ox + 18, y), QPointF(ox + 20, y))  # right
+            x = ox + 8 + i * 3
+            p.drawLine(QPointF(x, oy + 4), QPointF(x, oy + 6))  # top
+            p.drawLine(QPointF(x, oy + 18), QPointF(x, oy + 20))  # bottom
+        # Orientation notch
+        p.drawArc(QRectF(ox + 9, oy + 5, 6, 4), 0, 180 * 16)
+
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
         cx, cy = ox + 12, oy + 12
@@ -374,6 +400,7 @@ class ActivityBar(QWidget):
             ("docker", "Docker (Ctrl+Shift+K)"),
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
             ("tests", "Tests (Ctrl+Shift+T)"),
+            ("arduino", "Arduino (Ctrl+Shift+A)"),
         ]
 
         for icon_type, tooltip in top_items:
