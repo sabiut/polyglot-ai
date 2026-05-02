@@ -315,7 +315,23 @@ class ArduinoService:
                 )
             return results
 
-        return await asyncio.to_thread(_scan)
+        # Try to push the scan onto the default executor so the qasync
+        # event loop stays responsive — but ``asyncio.to_thread`` calls
+        # ``events.get_running_loop()`` internally, which has been
+        # observed to raise ``RuntimeError: no running event loop`` when
+        # this coroutine is driven from a Qt timer through a qasync-
+        # backed loop. ``pyserial.tools.list_ports.comports()`` is
+        # millisecond-fast, so falling back to a synchronous call is
+        # safe and removes the only failure mode the panel hit in the
+        # wild (board detection error spam every 2.5 s polling tick).
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return _scan()
+        try:
+            return await loop.run_in_executor(None, _scan)
+        except RuntimeError:
+            return _scan()
 
     # ── Compile (C++) ──────────────────────────────────────────────
 
