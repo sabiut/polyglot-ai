@@ -403,25 +403,56 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
 
     # Prefer pkexec — native GUI password prompt, no terminal pop-up.
     if has_pkexec():
-        # pkexec cannot write to a file owned by the invoking user by
-        # default when running as root, so we redirect via `tee` which
-        # the invoking user controls.
-        tee_cmd = f"({chained}) 2>&1 | tee {shlex_quote(str(log_path))}"
+        # Earlier versions piped the install commands through ``tee``
+        # *inside the pkexec'd shell* so the log file ended up owned
+        # by the calling user. That broke on systems where pkexec
+        # runs the shell under a sandboxed namespace (AppArmor
+        # profile / systemd PrivateTmp) — tee inside the sandbox
+        # couldn't see the user's /tmp file and bailed with
+        # "Permission denied", leaving a 0-byte log and rc=1 with
+        # the user no clue what went wrong.
+        #
+        # Now we stream pkexec's stdout from *our* side and write
+        # the log file from the user process. No sandbox is involved
+        # in the write, so no permission-denied class of failure.
         logger.info("install_system_deps: running via pkexec (timeout=%ds)", _INSTALLER_TIMEOUT)
         try:
-            result = subprocess.run(
-                ["pkexec", "sh", "-c", tee_cmd],
+            proc = subprocess.Popen(
+                ["pkexec", "sh", "-c", chained],
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                # Capture stderr so we can surface pkexec's own
-                # diagnostic when the install never starts (no auth
-                # agent on Wayland, polkit policy denial, etc.).
-                # Discarding it left users staring at a 0-byte log
-                # with no clue why the install bailed.
-                stderr=subprocess.PIPE,
-                timeout=_INSTALLER_TIMEOUT,
+                stdout=subprocess.PIPE,
+                # Merge stderr into stdout so the log captures both
+                # the install's diagnostics *and* pkexec's own
+                # error messages in one stream — no separate
+                # "stderr was empty / log was empty" guess work.
+                stderr=subprocess.STDOUT,
             )
+        except OSError as e:
+            logger.exception("install_system_deps: could not launch pkexec")
+            return InstallResult(ok=False, message=f"Could not launch pkexec: {e}")
+
+        # Stream chunks to the log so the dialog's poll timer can
+        # tail it for progress markers as the install runs. 4 KiB
+        # chunks balance I/O syscalls against latency — a typical
+        # ``apt`` line is well under 1 KiB so the user sees output
+        # appear within a fraction of a second of when it was
+        # produced.
+        try:
+            with log_path.open("wb") as log:
+                assert proc.stdout is not None
+                while True:
+                    chunk = proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    log.write(chunk)
+                    log.flush()
+            proc.wait(timeout=_INSTALLER_TIMEOUT)
         except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
             logger.error(
                 "install_system_deps: pkexec timed out after %ds; log=%s",
                 _INSTALLER_TIMEOUT,
@@ -435,38 +466,32 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
                 ),
                 log_path=log_path,
             )
-        except OSError as e:
-            logger.exception("install_system_deps: could not launch pkexec")
-            return InstallResult(ok=False, message=f"Could not launch pkexec: {e}")
 
-        if result.returncode != 0:
-            rc = result.returncode
-            stderr_text = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            rc = proc.returncode
+            # The log file now has both stdout and stderr merged,
+            # so we don't need a separate stderr capture — read the
+            # log itself for whatever pkexec / the install wrote.
+            try:
+                stderr_text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                stderr_text = ""
 
             # If the install never produced any output, the failure
             # was at the pkexec / polkit layer — the chained command
             # never ran. Embed pkexec's own stderr in the log file
             # so the user has *something* to read when they click
             # the path in the dialog.
+            # The merged stdout+stderr is in the log file; size > 0
+            # means at least *something* ran (even if it errored).
             try:
                 log_size = log_path.stat().st_size
             except OSError:
                 log_size = 0
-            if log_size == 0 and stderr_text:
-                try:
-                    log_path.write_text(
-                        "pkexec failed before the install commands ran.\n"
-                        f"Exit code: {rc}\n"
-                        "Captured stderr from pkexec:\n\n"
-                        f"{stderr_text}\n",
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
 
             # pkexec returns 126 if the user cancelled or auth failed,
             # 127 if the command wasn't found. Anything else is the
-            # installer's own exit code (apt/dnf rc).
+            # install command's own exit code.
             if rc in (126, 127):
                 hint_msg = (
                     "Authentication was cancelled or failed (no polkit "
@@ -476,22 +501,23 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
                     else "pkexec could not find the command."
                 )
             elif log_size == 0:
-                # pkexec returned a non-standard code AND nothing was
-                # written to the log — almost always a polkit policy
-                # or agent issue rather than an install failure.
+                # The install commands didn't print anything — pkexec
+                # auth probably succeeded but the elevated shell
+                # bailed before the first echo (e.g. the chained
+                # command's first token wasn't on PATH).
                 hint_msg = (
-                    "pkexec ran but the install never started (likely a "
-                    "polkit auth-agent issue on Wayland). Try running "
-                    "the commands manually in a terminal — click "
-                    "'Copy all commands' then paste in your shell."
+                    "pkexec ran but the install never produced any "
+                    "output. Try running the commands manually in a "
+                    "terminal — click 'Copy all commands' then paste "
+                    "in your shell."
                 )
             else:
-                hint_msg = "The installer reported errors."
+                hint_msg = "The installer reported errors. See the log file for details."
             logger.error(
-                "install_system_deps: pkexec returned rc=%d; log=%s; stderr=%r",
+                "install_system_deps: pkexec returned rc=%d; log=%s; tail=%r",
                 rc,
                 log_path,
-                stderr_text[:500],
+                stderr_text[-500:],
             )
             return InstallResult(
                 ok=False,
