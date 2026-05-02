@@ -413,7 +413,12 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
                 ["pkexec", "sh", "-c", tee_cmd],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                # Capture stderr so we can surface pkexec's own
+                # diagnostic when the install never starts (no auth
+                # agent on Wayland, polkit policy denial, etc.).
+                # Discarding it left users staring at a 0-byte log
+                # with no clue why the install bailed.
+                stderr=subprocess.PIPE,
                 timeout=_INSTALLER_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
@@ -435,19 +440,59 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
             return InstallResult(ok=False, message=f"Could not launch pkexec: {e}")
 
         if result.returncode != 0:
+            rc = result.returncode
+            stderr_text = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+
+            # If the install never produced any output, the failure
+            # was at the pkexec / polkit layer — the chained command
+            # never ran. Embed pkexec's own stderr in the log file
+            # so the user has *something* to read when they click
+            # the path in the dialog.
+            try:
+                log_size = log_path.stat().st_size
+            except OSError:
+                log_size = 0
+            if log_size == 0 and stderr_text:
+                try:
+                    log_path.write_text(
+                        "pkexec failed before the install commands ran.\n"
+                        f"Exit code: {rc}\n"
+                        "Captured stderr from pkexec:\n\n"
+                        f"{stderr_text}\n",
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
+
             # pkexec returns 126 if the user cancelled or auth failed,
             # 127 if the command wasn't found. Anything else is the
             # installer's own exit code (apt/dnf rc).
-            rc = result.returncode
             if rc in (126, 127):
                 hint_msg = (
-                    "Authentication was cancelled or failed."
+                    "Authentication was cancelled or failed (no polkit "
+                    "agent? on Wayland, install gnome-keyring or "
+                    "polkit-kde-agent and log out / back in)."
                     if rc == 126
                     else "pkexec could not find the command."
                 )
+            elif log_size == 0:
+                # pkexec returned a non-standard code AND nothing was
+                # written to the log — almost always a polkit policy
+                # or agent issue rather than an install failure.
+                hint_msg = (
+                    "pkexec ran but the install never started (likely a "
+                    "polkit auth-agent issue on Wayland). Try running "
+                    "the commands manually in a terminal — click "
+                    "'Copy all commands' then paste in your shell."
+                )
             else:
                 hint_msg = "The installer reported errors."
-            logger.error("install_system_deps: pkexec returned rc=%d; log=%s", rc, log_path)
+            logger.error(
+                "install_system_deps: pkexec returned rc=%d; log=%s; stderr=%r",
+                rc,
+                log_path,
+                stderr_text[:500],
+            )
             return InstallResult(
                 ok=False,
                 message=f"{hint_msg} Exit code {rc}. See log for details: {log_path}",
