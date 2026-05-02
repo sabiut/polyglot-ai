@@ -469,7 +469,14 @@ class ArduinoService:
         target = drive / "code.py"
         yield StepUpdate("Copying your code to the board…")
         try:
-            await asyncio.to_thread(_safe_copy, script, target)
+            # ``asyncio.to_thread`` raises "no running event loop"
+            # under qasync from a Qt-click chain (same issue the
+            # board detector hit). ``run_blocking`` falls back to
+            # a real thread + Qt event pump if the standard path
+            # is unavailable.
+            from polyglot_ai.core.async_utils import run_blocking
+
+            await run_blocking(_safe_copy, script, target)
         except OSError as exc:
             self.last_error_detail = str(exc)
             yield StepUpdate(

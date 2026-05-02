@@ -36,6 +36,17 @@ from polyglot_ai.core.dependency_check import (
 logger = logging.getLogger(__name__)
 
 
+def _install_system_deps_with_kwargs(deps, log_path):
+    """Positional-args adapter so ``run_blocking`` can call ``install_system_deps``.
+
+    ``run_blocking`` accepts ``*args`` only; ``install_system_deps``
+    takes a keyword-only ``log_path``. This thin wrapper bridges the
+    two without forcing every caller of ``run_blocking`` to grow a
+    ``**kwargs`` parameter.
+    """
+    return install_system_deps(deps, log_path=log_path)
+
+
 class DependencyDialog(QDialog):
     """Non-blocking info dialog listing missing optional dependencies.
 
@@ -272,10 +283,13 @@ class DependencyDialog(QDialog):
 
     async def _run_uv_install(self, button: QPushButton) -> None:
         """Worker coroutine: runs the blocking installer off the UI thread."""
-        import asyncio
+        from polyglot_ai.core.async_utils import run_blocking
 
         try:
-            result: InstallResult = await asyncio.to_thread(install_uv)
+            # ``run_blocking`` handles the qasync RuntimeError that
+            # bare ``asyncio.to_thread`` hits when invoked from a
+            # Qt-click → safe_task chain. See async_utils.py.
+            result: InstallResult = await run_blocking(install_uv)
         except Exception as e:
             logger.exception("uv installer raised unexpectedly")
             result = InstallResult(ok=False, message=f"Installer crashed: {e}")
@@ -428,8 +442,6 @@ class DependencyDialog(QDialog):
 
     async def _run_install_all(self, button: QPushButton, to_install: list[Dependency]) -> None:
         """Worker coroutine: runs the blocking installer off the UI thread."""
-        import asyncio
-
         # Pre-allocate the log file so the GUI can tail it from the
         # moment the password prompt appears, instead of finding out
         # where the installer wrote *after* it's done.
@@ -438,9 +450,15 @@ class DependencyDialog(QDialog):
         self._install_log_seek = 0
         self._start_log_poll_timer()
 
+        from polyglot_ai.core.async_utils import run_blocking
+
         try:
-            result: InstallResult = await asyncio.to_thread(
-                install_system_deps, to_install, log_path=log_path
+            # See async_utils.run_blocking — bare asyncio.to_thread
+            # raises ``no running event loop`` when invoked from a
+            # Qt-click → safe_task chain on qasync. ``run_blocking``
+            # falls back to a real thread + Qt event pump in that case.
+            result: InstallResult = await run_blocking(
+                _install_system_deps_with_kwargs, to_install, log_path
             )
         except Exception as e:
             logger.exception("system installer raised unexpectedly")
