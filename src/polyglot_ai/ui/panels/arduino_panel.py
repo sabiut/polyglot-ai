@@ -1055,12 +1055,44 @@ class ArduinoPanel(QWidget):
         # feed with hint lines.
         if not had_board_before and self._board is not None and self._project is not None:
             self._announce_next_step()
+            self._maybe_warn_dialout_group()
 
         # Re-publish the snapshot for the chat panel. Done only when
         # the board state actually changed — re-publishing on every
         # 2.5 s poll would burn cycles for no benefit.
         if (self._board is not None) != had_board_before:
             self._publish_panel_state()
+
+    def _maybe_warn_dialout_group(self) -> None:
+        """One-shot warning when the user isn't in dialout/uucp.
+
+        Without group membership the kernel rejects the open() on
+        ``/dev/ttyUSB0`` and arduino-cli upload exits with a
+        permission-denied diagnostic that's hard to act on. Posting
+        a clear hint up front (with the exact ``usermod`` command)
+        saves the user a confusing failed-upload + Google search.
+
+        Latched per-panel so the message appears once when the
+        first board is plugged in, not every poll.
+        """
+        if getattr(self, "_dialout_warned", False):
+            return
+        if self._service.user_in_dialout_group():
+            return
+        self._dialout_warned = True
+        import getpass
+
+        try:
+            user = getpass.getuser()
+        except Exception:
+            user = "$USER"
+        self._append_status(
+            f"Heads up: your user '{user}' isn't in the 'dialout' group, "
+            "so uploads will probably fail with a permission error.\n"
+            f"Fix it with:  sudo usermod -aG dialout {user}\n"
+            "Then log out and back in.",
+            kind="hint",
+        )
 
     # ── Advanced overrides ─────────────────────────────────────────
 

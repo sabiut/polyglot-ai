@@ -139,6 +139,43 @@ class ArduinoService:
         )
 
     @staticmethod
+    def user_in_dialout_group() -> bool:
+        """Return True iff the current user can read/write USB serial ports.
+
+        On Linux, uploading to a microcontroller over /dev/ttyUSB* or
+        /dev/ttyACM* requires the user be in the ``dialout`` group
+        (or ``uucp`` on some distros). Without it, ``arduino-cli
+        upload`` fails with a permission-denied error that the panel
+        can't usefully act on. Detecting up front means we can
+        surface a friendly hint *before* the user clicks Upload.
+
+        Returns True on non-Linux platforms (the constraint is
+        Linux-specific) and on platforms where the lookup fails so
+        we never falsely block a working setup.
+        """
+        import os
+        import sys
+
+        if sys.platform != "linux":
+            return True
+        try:
+            import grp
+
+            user_groups = {g.gr_name for g in grp.getgrall() if os.getuid() in g.gr_mem}
+            # The login-group GID isn't enumerated by getgrall().
+            try:
+                user_groups.add(grp.getgrgid(os.getgid()).gr_name)
+            except (KeyError, OSError):
+                pass
+            # ``dialout`` on Debian/Ubuntu/Fedora; ``uucp`` on Arch
+            # and a few other distros.
+            return bool(user_groups & {"dialout", "uucp"})
+        except (ImportError, OSError):
+            # Missing grp / weird filesystem — fail open rather than
+            # warn against a setup that may actually work.
+            return True
+
+    @staticmethod
     def install_hint(language: Language) -> str:
         """Plain-English instruction for installing the missing toolchain.
 

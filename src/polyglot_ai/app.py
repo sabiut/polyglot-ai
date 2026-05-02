@@ -33,11 +33,43 @@ def setup_logging() -> None:
         log_path.chmod(0o600)
     except OSError:
         pass
+    _install_excepthook(log_path)
+
+
+def _install_excepthook(log_path: "Path") -> None:
+    """Route unhandled exceptions to the log + stderr.
+
+    Without this, a crash in a Qt event handler or a background
+    task vanishes into Python's default ``sys.excepthook`` and the
+    user is left with no clue what went wrong. By writing every
+    unhandled exception to the same log file the rest of the app
+    uses, bug reports become "attach this file" rather than "try
+    to reproduce in a terminal".
+    """
+
+    def _log_unhandled(exc_type, exc_value, exc_tb) -> None:
+        # KeyboardInterrupt is the user — let it terminate normally.
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.critical(
+            "Unhandled exception — see %s", log_path, exc_info=(exc_type, exc_value, exc_tb)
+        )
+
+    sys.excepthook = _log_unhandled
 
 
 def main() -> None:
     setup_logging()
     logger.info("Starting %s", APP_NAME)
+
+    # Pre-flight: verify Qt is loadable and a display is reachable
+    # *before* QApplication is created. Without this, a missing
+    # platform plugin or a headless session produces an unhelpful
+    # ``qFatal`` dump instead of an actionable error message.
+    from polyglot_ai.startup.preflight import run_preflight
+
+    run_preflight()
 
     # Migrate legacy data from Codex Desktop if needed
     from polyglot_ai.migration import migrate_legacy_data

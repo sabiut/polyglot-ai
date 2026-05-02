@@ -93,6 +93,28 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # Prepend install instructions so users hit
+          # "what do I do with these files?" above the auto-generated
+          # changelog. ``softprops/action-gh-release`` puts ``body``
+          # before the generated notes by default.
+          body: |
+            ### Install
+
+            See **[packaging/INSTALL.md](https://github.com/sabiut/polyglot-ai/blob/main/packaging/INSTALL.md)**
+            for the full distro-specific guide.
+
+            Quick start:
+
+            - **Debian/Ubuntu**:  `sudo apt install ./polyglot-ai_*_amd64.deb`
+            - **Fedora/RHEL**:    `sudo dnf install ./polyglot-ai-*.rpm`
+            - **Any Linux**:      `chmod +x Polyglot_AI-*.AppImage && ./Polyglot_AI-*.AppImage`
+
+            > **AppImage** on Ubuntu 22.04+ / Fedora 36+ needs
+            > `libfuse2` (or `fuse-libs` on Fedora). See INSTALL.md
+            > if double-clicking does nothing.
+
+            All three packages bundle their Python dependencies, so
+            no PyPI access is needed at install time.
           files: |
             artifacts/wheel/*.whl
             artifacts/deb/*.deb

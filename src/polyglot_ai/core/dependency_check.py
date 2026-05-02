@@ -148,6 +148,48 @@ DEPENDENCIES: list[Dependency] = [
             "unknown": "https://cli.github.com/",
         },
     ),
+    Dependency(
+        key="arduino-cli",
+        name="Arduino CLI",
+        command="arduino-cli",
+        purpose="Arduino panel — compile and upload C++ sketches",
+        install_urls={
+            # arduino-cli isn't in default Debian/Ubuntu repos; the
+            # upstream installer is the friendliest path.
+            "debian": (
+                "curl -fsSL https://raw.githubusercontent.com/arduino/"
+                "arduino-cli/master/install.sh | sh"
+            ),
+            "fedora": (
+                "curl -fsSL https://raw.githubusercontent.com/arduino/"
+                "arduino-cli/master/install.sh | sh"
+            ),
+            "arch": "yay -S arduino-cli",
+            "opensuse": (
+                "curl -fsSL https://raw.githubusercontent.com/arduino/"
+                "arduino-cli/master/install.sh | sh"
+            ),
+            "alpine": (
+                "curl -fsSL https://raw.githubusercontent.com/arduino/"
+                "arduino-cli/master/install.sh | sh"
+            ),
+            "unknown": "https://arduino.github.io/arduino-cli/latest/installation/",
+        },
+    ),
+    Dependency(
+        key="mpremote",
+        name="mpremote (MicroPython)",
+        command="mpremote",
+        purpose="Arduino panel — upload Python code to MicroPython boards",
+        install_urls={
+            "debian": "pip install --user mpremote",
+            "fedora": "pip install --user mpremote",
+            "arch": "pip install --user mpremote",
+            "opensuse": "pip install --user mpremote",
+            "alpine": "pip install --user mpremote",
+            "unknown": "pip install --user mpremote",
+        },
+    ),
 ]
 
 

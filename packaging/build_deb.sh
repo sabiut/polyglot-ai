@@ -46,6 +46,32 @@ chmod 755 "$STAGING/DEBIAN/prerm"
 # Copy wheel
 cp "$PROJECT_DIR/dist/"*.whl "$STAGING/opt/polyglot-ai/"
 
+# Bundle dependency wheels so postinst can install offline.
+# Without this, ``apt install polyglot-ai_*.deb`` requires internet
+# at install time to fetch PyQt6 + provider SDKs from PyPI — fails
+# silently for users behind a corporate proxy, on a flight, or on
+# a fresh distro before networking comes up.
+mkdir -p "$STAGING/opt/polyglot-ai/wheels"
+echo "Pre-downloading dependency wheels for offline install..."
+python3 -m pip download \
+    --dest "$STAGING/opt/polyglot-ai/wheels" \
+    --only-binary=:all: \
+    --python-version 3.11 \
+    --platform manylinux2014_x86_64 \
+    --platform manylinux_2_17_x86_64 \
+    --platform manylinux_2_28_x86_64 \
+    --platform any \
+    "$PROJECT_DIR/dist/"*.whl \
+    || {
+        # Fall back to the host's resolver if the strict platform
+        # filter rejects something — better a slightly bigger .deb
+        # than no .deb at all.
+        echo "Strict platform download failed; retrying with host resolver…"
+        python3 -m pip download \
+            --dest "$STAGING/opt/polyglot-ai/wheels" \
+            "$PROJECT_DIR/dist/"*.whl
+    }
+
 # Copy desktop file
 cp "$SCRIPT_DIR/debian/polyglot-ai.desktop" "$STAGING/usr/share/applications/"
 
