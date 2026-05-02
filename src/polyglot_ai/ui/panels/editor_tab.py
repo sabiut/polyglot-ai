@@ -60,6 +60,13 @@ LEXER_MAP: dict[str, type] = {
     ".cc": QsciLexerCPP,
     ".h": QsciLexerCPP,
     ".hpp": QsciLexerCPP,
+    ".hh": QsciLexerCPP,
+    ".hxx": QsciLexerCPP,
+    # Arduino sketches are C++ with auto-generated headers; the
+    # CPP lexer's keyword set covers ``setup()``, ``loop()``,
+    # ``Serial``, etc. close enough for syntax-colouring purposes.
+    ".ino": QsciLexerCPP,
+    ".pde": QsciLexerCPP,  # legacy Arduino / Processing
     ".java": QsciLexerCPP,
     ".go": QsciLexerCPP,
     ".rs": QsciLexerCPP,
