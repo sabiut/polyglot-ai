@@ -1,6 +1,6 @@
 [project]
 name = "polyglot-ai"
-version = "0.12.1"
+version = "0.12.2"
 description = "AI-powered coding assistant desktop app for Linux — supports OpenAI, Anthropic, Google, DeepSeek, and more"
 requires-python = ">=3.11"
 license = {text = "LGPL-3.0-or-later"}

@@ -36,6 +36,45 @@ def setup_logging() -> None:
     _install_excepthook(log_path)
 
 
+def _notify_already_running(app: "QApplication", lock_path: str) -> None:
+    """Show a clear "instance already running" message before exiting.
+
+    QApplication is constructed by the time we acquire the lock, so
+    a QMessageBox should work. We still fall back to the OS-native
+    dialog helpers from preflight in case Qt's modal subsystem is
+    in a weird state (some Wayland compositors hang on a synchronous
+    exec without a parent window, for example).
+    """
+    text = (
+        "Polyglot AI is already running.\n\n"
+        "Look for an existing window — it may be minimised or on "
+        "another desktop. If you're sure no other instance exists, "
+        f"delete the lock file:\n  {lock_path}"
+    )
+    try:
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.information(None, "Polyglot AI", text)
+        return
+    except Exception:
+        logger.debug("QMessageBox unavailable for already-running notice", exc_info=True)
+    # OS-native fallback — same chain the pre-flight uses.
+    try:
+        from polyglot_ai.startup.preflight import _zenity_cmd, _kdialog_cmd, _xmessage_cmd
+        import subprocess as _sp
+
+        for cmd in (_zenity_cmd(text), _kdialog_cmd(text), _xmessage_cmd(text)):
+            if cmd is None:
+                continue
+            try:
+                _sp.run(cmd, check=False, timeout=10)
+                return
+            except (OSError, _sp.TimeoutExpired):
+                continue
+    except Exception:
+        logger.debug("OS-native already-running fallback failed", exc_info=True)
+
+
 def _install_excepthook(log_path: "Path") -> None:
     """Route unhandled exceptions to the log + stderr.
 
@@ -91,10 +130,33 @@ def main() -> None:
 
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    # Single-instance lock
-    lock = QLockFile(str(DATA_DIR / "polyglot-ai.lock"))
+    # Single-instance lock.
+    #
+    # ``QLockFile`` writes the running app's PID into the lock file
+    # and removes it on clean exit. If the previous run *crashed*
+    # (segfault, kill -9, power loss), the file is left behind and
+    # — by default — Qt refuses to acquire the lock again forever.
+    # The user sees the app silently fail to launch with no window
+    # and no actionable error, until they discover the stale file
+    # under ``~/.local/share/polyglot-ai/polyglot-ai.lock`` and
+    # delete it manually.
+    #
+    # ``setStaleLockTime(0)`` tells Qt to verify the PID in the lock
+    # file is still alive before refusing; if the process is dead,
+    # the stale lock is removed and we proceed normally. This is the
+    # single-line fix for "the app won't launch after a crash".
+    lock_path = str(DATA_DIR / "polyglot-ai.lock")
+    lock = QLockFile(lock_path)
+    lock.setStaleLockTime(0)
     if not lock.tryLock(100):
-        logger.warning("Another instance is already running")
+        # Another live instance — tell the user up front (graphical
+        # fallback to zenity / kdialog / xmessage if our QApplication
+        # isn't ready to pop a QMessageBox). Silent exit was the
+        # previous behaviour; users reported "I clicked the icon and
+        # nothing happened" because they'd minimised the running
+        # window to the system tray and forgotten about it.
+        logger.warning("Another instance is already running (lock at %s)", lock_path)
+        _notify_already_running(app, lock_path)
         sys.exit(1)
 
     theme_manager = ThemeManager(app)
