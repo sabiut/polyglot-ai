@@ -135,6 +135,34 @@ These are only needed if you want to use the corresponding panel:
 | `gh` (GitHub CLI) | [cli.github.com](https://cli.github.com/) | CI/CD panel (GitHub Actions) |
 | `docker` | [docs.docker.com](https://docs.docker.com/engine/install/) | Docker panel |
 | `kubectl` | [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) | Kubernetes panel |
+| `arduino-cli` | [arduino.github.io/arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | Arduino panel (C++ build & upload) |
+| `mpremote` | `pip install --user mpremote` | Arduino panel (MicroPython upload) |
+
+## Linux notes
+
+- **GNOME on Wayland — system tray icon won't appear** unless the
+  AppIndicator extension is installed and enabled. The app runs
+  normally either way; only the tray icon is affected. Install with:
+
+  ```bash
+  sudo apt install gnome-shell-extension-appindicator   # Debian/Ubuntu
+  sudo dnf install gnome-shell-extension-appindicator   # Fedora
+  ```
+
+  Then enable it in the GNOME *Extensions* app and log out / back in.
+
+- **Arduino uploads need `dialout` group membership** — without it,
+  flashing a board fails with a permission-denied error on `/dev/ttyUSB*`.
+
+  ```bash
+  sudo usermod -aG dialout $USER
+  # then log out and back in
+  ```
+
+- **AppImage on Ubuntu 22.04+ / Fedora 36+** needs `libfuse2`
+  (or `fuse-libs` on Fedora) since modern distros no longer ship it
+  by default. See [packaging/INSTALL.md](packaging/INSTALL.md) for the
+  full distro-specific guide.
 
 ## License
 

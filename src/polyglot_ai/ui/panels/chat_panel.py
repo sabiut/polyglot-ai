@@ -1034,7 +1034,7 @@ class ChatPanel(QWidget):
 
         result = self._provider_manager.get_provider_for_model(full_id)
         if not result:
-            self._add_system_message(f"No provider found for model: {display_model}")
+            self._add_system_message(self._provider_missing_hint(display_model))
             return
 
         provider, model_id = result
@@ -1304,7 +1304,7 @@ class ChatPanel(QWidget):
 
         result = self._provider_manager.get_provider_for_model(full_id)
         if not result:
-            self._add_system_message(f"No provider found for model: {display_model}")
+            self._add_system_message(self._provider_missing_hint(display_model))
             return
 
         self._input.clear()
@@ -2385,6 +2385,34 @@ class ChatPanel(QWidget):
         for badge in (" 👁", " 🧠", " ⚡"):
             display = display.replace(badge, "")
         return full_id, display.strip()
+
+    def _provider_missing_hint(self, display_model: str) -> str:
+        """Build an actionable error when ``get_provider_for_model`` returns None.
+
+        The bare line "No provider found for model: X" used to bewilder
+        users who *had* signed in via OAuth but whose provider failed
+        to register at startup (e.g. a missing credentials file at boot
+        time). Map the model family back to its provider so the message
+        names the actual setup step the user is missing.
+        """
+        m = (display_model or "").lower()
+        if "claude" in m:
+            who, where = "Claude", "Settings → AI Providers → Claude"
+        elif m.startswith(("gpt-", "o1", "o3", "o4")):
+            who, where = "OpenAI / ChatGPT", "Settings → AI Providers → OpenAI"
+        elif "gemini" in m:
+            who, where = "Google Gemini", "Settings → AI Providers → Google"
+        elif "deepseek" in m:
+            who, where = "DeepSeek", "Settings → AI Providers → DeepSeek"
+        else:
+            who, where = display_model, "Settings → AI Providers"
+        return (
+            f"No {who} provider is registered, so '{display_model}' can't run.\n\n"
+            f"Open {where} and either sign in via OAuth or paste an "
+            "API key, then try again. If you already authenticated and "
+            "still see this, your credentials file may have been missing "
+            "when the app started — restart Polyglot AI to re-detect it."
+        )
 
     # ─── Auto-apply ─────────────────────────────────────────────────
 

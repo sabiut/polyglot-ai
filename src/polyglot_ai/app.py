@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QLockFile
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QApplication
 
 from polyglot_ai.constants import APP_NAME, DATA_DIR, LOG_DIR
@@ -36,43 +37,9 @@ def setup_logging() -> None:
     _install_excepthook(log_path)
 
 
-def _notify_already_running(app: "QApplication", lock_path: str) -> None:
-    """Show a clear "instance already running" message before exiting.
-
-    QApplication is constructed by the time we acquire the lock, so
-    a QMessageBox should work. We still fall back to the OS-native
-    dialog helpers from preflight in case Qt's modal subsystem is
-    in a weird state (some Wayland compositors hang on a synchronous
-    exec without a parent window, for example).
-    """
-    text = (
-        "Polyglot AI is already running.\n\n"
-        "Look for an existing window — it may be minimised or on "
-        "another desktop. If you're sure no other instance exists, "
-        f"delete the lock file:\n  {lock_path}"
-    )
-    try:
-        from PyQt6.QtWidgets import QMessageBox
-
-        QMessageBox.information(None, "Polyglot AI", text)
-        return
-    except Exception:
-        logger.debug("QMessageBox unavailable for already-running notice", exc_info=True)
-    # OS-native fallback — same chain the pre-flight uses.
-    try:
-        from polyglot_ai.startup.preflight import _zenity_cmd, _kdialog_cmd, _xmessage_cmd
-        import subprocess as _sp
-
-        for cmd in (_zenity_cmd(text), _kdialog_cmd(text), _xmessage_cmd(text)):
-            if cmd is None:
-                continue
-            try:
-                _sp.run(cmd, check=False, timeout=10)
-                return
-            except (OSError, _sp.TimeoutExpired):
-                continue
-    except Exception:
-        logger.debug("OS-native already-running fallback failed", exc_info=True)
+# Single-instance helpers live in startup/single_instance.py so the
+# unit tests can exercise them without dragging the full UI tree
+# into their import chain. ``app.main`` calls them via thin wrappers.
 
 
 def _install_excepthook(log_path: "Path") -> None:
@@ -121,10 +88,23 @@ def main() -> None:
 
     icon_path = setup_platform()
 
+    # Set the desktop file name *before* QApplication is constructed.
+    # On Wayland the QApplication ctor registers an XDG portal app
+    # ID immediately, and once that's registered with a default ID
+    # ("python3" / argv[0]), Qt logs:
+    #
+    #     Failed to register with host portal — Connection already
+    #     associated with an application ID
+    #
+    # …and the launcher / dock can't match the running window back
+    # to ``polyglot-ai.desktop``. ``QGuiApplication.setDesktopFileName``
+    # is a static method that latches the name into the registration
+    # used by the upcoming QApplication. Set it here.
+    QGuiApplication.setDesktopFileName("polyglot-ai")
+
     # Qt application
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setDesktopFileName("polyglot-ai")
     if icon_path:
         from PyQt6.QtGui import QIcon
 
@@ -149,15 +129,36 @@ def main() -> None:
     lock = QLockFile(lock_path)
     lock.setStaleLockTime(0)
     if not lock.tryLock(100):
-        # Another live instance — tell the user up front (graphical
-        # fallback to zenity / kdialog / xmessage if our QApplication
-        # isn't ready to pop a QMessageBox). Silent exit was the
-        # previous behaviour; users reported "I clicked the icon and
-        # nothing happened" because they'd minimised the running
-        # window to the system tray and forgotten about it.
-        logger.warning("Another instance is already running (lock at %s)", lock_path)
-        _notify_already_running(app, lock_path)
-        sys.exit(1)
+        # Qt's ``setStaleLockTime(0)`` only checks "is this PID
+        # alive". It can't tell whether the live PID belongs to
+        # *us* or to some unrelated long-lived process (sshd,
+        # systemd unit, terminal multiplexer) that Linux happened
+        # to recycle the PID for. The result, hit by real users:
+        # the lock file claims PID 12345 is "Polyglot AI", PID
+        # 12345 is actually nginx, and the user is permanently
+        # locked out.
+        #
+        # Manual fallback: read the recorded PID, verify its
+        # cmdline mentions polyglot-ai, otherwise treat the lock
+        # as stale-with-PID-reuse and retry once.
+        from polyglot_ai.startup.single_instance import (
+            lock_owner_is_unrelated,
+            notify_already_running,
+        )
+
+        if lock_owner_is_unrelated(lock):
+            logger.info("Stale lock at %s belongs to an unrelated PID — clearing", lock_path)
+            lock.removeStaleLockFile()
+            if lock.tryLock(100):
+                logger.info("Lock acquired after clearing stale PID-reuse lock")
+            else:
+                logger.warning("Another instance is already running (lock at %s)", lock_path)
+                notify_already_running(app, lock_path)
+                sys.exit(1)
+        else:
+            logger.warning("Another instance is already running (lock at %s)", lock_path)
+            notify_already_running(app, lock_path)
+            sys.exit(1)
 
     theme_manager = ThemeManager(app)
 

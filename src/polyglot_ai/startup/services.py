@@ -88,15 +88,30 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
     else:
         provider_manager.unregister("openai_oauth")
 
-    # Claude OAuth (subscription login)
-    # NOTE: Disabled — Anthropic's API currently returns "OAuth authentication
-    # is currently not supported" on /v1/messages. Claude Code uses an internal
-    # routing layer not available to third-party apps. Re-enable when Anthropic
-    # opens OAuth access on the public API.
-    # from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
-    # claude_oauth = ClaudeOAuthClient(event_bus)
-    # if claude_oauth.is_authenticated:
-    #     if not provider_manager.get_provider("claude_oauth"):
-    #         provider_manager.register(claude_oauth)
-    # else:
-    #     provider_manager.unregister("claude_oauth")
+    # Claude OAuth (subscription login).
+    #
+    # Earlier versions had this registration commented out because
+    # Anthropic's ``/v1/messages`` was rejecting OAuth bearer tokens
+    # at the time, so even an authenticated user saw the API error
+    # at first message. The cure was worse than the disease: with
+    # registration disabled, the model dropdown still showed
+    # ``claude-*`` (those names live in Anthropic's API client too),
+    # the provider lookup returned None, and the user hit a
+    # cryptic "No provider found for model: claude-opus-4-7" loop
+    # with no clue what was wrong.
+    #
+    # Re-enabling the registration. If upstream still rejects the
+    # OAuth token, the user now gets Anthropic's own error message
+    # ("authentication is not supported" or similar) — at least
+    # they can see *what* failed and where, rather than wondering
+    # why the model dropdown's selection is unusable.
+    from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
+
+    claude_oauth = ClaudeOAuthClient(event_bus)
+    if claude_oauth.is_authenticated:
+        if not provider_manager.get_provider("claude_oauth"):
+            provider_manager.register(claude_oauth)
+            logger.info("Claude OAuth registered (subscription auth detected)")
+    else:
+        provider_manager.unregister("claude_oauth")
+        logger.debug("Claude OAuth not authenticated — skipping registration")

@@ -15,6 +15,7 @@ Qt event loop starts.
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from PyQt6.QtGui import QIcon
@@ -67,6 +68,7 @@ def install_notifications(
                 tray.setIcon(QIcon.fromTheme("dialog-information"))
             tray.setToolTip("Polyglot AI")
             tray.show()
+            _maybe_warn_gnome_wayland_tray()
         except Exception:
             logger.exception("System tray init failed — falling back to toasts only")
             tray = None
@@ -104,3 +106,34 @@ def install_notifications(
         window._tray = tray  # type: ignore[attr-defined]
 
     return notifier
+
+
+def _maybe_warn_gnome_wayland_tray() -> None:
+    """Log an actionable hint when the tray is likely invisible.
+
+    On GNOME-Wayland, ``QSystemTrayIcon.isSystemTrayAvailable()``
+    returns True but the icon often vanishes into the void because
+    GNOME Shell doesn't render Status Notifier Items by default.
+    The user sees nothing, no error, no log — they just assume the
+    tray feature is broken. The fix on their side is to install
+    the AppIndicator extension; surfacing that here costs us a
+    five-line probe and saves a support ticket.
+
+    Heuristic only: any GNOME-Wayland session triggers the hint,
+    even if the user does have AppIndicator installed (in which
+    case the hint is harmless noise in the log). Probing for the
+    extension via D-Bus would be more accurate but the API surface
+    is brittle and varies by GNOME Shell version — not worth it
+    for a debug-friendly hint.
+    """
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    session = os.environ.get("XDG_SESSION_TYPE", "")
+    if "GNOME" not in desktop.upper() or session.lower() != "wayland":
+        return
+    logger.info(
+        "Tray icon may not be visible on GNOME-Wayland without the "
+        "AppIndicator extension. Install it with: "
+        "sudo apt install gnome-shell-extension-appindicator "
+        "(or the equivalent for your distro), enable it in the "
+        "Extensions app, and log out / back in."
+    )
