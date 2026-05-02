@@ -37,6 +37,22 @@ DEFAULT_MODELS = [
 ]
 
 
+def _is_oauth_unsupported_error(error_text: str) -> bool:
+    """Detect Anthropic's specific 'OAuth not supported' rejection.
+
+    The exact text Anthropic returns is
+    ``"OAuth authentication is currently not supported."`` inside an
+    HTTP 401 ``authentication_error``. We match on a substring so a
+    minor wording change (capitalisation, trailing punctuation,
+    nested in a wrapper exception's ``str``) doesn't make us miss
+    it. Case-insensitive for the same reason.
+    """
+    if not error_text:
+        return False
+    needle = "oauth authentication is currently not supported"
+    return needle in error_text.lower()
+
+
 class ClaudeOAuthClient(AIProvider):
     """Claude provider using subscription via OAuth tokens from Claude Code."""
 
@@ -354,6 +370,35 @@ class ClaudeOAuthClient(AIProvider):
             error_msg = sanitize_error(str(e))
             logger.exception("Claude subscription API error")
             self._event_bus.emit(EVT_AI_ERROR, error=error_msg)
+
+            # Anthropic's public /v1/messages API rejects OAuth
+            # bearer tokens with HTTP 401 + "OAuth authentication is
+            # currently not supported". The Claude Code CLI uses an
+            # internal Anthropic routing layer that third-party apps
+            # don't have access to. Users see this when they sign
+            # in via the OAuth flow successfully and then send a
+            # message; the credentials are real but the API won't
+            # accept them. Replace the cryptic JSON dump with a
+            # friendly explanation + the workaround.
+            if _is_oauth_unsupported_error(error_msg):
+                yield StreamChunk(
+                    delta_content=(
+                        "\n\n**Claude subscription chat isn't supported on the "
+                        "public Anthropic API yet.**\n\n"
+                        "Your OAuth login (Claude Pro / Max / Team) succeeded — "
+                        "the token in `~/.claude/.credentials.json` is real. "
+                        "But Anthropic's public ``/v1/messages`` endpoint "
+                        "doesn't currently accept OAuth bearer tokens; only "
+                        "Claude Code's internal routing layer does, and that "
+                        "isn't available to third-party apps.\n\n"
+                        "**Workaround**: open Settings → AI Providers → "
+                        "Anthropic and paste an API key from "
+                        "https://console.anthropic.com/settings/keys. "
+                        "Pick a Claude model from the dropdown again and it "
+                        "will route through the API-key provider instead."
+                    )
+                )
+                return
             yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg[:200]}")
 
     async def test_connection(self) -> tuple[bool, str]:
