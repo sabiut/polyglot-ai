@@ -51,55 +51,47 @@ async def run_blocking(fn: Callable, *args: Any) -> Any:
     Prevents synchronous I/O (file reads, keyring access, etc.) from
     blocking the asyncio/Qt event loop.
 
-    Defensive against the qasync edge case where ``get_running_loop``
-    raises ``RuntimeError`` from inside a Qt-timer-driven coroutine —
-    same bug that hit the Arduino panel's board detector and the
-    dependency installer dialog. When the standard async path fails,
-    we drop to a real ``threading.Thread`` and pump the GUI's event
-    loop while we wait so the user doesn't see a frozen window.
+    Defensive against the qasync edge case where
+    ``asyncio.get_running_loop`` raises ``RuntimeError`` from inside
+    a Qt-timer-driven coroutine — same bug that hit the Arduino
+    panel's board detector and the dependency installer dialog.
+
+    Two-step fallback:
+
+    1. Try ``get_running_loop`` — the standard, fast path.
+    2. Fall back to ``get_event_loop_policy().get_event_loop()``,
+       which is more lenient about the loop's "running" state.
+       qasync registers its loop with the policy even when
+       ``get_running_loop`` doesn't see it, so this catches the
+       qasync edge case without re-entering Qt's event loop.
+
+    If both fail, run synchronously and accept a brief GUI freeze.
+    The earlier "thread + processEvents pump" approach was nixed
+    because pumping events from inside a coroutine triggered
+    "Cannot enter into task" errors from qasync when a Qt timer
+    fired and tried to schedule another asyncio task during the
+    pump.
     """
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, fn, *args)
     except RuntimeError:
-        # No running loop visible to asyncio. Run on a real thread
-        # and wait for completion while keeping Qt responsive — the
-        # alternative is either crashing (current behaviour) or
-        # blocking the GUI thread for the duration of the call.
-        return _run_in_thread_pumping_qt(fn, *args)
+        pass
 
+    # qasync-friendly fallback: the policy still knows the loop
+    # even when asyncio doesn't consider it "running".
+    try:
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+        if loop is not None and not loop.is_closed():
+            return await loop.run_in_executor(None, fn, *args)
+    except (RuntimeError, DeprecationWarning):
+        pass
 
-def _run_in_thread_pumping_qt(fn: Callable, *args: Any) -> Any:
-    """Spawn a thread and pump Qt events until it finishes.
-
-    Used as a fallback when no asyncio loop is reachable. The
-    ``processEvents`` poll keeps the GUI alive (timers fire,
-    redraws happen) without an event loop driving us. 50 ms is a
-    reasonable poll cadence — fast enough that the UI feels live,
-    slow enough that we're not burning a CPU core.
-    """
-    import threading
-
-    from PyQt6.QtCore import QCoreApplication, QEventLoop
-
-    result: dict[str, Any] = {}
-
-    def _target() -> None:
-        try:
-            result["value"] = fn(*args)
-        except BaseException as exc:  # capture and re-raise on caller thread
-            result["error"] = exc
-
-    thread = threading.Thread(target=_target, daemon=True)
-    thread.start()
-    while thread.is_alive():
-        app = QCoreApplication.instance()
-        if app is not None:
-            app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
-        else:
-            # Headless / test path — just wait briefly.
-            thread.join(timeout=0.05)
-
-    if "error" in result:
-        raise result["error"]
-    return result.get("value")
+    # No usable loop. Run synchronously — GUI freezes for the
+    # duration, but for the call sites that hit this branch
+    # (pyserial scan ~1 ms, atomic file copy ~10 ms) the freeze
+    # is invisible. Slow operations like the system installer
+    # should never reach this fallback in practice because the
+    # qasync loop IS registered with the policy.
+    logger.debug("run_blocking: no loop available, running synchronously")
+    return fn(*args)

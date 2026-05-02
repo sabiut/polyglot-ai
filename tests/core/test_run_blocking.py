@@ -52,43 +52,88 @@ class TestRunBlockingHappyPath:
 
 
 class TestRunBlockingFallback:
-    """When ``get_running_loop`` raises, fall back to a real thread."""
+    """When ``get_running_loop`` raises, fall back via the loop policy.
 
-    def test_fallback_when_get_running_loop_fails(self, qapp):
+    The fallback used to spawn a thread and pump Qt events while it
+    ran. That broke under qasync: pumping ``processEvents`` from
+    inside a coroutine let Qt timers schedule new asyncio tasks
+    that qasync then refused to enter ("Cannot enter into task").
+    The current fallback asks the loop policy directly and only
+    runs synchronously when no loop is reachable at all.
+    """
+
+    def test_fallback_via_policy_when_get_running_loop_fails(self, qapp):
+        # Patch ``asyncio.get_running_loop`` to raise, but leave the
+        # event loop policy intact. The helper should fetch the
+        # qapp's loop via the policy and use ``run_in_executor``.
         from polyglot_ai.core import async_utils
-
-        # Patch get_running_loop on the module so the helper falls
-        # into the thread-pumping branch. ``asyncio.run`` provides
-        # the outer loop the test itself runs under, but the
-        # internal call sees the patched RuntimeError.
 
         def _no_loop():
             raise RuntimeError("no running event loop")
 
-        with patch.object(async_utils.asyncio, "get_running_loop", _no_loop):
-            # ``asyncio.run`` requires SOME loop, so spin up the
-            # fallback by calling the sync helper directly. The
-            # fallback doesn't await anything — it threads + pumps.
-            result = async_utils._run_in_thread_pumping_qt(_slow_add, 4, 5)
+        async def _go() -> int:
+            with patch.object(async_utils.asyncio, "get_running_loop", _no_loop):
+                return await run_blocking(_slow_add, 4, 5)
+
+        result = asyncio.run(_go())
         assert result == 9
 
-    def test_fallback_propagates_exceptions(self, qapp):
-        from polyglot_ai.core.async_utils import _run_in_thread_pumping_qt
+    def test_fully_synchronous_when_no_loop_reachable(self, qapp):
+        # Patch BOTH the running-loop check and the policy so the
+        # helper drops to direct synchronous execution. This is the
+        # last-ditch path when nothing asyncio-related is available.
+        from polyglot_ai.core import async_utils
 
-        def _explode():
-            raise OSError("disk gone")
+        async def _go() -> str:
+            def _no_loop():
+                raise RuntimeError("no running event loop")
+
+            class _DeadPolicy:
+                def get_event_loop(self):
+                    raise RuntimeError("policy is dead too")
+
+            with (
+                patch.object(async_utils.asyncio, "get_running_loop", _no_loop),
+                patch.object(
+                    async_utils.asyncio,
+                    "get_event_loop_policy",
+                    lambda: _DeadPolicy(),
+                ),
+            ):
+                return await run_blocking(lambda: "fell-through")
+
+        # ``asyncio.run`` provides the test's own loop; the patched
+        # ``get_running_loop`` makes the helper think there isn't
+        # one, exercising the synchronous fallback.
+        result = asyncio.run(_go())
+        assert result == "fell-through"
+
+    def test_synchronous_fallback_propagates_exceptions(self, qapp):
+        from polyglot_ai.core import async_utils
+
+        async def _go() -> None:
+            def _no_loop():
+                raise RuntimeError("no running event loop")
+
+            class _DeadPolicy:
+                def get_event_loop(self):
+                    raise RuntimeError("policy is dead too")
+
+            def _explode() -> None:
+                raise OSError("disk gone")
+
+            with (
+                patch.object(async_utils.asyncio, "get_running_loop", _no_loop),
+                patch.object(
+                    async_utils.asyncio,
+                    "get_event_loop_policy",
+                    lambda: _DeadPolicy(),
+                ),
+            ):
+                await run_blocking(_explode)
 
         with pytest.raises(OSError, match="disk gone"):
-            _run_in_thread_pumping_qt(_explode)
-
-    def test_fallback_does_not_drop_return_value_on_subclass_exception(self, qapp):
-        # ``_run_in_thread_pumping_qt`` catches BaseException to
-        # forward KeyboardInterrupt etc. — pin that the *value*
-        # path still returns cleanly when no exception happens.
-        from polyglot_ai.core.async_utils import _run_in_thread_pumping_qt
-
-        result = _run_in_thread_pumping_qt(lambda: "ok")
-        assert result == "ok"
+            asyncio.run(_go())
 
 
 class TestNoToThreadInTouchedCallSites:
