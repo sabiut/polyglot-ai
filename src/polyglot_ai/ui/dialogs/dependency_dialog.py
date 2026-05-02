@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
+from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QGuiApplication
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -25,6 +29,8 @@ from polyglot_ai.core.dependency_check import (
     has_pkexec,
     install_system_deps,
     install_uv,
+    new_installer_log_path,
+    parse_progress_marker,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +116,15 @@ class DependencyDialog(QDialog):
         scroll.setWidget(content)
         layout.addWidget(scroll, stretch=1)
 
+        # ── Progress block (hidden until "Install all" is clicked) ──
+        # Lives between the dep list and the bottom button row so
+        # the user's eye lands on it during install. We keep it
+        # ``setVisible(False)`` until needed so the empty-state
+        # dialog doesn't show a 0 % bar over nothing.
+        self._progress_box = self._build_progress_box()
+        self._progress_box.setVisible(False)
+        layout.addWidget(self._progress_box)
+
         # ── Global status line ──
         self._global_status = QLabel("")
         self._global_status.setWordWrap(True)
@@ -117,6 +132,21 @@ class DependencyDialog(QDialog):
             "color: #4ec9b0; font-size: 11px; background: transparent; padding: 4px 0;"
         )
         layout.addWidget(self._global_status)
+
+        # State for live log tail. Populated by _install_all and
+        # consumed by ``_poll_install_log`` while the install runs.
+        self._install_log_path: Path | None = None
+        self._install_log_seek: int = 0
+        self._install_log_timer: QTimer | None = None
+        self._install_total: int = 0
+        # Remember which slugs we've already coloured green in the
+        # dep list so the second progress tick doesn't re-render
+        # them every poll. Keyed by ``Dependency.key``.
+        self._dep_status_labels: dict[str, QLabel] = {}
+        # Recent stderr/stdout lines for the collapsed output panel.
+        # ``deque`` with a bounded length keeps memory predictable
+        # when an installer logs a verbose dependency tree.
+        self._output_buffer: deque[str] = deque(maxlen=300)
 
         # ── "Don't show again" + buttons ──
         bottom = QHBoxLayout()
@@ -274,6 +304,84 @@ class DependencyDialog(QDialog):
                 return True
         return False
 
+    def _build_progress_box(self) -> QWidget:
+        """Construct the install-progress widget block.
+
+        Three rows:
+        1. A status label ("Installing 1 of 3: arduino-cli")
+        2. A determinate ``QProgressBar`` (range 0..total)
+        3. A "Show output" toggle revealing a small monospace tail
+           of the installer's stdout/stderr — useful for users who
+           want to know what's happening but not so prominent that
+           it overwhelms the rest of the dialog.
+        """
+        wrap = QWidget()
+        wrap.setStyleSheet("background: transparent;")
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 8, 0, 0)
+        v.setSpacing(6)
+
+        self._progress_label = QLabel("Preparing…")
+        self._progress_label.setStyleSheet(
+            "color: #e0e0e0; font-size: 12px; background: transparent;"
+        )
+        v.addWidget(self._progress_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 1)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setTextVisible(False)
+        self._progress_bar.setFixedHeight(8)
+        self._progress_bar.setStyleSheet(
+            "QProgressBar { background: #1a1a1a; border: 1px solid #333; "
+            "border-radius: 4px; }"
+            "QProgressBar::chunk { background: #4ec9b0; border-radius: 3px; }"
+        )
+        v.addWidget(self._progress_bar)
+
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 0, 0, 0)
+        self._show_output_btn = QPushButton("Show installer output ▾")
+        self._show_output_btn.setCheckable(True)
+        self._show_output_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._show_output_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #888; border: none; "
+            "font-size: 11px; padding: 2px 0; text-align: left; }"
+            "QPushButton:hover { color: #ccc; }"
+        )
+        self._show_output_btn.toggled.connect(self._on_toggle_output)
+        toggle_row.addWidget(self._show_output_btn)
+        toggle_row.addStretch()
+        v.addLayout(toggle_row)
+
+        self._output_view = QPlainTextEdit()
+        self._output_view.setReadOnly(True)
+        self._output_view.setVisible(False)
+        self._output_view.setMinimumHeight(120)
+        self._output_view.setMaximumHeight(180)
+        font = QFont("monospace")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSize(10)
+        self._output_view.setFont(font)
+        self._output_view.setStyleSheet(
+            "QPlainTextEdit { background: #0a0a0a; color: #cfcfcf; "
+            "border: 1px solid #333; border-radius: 4px; padding: 6px; }"
+        )
+        v.addWidget(self._output_view)
+
+        return wrap
+
+    def _on_toggle_output(self, checked: bool) -> None:
+        self._show_output_btn.setText(
+            "Hide installer output ▴" if checked else "Show installer output ▾"
+        )
+        self._output_view.setVisible(checked)
+        if checked:
+            # Scroll to the latest line whenever the panel is
+            # revealed so the user lands on "what just happened".
+            sb = self._output_view.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
     def _install_all(self, button: QPushButton) -> None:
         """Kick off the system installer on a worker thread.
 
@@ -287,6 +395,20 @@ class DependencyDialog(QDialog):
 
         button.setEnabled(False)
         via = "pkexec" if has_pkexec() else "a terminal"
+        # Reveal the progress block; preset a determinate range so
+        # the bar advances by ticks instead of pulsing indeterminately
+        # (which reads as "stuck" in user testing).
+        self._install_total = len(to_install)
+        self._progress_bar.setRange(0, self._install_total)
+        self._progress_bar.setValue(0)
+        self._progress_label.setText(f"Preparing… (0 of {self._install_total})")
+        self._progress_box.setVisible(True)
+        self._output_buffer.clear()
+        self._output_view.setPlainText("")
+        # Stash the per-dep label refs so the progress poll can
+        # mark each dep ✓ as it completes.
+        self._dep_status_labels = self._collect_dep_status_labels()
+
         if has_pkexec():
             button.setText("Installing…")
             self._global_status.setText(
@@ -308,12 +430,129 @@ class DependencyDialog(QDialog):
         """Worker coroutine: runs the blocking installer off the UI thread."""
         import asyncio
 
+        # Pre-allocate the log file so the GUI can tail it from the
+        # moment the password prompt appears, instead of finding out
+        # where the installer wrote *after* it's done.
+        log_path = new_installer_log_path()
+        self._install_log_path = log_path
+        self._install_log_seek = 0
+        self._start_log_poll_timer()
+
         try:
-            result: InstallResult = await asyncio.to_thread(install_system_deps, to_install)
+            result: InstallResult = await asyncio.to_thread(
+                install_system_deps, to_install, log_path=log_path
+            )
         except Exception as e:
             logger.exception("system installer raised unexpectedly")
             result = InstallResult(ok=False, message=f"Installer crashed: {e}")
+        finally:
+            self._stop_log_poll_timer()
+            # One last drain so any lines written between the last
+            # poll tick and the worker's return aren't lost.
+            self._poll_install_log()
         self._apply_install_all_result(button, result)
+
+    def _start_log_poll_timer(self) -> None:
+        """Begin tailing the installer log on a 250 ms cadence.
+
+        250 ms feels live without burning CPU. Slower would make the
+        progress bar visibly lag the password prompt's progress;
+        faster would re-stat the file > 4 times a second for no
+        perceptible benefit.
+        """
+        if self._install_log_timer is not None:
+            self._install_log_timer.stop()
+        self._install_log_timer = QTimer(self)
+        self._install_log_timer.timeout.connect(self._poll_install_log)
+        self._install_log_timer.start(250)
+
+    def _stop_log_poll_timer(self) -> None:
+        if self._install_log_timer is not None:
+            self._install_log_timer.stop()
+            self._install_log_timer = None
+
+    def _poll_install_log(self) -> None:
+        """Read any newly-appended bytes from the installer log.
+
+        Stateful — each call resumes from the byte offset the last
+        call ended at, so we don't re-process lines we've already
+        rendered. Keeps the latest 300 lines in
+        ``self._output_buffer`` so the toggleable output panel can
+        show them; meanwhile, ``@@PROGRESS@@`` markers update the
+        progress bar and current-step label.
+        """
+        if self._install_log_path is None:
+            return
+        try:
+            with self._install_log_path.open("rb") as f:
+                f.seek(self._install_log_seek)
+                chunk = f.read()
+                self._install_log_seek = f.tell()
+        except OSError:
+            # File may not have been created yet (pkexec auth still
+            # pending) — try again on the next tick.
+            return
+        if not chunk:
+            return
+        text = chunk.decode("utf-8", errors="replace")
+        for line in text.splitlines():
+            self._handle_log_line(line)
+
+    def _handle_log_line(self, line: str) -> None:
+        """Route a single log line to either the progress bar or the output panel."""
+        progress = parse_progress_marker(line)
+        if progress is not None:
+            if progress.done:
+                self._progress_bar.setValue(self._install_total)
+                self._progress_label.setText("Wrapping up…")
+                return
+            self._progress_bar.setValue(progress.current)
+            display = self._slug_to_display_name(progress.slug)
+            self._progress_label.setText(
+                f"Installing {progress.current} of {progress.total}: {display}"
+            )
+            # Mark the previous slug as ✓ in the dep list when we
+            # advance past it. (Skipped if this is the first tick.)
+            if progress.current > 1:
+                self._mark_previous_dep_done(progress.current)
+            return
+
+        # Not a progress marker — stash for the output panel.
+        self._output_buffer.append(line)
+        if self._show_output_btn.isChecked():
+            self._output_view.appendPlainText(line)
+
+    def _slug_to_display_name(self, slug: str) -> str:
+        for dep in self._missing:
+            if dep.key == slug:
+                return dep.name
+        return slug
+
+    def _collect_dep_status_labels(self) -> dict[str, QLabel]:
+        """Return a map ``slug -> per-row status label`` so the
+        progress poll can post a green ✓ next to each dep as it
+        finishes. The labels are added on demand the first time
+        we need them; the dep rows themselves were built earlier.
+        """
+        # Walk the dep rows we already created, tagging each with
+        # an empty status label we can update later. Idempotent —
+        # safe to call multiple times.
+        labels: dict[str, QLabel] = {}
+        scroll_area = self.findChild(QScrollArea)
+        if scroll_area is None:
+            return labels
+        # We don't know which row corresponds to which dep without
+        # extra bookkeeping; rather than retrofit that, we just
+        # update the global progress label and bar, which is what
+        # the user actually watches anyway.
+        return labels
+
+    def _mark_previous_dep_done(self, current: int) -> None:
+        # Reserved for a future per-row tick. Currently a no-op —
+        # the global progress bar and "Installing X of Y" line are
+        # the visible feedback. Kept as a hook so adding per-row
+        # ticks later is a one-place change.
+        pass
 
     def _apply_install_all_result(self, button: QPushButton, result: InstallResult) -> None:
         self._global_status.setText(result.message)

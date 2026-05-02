@@ -8,6 +8,7 @@ commands except the opt-in uv installer.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -154,24 +155,31 @@ DEPENDENCIES: list[Dependency] = [
         command="arduino-cli",
         purpose="Arduino panel — compile and upload C++ sketches",
         install_urls={
-            # arduino-cli isn't in default Debian/Ubuntu repos; the
-            # upstream installer is the friendliest path.
+            # The upstream installer drops a single static binary
+            # under ``$HOME/.local/bin`` (or ``BINDIR=…`` if set) and
+            # works on every distro. Using it everywhere keeps the
+            # install path consistent — earlier versions suggested
+            # ``yay -S arduino-cli`` on Arch which silently failed
+            # for users without an AUR helper installed.
             "debian": (
                 "curl -fsSL https://raw.githubusercontent.com/arduino/"
-                "arduino-cli/master/install.sh | sh"
+                "arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
             ),
             "fedora": (
                 "curl -fsSL https://raw.githubusercontent.com/arduino/"
-                "arduino-cli/master/install.sh | sh"
+                "arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
             ),
-            "arch": "yay -S arduino-cli",
+            "arch": (
+                "curl -fsSL https://raw.githubusercontent.com/arduino/"
+                "arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
+            ),
             "opensuse": (
                 "curl -fsSL https://raw.githubusercontent.com/arduino/"
-                "arduino-cli/master/install.sh | sh"
+                "arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
             ),
             "alpine": (
                 "curl -fsSL https://raw.githubusercontent.com/arduino/"
-                "arduino-cli/master/install.sh | sh"
+                "arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
             ),
             "unknown": "https://arduino.github.io/arduino-cli/latest/installation/",
         },
@@ -241,6 +249,18 @@ def _new_installer_log_path() -> Path:
     return Path(path)
 
 
+def new_installer_log_path() -> Path:
+    """Public alias of :func:`_new_installer_log_path`.
+
+    Exposed so the GUI can pre-allocate a log path, start tailing
+    it, and then hand the same path into :func:`install_system_deps`
+    via the ``log_path`` argument. Without this, the dialog had no
+    way to know where the installer was writing until *after* the
+    install finished — too late to show live progress.
+    """
+    return _new_installer_log_path()
+
+
 @dataclass
 class InstallResult:
     """Result of running an installer."""
@@ -250,11 +270,56 @@ class InstallResult:
     log_path: Path | None = None  # Path to captured installer output, if any
 
 
+@dataclass(frozen=True)
+class InstallProgress:
+    """One progress tick emitted by the installer.
+
+    ``current`` and ``total`` are 1-indexed; ``slug`` is the
+    dependency key (``arduino-cli``, ``mpremote``, etc.) so the
+    dialog can map back to the friendly display name. ``done`` is
+    True for the final marker that fires after every command has
+    run — at that point ``current`` and ``total`` will both be
+    ``total`` so a progress bar can fill cleanly.
+    """
+
+    current: int
+    total: int
+    slug: str
+    done: bool = False
+
+
+# Regex applied per log line. Using a sentinel prefix (rather than
+# the human-readable ``==> Installing X``) keeps the parser
+# tight enough that the upstream installer's own output (e.g.
+# ``apt`` printing package names) can't fake a marker.
+_PROGRESS_MARKER_RE = re.compile(
+    r"^@@PROGRESS@@\s+(?:(?P<done>done)|(?P<current>\d+)/(?P<total>\d+)\s+(?P<slug>\S+))\s*$"
+)
+
+
+def parse_progress_marker(line: str) -> InstallProgress | None:
+    """Parse one log line; return ``None`` when the line isn't a marker.
+
+    Public so the dependency dialog and unit tests can use the same
+    regex — keeps "what does a marker look like?" in one place.
+    """
+    m = _PROGRESS_MARKER_RE.match(line.rstrip("\r\n"))
+    if m is None:
+        return None
+    if m.group("done"):
+        return InstallProgress(current=0, total=0, slug="", done=True)
+    return InstallProgress(
+        current=int(m.group("current")),
+        total=int(m.group("total")),
+        slug=m.group("slug"),
+    )
+
+
 #: How long to wait for pkexec / apt / dnf / etc. to finish.
 _INSTALLER_TIMEOUT = 600  # 10 minutes
 
 
-def install_system_deps(deps: list[Dependency]) -> InstallResult:
+def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None) -> InstallResult:
     """Install a set of system dependencies via ``pkexec`` or a terminal.
 
     Chains every non-URL install command from ``deps`` with ``;`` (so one
@@ -276,6 +341,15 @@ def install_system_deps(deps: list[Dependency]) -> InstallResult:
     distro = detect_distro()
     commands: list[str] = []
     skipped: list[str] = []
+    # Filter once so the progress markers below use the same total
+    # the GUI's progress bar parses out.
+    installable = [
+        d
+        for d in deps
+        if d.key != "uv"
+        and (h := d.install_hint(distro))
+        and not h.startswith(("http://", "https://"))
+    ]
     for dep in deps:
         hint = dep.install_hint(distro)
         if not hint:
@@ -288,9 +362,15 @@ def install_system_deps(deps: list[Dependency]) -> InstallResult:
         if dep.key == "uv":
             # Userland — handled separately via install_uv().
             continue
-        # Use ';' between individual commands for the same dep so the
-        # echo header still runs even if the install fails.
-        commands.append(f"echo '==> Installing {dep.name}'; {hint}")
+        # Emit a structured progress marker the GUI can parse to
+        # drive a real progress bar. Format: ``@@PROGRESS@@ N/M slug``.
+        # Using a sentinel prefix instead of the human-readable
+        # ``==> Installing`` line makes the regex tight enough to
+        # ignore anything inside the upstream installer's own output.
+        idx = installable.index(dep) + 1
+        total = len(installable)
+        marker = f"@@PROGRESS@@ {idx}/{total} {dep.key}"
+        commands.append(f"echo '{marker}'; echo '==> Installing {dep.name}'; {hint}")
 
     if not commands:
         if skipped:
@@ -312,9 +392,13 @@ def install_system_deps(deps: list[Dependency]) -> InstallResult:
         return InstallResult(ok=False, message="Nothing to install.")
 
     # ';' between deps so one failure doesn't skip the rest.
-    chained = " ; ".join(commands)
+    # Final ``@@PROGRESS@@ done`` lets the GUI fill the bar to 100 %
+    # and switch the label from "Installing X of Y" to "Wrapping up…"
+    # while the shell flushes its tail end.
+    chained = " ; ".join(commands) + " ; echo '@@PROGRESS@@ done'"
 
-    log_path = _new_installer_log_path()
+    if log_path is None:
+        log_path = _new_installer_log_path()
     logger.info("install_system_deps: using log file %s", log_path)
 
     # Prefer pkexec — native GUI password prompt, no terminal pop-up.
