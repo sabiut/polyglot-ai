@@ -39,14 +39,29 @@ and xAI Grok, with a full IDE-like interface.
 mkdir -p %{buildroot}/opt/polyglot-ai
 mkdir -p %{buildroot}/opt/polyglot-ai/wheels
 mkdir -p %{buildroot}/usr/share/applications
-mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps
+# Full hicolor size set so menus / pickers / tray pick a sharp
+# render at any size instead of downscaling 256 → 24 (blurry).
+for sz in 16 32 48 128 256 512; do
+    mkdir -p %{buildroot}/usr/share/icons/hicolor/${sz}x${sz}/apps
+done
+mkdir -p %{buildroot}/usr/share/icons/hicolor/scalable/apps
 cp %{_sourcedir}/*.whl %{buildroot}/opt/polyglot-ai/
 # Bundled dependency wheels — see build_rpm.sh.
 if [ -d %{_sourcedir}/wheels ] && [ -n "$(ls -A %{_sourcedir}/wheels 2>/dev/null)" ]; then
     cp %{_sourcedir}/wheels/* %{buildroot}/opt/polyglot-ai/wheels/
 fi
 cp %{_sourcedir}/polyglot-ai.desktop %{buildroot}/usr/share/applications/
-cp %{_sourcedir}/polyglot-ai.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/
+# Every PNG size build_rpm.sh staged.
+for sz in 16 32 48 128 256 512; do
+    if [ -f %{_sourcedir}/polyglot-ai-${sz}.png ]; then
+        cp %{_sourcedir}/polyglot-ai-${sz}.png \
+           %{buildroot}/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png
+    fi
+done
+if [ -f %{_sourcedir}/polyglot-ai.svg ]; then
+    cp %{_sourcedir}/polyglot-ai.svg \
+       %{buildroot}/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg
+fi
 
 %post
 INSTALL_DIR="/opt/polyglot-ai"
@@ -67,6 +82,16 @@ else
     "$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
 fi
 ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
+# Refresh desktop / icon caches so the launcher entry shows up
+# in the user's menu *now*, not after the next reboot. Both tools
+# are commonly present on Fedora/RHEL but not guaranteed in
+# minimal images, so we tolerate either being absent.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications || :
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || :
+fi
 echo "Polyglot AI installed successfully."
 echo "Run 'polyglot-ai' to start, or find it in your application menu."
 
@@ -74,8 +99,29 @@ echo "Run 'polyglot-ai' to start, or find it in your application menu."
 rm -f /usr/local/bin/polyglot-ai
 rm -rf /opt/polyglot-ai/venv
 
+%postun
+# After uninstall, refresh caches so the leftover icon doesn't
+# linger in the user's launcher. ``: `` (the rpm idiom for "this
+# is fine") because rpm scriptlet failures abort %postun.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications || :
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || :
+fi
+
 %files
 /opt/polyglot-ai/*.whl
 /opt/polyglot-ai/wheels
 /usr/share/applications/polyglot-ai.desktop
+/usr/share/icons/hicolor/16x16/apps/polyglot-ai.png
+/usr/share/icons/hicolor/32x32/apps/polyglot-ai.png
+/usr/share/icons/hicolor/48x48/apps/polyglot-ai.png
+/usr/share/icons/hicolor/128x128/apps/polyglot-ai.png
 /usr/share/icons/hicolor/256x256/apps/polyglot-ai.png
+/usr/share/icons/hicolor/512x512/apps/polyglot-ai.png
+%if 0
+# SVG only listed when present — wrapped under %if 0 in case some
+# CI doesn't generate it. (Listed manually below to be safe.)
+%endif
+/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg

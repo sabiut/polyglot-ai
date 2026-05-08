@@ -1,6 +1,7 @@
 #!/bin/bash
 # AppRun — entry point for the Polyglot AI AppImage
 APPDIR="$(dirname "$(readlink -f "$0")")"
+export APPDIR
 
 # Use bundled Python
 export PATH="$APPDIR/usr/bin:$PATH"
@@ -10,5 +11,42 @@ export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
 
 # Qt platform plugin path
 export QT_PLUGIN_PATH="$APPDIR/usr/lib/python3.11/site-packages/PyQt6/Qt6/plugins"
+
+# Self-register a launcher entry on first run so the AppImage
+# shows up in the user's app menu without requiring appimaged or
+# AppImageLauncher. Idempotent — re-running just rewrites the
+# same files. We do this in shell (instead of leaving it to the
+# Python startup path) so the icon appears in the menu before the
+# Python interpreter even imports its first PyQt module.
+#
+# Exec= is rewritten to the AppImage's actual path on disk, taken
+# from $APPIMAGE (set by appimagetool's runtime). Without that,
+# launching from the menu would try ``polyglot-ai`` on PATH —
+# almost certainly absent on a freshly-downloaded AppImage.
+if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
+    USER_APPS="$HOME/.local/share/applications"
+    USER_ICONS="$HOME/.local/share/icons/hicolor"
+    mkdir -p "$USER_APPS"
+    if [ -f "$APPDIR/polyglot-ai.desktop" ]; then
+        sed "s|Exec=polyglot-ai|Exec=$APPIMAGE|" \
+            "$APPDIR/polyglot-ai.desktop" > "$USER_APPS/polyglot-ai.desktop"
+    fi
+    for sz in 16 32 48 128 256 512; do
+        src="$APPDIR/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png"
+        if [ -f "$src" ]; then
+            mkdir -p "$USER_ICONS/${sz}x${sz}/apps"
+            cp -f "$src" "$USER_ICONS/${sz}x${sz}/apps/polyglot-ai.png"
+        fi
+    done
+    svg="$APPDIR/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg"
+    if [ -f "$svg" ]; then
+        mkdir -p "$USER_ICONS/scalable/apps"
+        cp -f "$svg" "$USER_ICONS/scalable/apps/polyglot-ai.svg"
+    fi
+    command -v update-desktop-database >/dev/null 2>&1 && \
+        update-desktop-database -q "$USER_APPS" >/dev/null 2>&1 || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+        gtk-update-icon-cache -f -t "$USER_ICONS" >/dev/null 2>&1 || true
+fi
 
 exec "$APPDIR/usr/bin/python3" -m polyglot_ai.app "$@"

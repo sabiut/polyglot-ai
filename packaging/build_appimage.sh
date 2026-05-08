@@ -29,19 +29,42 @@ mkdir -p "$APPDIR/usr/lib"
 # NOTE: --clear wipes $APPDIR/usr, so mkdir for share/ must come AFTER this
 python3 -m venv "$APPDIR/usr" --copies --clear
 
-# Create directories that venv --clear would have removed
+# Create directories that venv --clear would have removed.
+# Full hicolor size set — appimaged / AppImageLauncher pick the
+# closest size when integrating, and a 24 px tray would otherwise
+# downscale 256 → blurry.
 mkdir -p "$APPDIR/usr/share/applications"
-mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+for sz in 16 32 48 128 256 512; do
+    mkdir -p "$APPDIR/usr/share/icons/hicolor/${sz}x${sz}/apps"
+done
+mkdir -p "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 
 # Install the wheel
 "$APPDIR/usr/bin/pip" install --upgrade pip
 "$APPDIR/usr/bin/pip" install "$PROJECT_DIR/dist/"*.whl
 
-# Copy desktop file and icon
+# Copy desktop file and icons
 cp "$SCRIPT_DIR/appimage/polyglot-ai.desktop" "$APPDIR/"
 cp "$SCRIPT_DIR/appimage/polyglot-ai.desktop" "$APPDIR/usr/share/applications/"
-cp "$SCRIPT_DIR/assets/polyglot-ai-256.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/polyglot-ai.png"
+for sz in 16 32 48 128 256 512; do
+    if [ -f "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" ]; then
+        cp "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" \
+           "$APPDIR/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png"
+    fi
+done
+if [ -f "$SCRIPT_DIR/assets/polyglot-ai.svg" ]; then
+    cp "$SCRIPT_DIR/assets/polyglot-ai.svg" \
+       "$APPDIR/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg"
+fi
+
+# Top-level icon. The AppImage spec requires a PNG at the AppDir
+# root and a ``.DirIcon`` file (or symlink) — appimagetool, file
+# managers, and the appimaged daemon all look here for thumbnail
+# extraction. Without ``.DirIcon`` the integration daemon can't
+# bind the .desktop to an icon, so the AppImage shows a generic
+# binary glyph in GNOME Files / KDE Dolphin.
 cp "$SCRIPT_DIR/assets/polyglot-ai-256.png" "$APPDIR/polyglot-ai.png"
+ln -sf polyglot-ai.png "$APPDIR/.DirIcon"
 
 # Copy AppRun
 cp "$SCRIPT_DIR/appimage/AppRun" "$APPDIR/"

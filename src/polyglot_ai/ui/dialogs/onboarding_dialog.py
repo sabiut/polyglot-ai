@@ -78,6 +78,21 @@ class OnboardingDialog(QDialog):
         self._back_btn.hide()
         nav_layout.addWidget(self._back_btn)
 
+        # Skip button — gives users an explicit way out without
+        # closing the dialog with the window X. Calling
+        # ``self.accept()`` rather than ``reject()`` so the caller
+        # in ``ui_wiring.run_onboarding`` records the dialog as
+        # "seen" and doesn't re-open it on every launch.
+        self._skip_btn = QPushButton("Skip for now")
+        self._skip_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #888; font-size: 13px; "
+            "border: none; padding: 6px 12px; }"
+            "QPushButton:hover { color: #ddd; text-decoration: underline; }"
+        )
+        self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._skip_btn.clicked.connect(self.accept)
+        nav_layout.addWidget(self._skip_btn)
+
         self._next_btn = QPushButton("Get Started →")
         self._next_btn.setStyleSheet(
             "QPushButton { background: #0078d4; color: white; font-size: 13px; "
@@ -386,6 +401,9 @@ class OnboardingDialog(QDialog):
                 f"font-size: 10px; background: transparent;"
             )
         self._back_btn.setVisible(self._current_page > 0)
+        # Hide the Skip link on the final "You're all set!" page —
+        # there's nothing left to skip past at that point.
+        self._skip_btn.setVisible(self._current_page < 3)
 
         if self._current_page == 3:
             self._next_btn.setText("Start Coding →")
@@ -393,6 +411,18 @@ class OnboardingDialog(QDialog):
             self._next_btn.setText("Next →")
         else:
             self._next_btn.setText("Next →")
+
+    def reject(self) -> None:
+        """Treat window-X close the same as Skip.
+
+        Without this, closing the dialog with the X button leaves
+        ``app.onboarding_done`` unset and the wizard re-appears on
+        every launch — a surprisingly common UX papercut. Routing
+        ``reject`` through ``accept`` records the dialog as seen.
+        The user can re-open it from the Help menu if they
+        actually want to revisit it.
+        """
+        self.accept()
 
     def _login_chatgpt(self) -> None:
         from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient

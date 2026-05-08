@@ -31,6 +31,22 @@ fi
 # Create symlink
 ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
 
+# Refresh desktop and icon caches so the launcher entry and icon
+# appear in the user's app menu immediately, not after the next
+# login. dpkg triggers usually handle this on Debian/Ubuntu, but
+# being explicit is belt-and-braces — it matters on minimal
+# installs (Docker images, chroots, server distros) where the
+# triggering path might not be wired up. Both tools no-op when
+# the optional package providing them isn't installed.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    # ``-f`` forces a refresh even when mtime didn't change;
+    # ``-t`` prevents a hard fail if the index file is missing.
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+fi
+
 # Hint that Arduino uploads need the user to be in the dialout
 # group. Posix-portable ``id -nG`` since ``getent group dialout``
 # might not be installed on minimal images.

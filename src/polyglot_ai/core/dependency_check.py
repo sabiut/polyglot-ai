@@ -8,11 +8,12 @@ commands except the opt-in uv installer.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -21,18 +22,211 @@ logger = logging.getLogger(__name__)
 Distro = Literal["debian", "fedora", "arch", "opensuse", "alpine", "unknown"]
 
 
+# ── Executable discovery ────────────────────────────────────────────
+#
+# ``shutil.which`` only searches ``$PATH``. That misses two very common
+# install locations on Linux:
+#
+#   • ``~/.local/bin`` — pip's ``--user`` install destination and the
+#     default ``BINDIR`` for the upstream ``arduino-cli`` installer
+#     when ``BINDIR=/usr/local/bin`` isn't set explicitly. Debian /
+#     Ubuntu only add this to ``$PATH`` from ``~/.profile`` *if it
+#     exists at login*; users who install a tool today and don't log
+#     out / back in won't have it on PATH for the running session.
+#
+#   • ``/snap/bin`` — Ubuntu / Mint default for snap-installed
+#     binaries (``kubectl``, ``gh``). Present on PATH for most users
+#     but not all (Fedora Silverblue, NixOS, custom shells).
+#
+# The first-run dependency dialog used to pop up for every user with
+# arduino-cli or mpremote in ``~/.local/bin`` because of this. We now
+# search a small list of well-known userland locations *in addition*
+# to PATH, and any tool that resolves anywhere on that list is
+# considered installed.
+_EXTRA_SEARCH_PATHS_CACHE: list[Path] | None = None
+
+
+def _extra_search_paths() -> list[Path]:
+    """Return common executable directories that may not be on PATH.
+
+    Cached on first call — these directories don't appear or
+    disappear during a session, and ``Path.is_dir()`` is cheap but
+    not free.
+    """
+    global _EXTRA_SEARCH_PATHS_CACHE
+    if _EXTRA_SEARCH_PATHS_CACHE is not None:
+        return _EXTRA_SEARCH_PATHS_CACHE
+
+    home = Path.home()
+    candidates = [
+        home / ".local" / "bin",  # pip --user, arduino-cli install.sh default
+        home / "bin",  # legacy ~/bin
+        home / ".cargo" / "bin",  # Rust / cargo-installed CLIs
+        Path("/usr/local/bin"),  # arduino-cli with BINDIR=/usr/local/bin
+        Path("/snap/bin"),  # snap (kubectl, gh on Ubuntu/Mint)
+        Path("/var/lib/snapd/snap/bin"),  # snap (alternate mount)
+        Path("/opt/homebrew/bin"),  # Homebrew on Apple Silicon (rare on Linux)
+    ]
+    # Deduplicate while preserving order, and drop ones that don't
+    # exist so per-tool lookups can short-circuit cleanly.
+    seen: set[str] = set()
+    result: list[Path] = []
+    for p in candidates:
+        s = str(p)
+        if s in seen:
+            continue
+        seen.add(s)
+        try:
+            if p.is_dir():
+                result.append(p)
+        except OSError:
+            # Permission errors on weird mounts shouldn't break
+            # detection — just skip the path.
+            continue
+    _EXTRA_SEARCH_PATHS_CACHE = result
+    return result
+
+
+def find_executable(command: str) -> str | None:
+    """Like ``shutil.which`` but also searches common userland bin dirs.
+
+    Returns the absolute path to ``command`` if found anywhere on
+    PATH or in :func:`_extra_search_paths`, else ``None``.
+
+    Public so other modules (e.g. ``arduino/service.py``) can use the
+    same resolver and avoid the "dialog says installed but the panel
+    can't find it" inconsistency.
+    """
+    if not command:
+        return None
+    found = shutil.which(command)
+    if found:
+        return found
+    for d in _extra_search_paths():
+        candidate = d / command
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
+def _module_importable(module: str) -> bool:
+    """Return True if ``module`` is importable in the *current* interpreter.
+
+    Used for pure-Python dependencies (``pyserial`` and friends)
+    that ship as importable packages rather than CLIs. Checking the
+    spec here — instead of subprocess-importing under ``python3`` —
+    means we report what the running app can actually use, which
+    avoids "system Python has it but our venv doesn't" false
+    positives.
+    """
+    if not module:
+        return False
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _python_module_runs(module: str) -> bool:
+    """Return True if ``python3 -m <module>`` exits cleanly.
+
+    Used as a last-resort fallback for pip-installed tools whose
+    console-script wrapper isn't reachable (e.g. ``pip install
+    --user mpremote`` on a system whose ``$PATH`` lacks
+    ``~/.local/bin``). The module is in ``sys.path`` either way, so
+    ``python3 -m mpremote --help`` still works.
+
+    Each call shells out and is bounded at 5 s — fine on the first-
+    run dialog which only invokes this once per startup. ``--help``
+    rather than ``--version`` because not every CLI implements
+    ``--version`` but ``-m`` always responds to ``--help``.
+    """
+    for python in ("python3", "python"):
+        py = shutil.which(python)
+        if not py:
+            continue
+        try:
+            result = subprocess.run(
+                [py, "-m", module, "--help"],
+                capture_output=True,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            return True
+    return False
+
+
 @dataclass
 class Dependency:
-    """A single optional dependency that may or may not be installed."""
+    """A single optional dependency that may or may not be installed.
+
+    Two flavours are supported:
+
+    * **Executables** — set ``command`` (and optionally ``aliases``).
+      Detection runs through :func:`find_executable`, which checks
+      both ``$PATH`` and a small list of well-known userland bin
+      dirs.
+    * **Python packages** — set ``importable_module`` (e.g.
+      ``"serial"`` for pyserial). Detection runs through
+      :func:`_module_importable` against the *current* interpreter,
+      which is what the app actually uses at runtime.
+
+    Both flavours can coexist on the same entry, and an additional
+    ``python_module`` fallback is available for pip-installed CLIs
+    whose console-script wrapper isn't reachable on ``$PATH``.
+    """
 
     key: str  # stable id, e.g. "node"
     name: str  # user-facing label, e.g. "Node.js"
-    command: str  # executable to look for on PATH
     purpose: str  # one-line description of what it unlocks
     install_urls: dict[Distro, str]  # distro → install command or URL
+    # Empty when the dependency is a pure-Python package with no
+    # CLI wrapper (e.g. pyserial). Use ``importable_module`` instead.
+    command: str = ""
+    # Optional: extra executable names to accept as "installed". Some
+    # tools ship under more than one binary name across distros
+    # (e.g. ``esptool`` vs ``esptool.py``); listing all of them here
+    # avoids false-negative dialogs.
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+    # Optional: a Python module name that, if importable, satisfies
+    # this dependency. Used for pure-Python packages — pyserial sets
+    # this to ``"serial"``.
+    importable_module: str | None = None
+    # Optional: if the tool can be invoked as ``python -m <name>``
+    # (typical of pip-installed CLIs whose console script may not be
+    # on PATH), set this and detection will try that as a fallback.
+    python_module: str | None = None
+    # Whether installing this dependency needs ``sudo`` / ``pkexec``.
+    # System packages (apt/dnf/etc.) need root; pip-installed Python
+    # packages (``pyserial``, ``mpremote``) and userland installers
+    # (``uv``) do not. The installer batches root deps under a
+    # single pkexec'd shell and runs userland deps as the calling
+    # user, so a missing pip package won't drag a sudo prompt.
+    requires_root: bool = True
 
     def is_installed(self) -> bool:
-        return shutil.which(self.command) is not None
+        # 1) Executable on PATH or in a known userland bin dir.
+        if self.command:
+            for name in (self.command, *self.aliases):
+                if find_executable(name) is not None:
+                    return True
+        # 2) Pure-Python package importable in the running app.
+        if self.importable_module and _module_importable(self.importable_module):
+            return True
+        # 3) ``python -m <name>`` fallback for pip-installed CLIs
+        #    whose console-script wrapper isn't reachable. Slower
+        #    (subprocess) so it runs last.
+        if self.python_module and _python_module_runs(self.python_module):
+            return True
+        return False
 
     def install_hint(self, distro: Distro) -> str:
         return self.install_urls.get(distro) or self.install_urls.get("unknown", "")
@@ -197,6 +391,57 @@ DEPENDENCIES: list[Dependency] = [
             "alpine": "pip install --user mpremote",
             "unknown": "pip install --user mpremote",
         },
+        # mpremote is now a hard dep in pyproject.toml, so for any
+        # standard install it's importable from the running app's
+        # interpreter even when its console-script wrapper isn't on
+        # PATH. The ``importable_module`` check is the canonical
+        # one. ``python_module`` stays as a third-tier fallback for
+        # the legacy case where someone has mpremote under a
+        # different Python that happens to be on PATH.
+        importable_module="mpremote",
+        python_module="mpremote",
+        requires_root=False,
+    ),
+    Dependency(
+        key="pyserial",
+        name="pyserial",
+        # No executable — pyserial is a pure-Python library that the
+        # Arduino panel imports directly. Detection is via the
+        # ``importable_module`` field below.
+        command="",
+        purpose=(
+            "Arduino panel — board detection (USB serial port scan). "
+            "Required when arduino-cli isn't installed and as a fallback "
+            "for cheap clones (CH340, ESP, Pico) it doesn't recognise."
+        ),
+        install_urls={
+            "debian": "pip install --user pyserial",
+            "fedora": "pip install --user pyserial",
+            "arch": "pip install --user pyserial",
+            "opensuse": "pip install --user pyserial",
+            "alpine": "pip install --user pyserial",
+            "unknown": "pip install --user pyserial",
+        },
+        importable_module="serial",
+        requires_root=False,
+    ),
+    Dependency(
+        key="git",
+        name="Git",
+        command="git",
+        # Used by the Git panel, the CI/CD panel, the AI's git_*
+        # tools, ``Sandbox`` change tracking, and the diff review
+        # engine. Silent failure here breaks half the app, so it
+        # earns its place in the first-run dialog.
+        purpose="Git panel, CI/CD panel, diff review, AI git_* tools",
+        install_urls={
+            "debian": "sudo apt install git",
+            "fedora": "sudo dnf install git",
+            "arch": "sudo pacman -S git",
+            "opensuse": "sudo zypper install git",
+            "alpine": "sudo apk add git",
+            "unknown": "https://git-scm.com/downloads",
+        },
     ),
 ]
 
@@ -319,60 +564,145 @@ def parse_progress_marker(line: str) -> InstallProgress | None:
 _INSTALLER_TIMEOUT = 600  # 10 minutes
 
 
+def _build_chained_command(
+    deps: list[Dependency],
+    distro: Distro,
+    *,
+    start_idx: int,
+    total: int,
+    emit_done: bool,
+) -> str:
+    """Compose a single shell pipeline that installs ``deps`` in order.
+
+    Each dependency emits a ``@@PROGRESS@@ N/M slug`` marker before
+    its install command runs so the GUI's log tailer can advance
+    its progress bar. ``start_idx`` lets us number across two
+    batches — the userland batch goes first (1..U), the root batch
+    follows (U+1..U+R) — without the bar resetting in the middle.
+    ``;`` between commands so one failure doesn't skip the rest.
+    """
+    pieces: list[str] = []
+    for i, dep in enumerate(deps, start=start_idx):
+        hint = dep.install_hint(distro)
+        marker = f"@@PROGRESS@@ {i}/{total} {dep.key}"
+        pieces.append(f"echo '{marker}'; echo '==> Installing {dep.name}'; {hint}")
+    chained = " ; ".join(pieces)
+    if emit_done:
+        # Final marker tells the GUI to fill the bar to 100 % and
+        # switch the label to "Wrapping up…" while the shell flushes.
+        chained = f"{chained} ; echo '@@PROGRESS@@ done'"
+    return chained
+
+
+def _run_userland_install(chained: str, log_path: Path) -> InstallResult:
+    """Run a userland install pipeline as the calling user (no pkexec).
+
+    Used for pip-installed packages (``pyserial``, ``mpremote``)
+    where ``pip install --user`` writes into ``~/.local/`` and
+    sudo'ing it would either install into root's home or trip
+    PEP 668's externally-managed marker.
+
+    Truncates the log file (``"wb"``) — the userland pass is
+    always the *first* pass, so any prior content is from a
+    previous run and isn't relevant.
+    """
+    logger.info(
+        "_run_userland_install: running as user (timeout=%ds, log=%s)",
+        _INSTALLER_TIMEOUT,
+        log_path,
+    )
+    try:
+        proc = subprocess.Popen(
+            ["sh", "-c", chained],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except OSError as e:
+        logger.exception("_run_userland_install: could not launch sh")
+        return InstallResult(ok=False, message=f"Could not launch installer: {e}")
+
+    try:
+        with log_path.open("wb") as log:
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                log.write(chunk)
+                log.flush()
+        proc.wait(timeout=_INSTALLER_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return InstallResult(
+            ok=False,
+            message=(
+                f"User-level installer timed out after {_INSTALLER_TIMEOUT // 60} "
+                f"minutes. See log: {log_path}"
+            ),
+            log_path=log_path,
+        )
+
+    if proc.returncode != 0:
+        return InstallResult(
+            ok=False,
+            message=(
+                f"User-level install reported errors (exit {proc.returncode}). See log: {log_path}"
+            ),
+            log_path=log_path,
+        )
+
+    logger.info("_run_userland_install: success")
+    return InstallResult(
+        ok=True,
+        message="User-level packages installed.",
+        log_path=log_path,
+    )
+
+
 def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None) -> InstallResult:
-    """Install a set of system dependencies via ``pkexec`` or a terminal.
+    """Install a set of dependencies, splitting userland from root.
 
-    Chains every non-URL install command from ``deps`` with ``;`` (so one
-    failed package doesn't prevent later ones from being attempted) and
-    runs them with elevated privileges. Captures all stdout/stderr to a
-    temp log file and waits for the process to finish (pkexec path).
-    The terminal-fallback path cannot be waited on, but still directs
-    output through ``tee`` to the same log file for post-mortem.
+    The deps are bucketed by ``Dependency.requires_root``:
 
-    BLOCKING — this function waits up to _INSTALLER_TIMEOUT seconds for
-    the installer to return. Callers must run it off the UI thread
-    (e.g. via ``asyncio.to_thread`` or a worker).
+    * **Userland** (e.g. ``pyserial``, ``mpremote``) run first as
+      the calling user — no auth prompt, no pkexec.
+    * **Root** (e.g. ``apt install nodejs``, ``dnf install gh``)
+      then run via a single ``pkexec`` so the user types their
+      password exactly once.
 
-    The returned ``InstallResult`` carries a real success flag based on
-    the installer's exit code (pkexec path) or on whether the terminal
-    spawn succeeded (fallback path), plus a log path the caller can
-    surface to the user.
+    Both batches share a single log file so the dialog's tail
+    timer renders one continuous stream, and the progress markers
+    are numbered across both batches so the bar advances smoothly.
+
+    Documentation URLs and the special ``uv`` key are skipped
+    (the GUI surfaces those separately) — same as before.
+
+    BLOCKING — waits up to _INSTALLER_TIMEOUT seconds *per batch*
+    for the installer to return. Callers must run it off the UI
+    thread.
     """
     distro = detect_distro()
-    commands: list[str] = []
     skipped: list[str] = []
-    # Filter once so the progress markers below use the same total
-    # the GUI's progress bar parses out.
-    installable = [
-        d
-        for d in deps
-        if d.key != "uv"
-        and (h := d.install_hint(distro))
-        and not h.startswith(("http://", "https://"))
-    ]
-    for dep in deps:
+
+    def _is_runnable(dep: Dependency) -> bool:
+        if dep.key == "uv":
+            return False  # userland, handled separately via install_uv()
         hint = dep.install_hint(distro)
         if not hint:
-            skipped.append(dep.name)
-            continue
+            return False
         if hint.startswith(("http://", "https://")):
-            # Documentation URL — we can't script it.
-            skipped.append(dep.name)
-            continue
-        if dep.key == "uv":
-            # Userland — handled separately via install_uv().
-            continue
-        # Emit a structured progress marker the GUI can parse to
-        # drive a real progress bar. Format: ``@@PROGRESS@@ N/M slug``.
-        # Using a sentinel prefix instead of the human-readable
-        # ``==> Installing`` line makes the regex tight enough to
-        # ignore anything inside the upstream installer's own output.
-        idx = installable.index(dep) + 1
-        total = len(installable)
-        marker = f"@@PROGRESS@@ {idx}/{total} {dep.key}"
-        commands.append(f"echo '{marker}'; echo '==> Installing {dep.name}'; {hint}")
+            return False
+        return True
 
-    if not commands:
+    runnable = [d for d in deps if _is_runnable(d)]
+    skipped = [d.name for d in deps if d.key != "uv" and not _is_runnable(d)]
+
+    if not runnable:
         if skipped:
             logger.warning(
                 "install_system_deps: no auto-installable deps on distro=%s (skipped=%s)",
@@ -391,15 +721,54 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
         )
         return InstallResult(ok=False, message="Nothing to install.")
 
-    # ';' between deps so one failure doesn't skip the rest.
-    # Final ``@@PROGRESS@@ done`` lets the GUI fill the bar to 100 %
-    # and switch the label from "Installing X of Y" to "Wrapping up…"
-    # while the shell flushes its tail end.
-    chained = " ; ".join(commands) + " ; echo '@@PROGRESS@@ done'"
+    # Stable order: userland first (no auth), then root via pkexec.
+    user_deps = [d for d in runnable if not d.requires_root]
+    root_deps = [d for d in runnable if d.requires_root]
+    total = len(runnable)
 
     if log_path is None:
         log_path = _new_installer_log_path()
     logger.info("install_system_deps: using log file %s", log_path)
+
+    # Pass 1 — userland (pip install --user, etc). Run only if we
+    # have userland deps; if we don't, skip straight to pkexec.
+    if user_deps:
+        user_chained = _build_chained_command(
+            user_deps,
+            distro,
+            start_idx=1,
+            total=total,
+            # Only emit done if there's no root pass after this.
+            emit_done=not root_deps,
+        )
+        user_result = _run_userland_install(user_chained, log_path)
+        if not user_result.ok:
+            # Userland failed — don't bother prompting for sudo to
+            # finish the root half. The dialog can re-launch later.
+            return user_result
+        if not root_deps:
+            return InstallResult(
+                ok=True,
+                message=(
+                    "Installer finished successfully. Restart Polyglot AI so the new "
+                    f"packages are picked up. Full log: {log_path}"
+                ),
+                log_path=log_path,
+            )
+
+    # Pass 2 — root (apt/dnf/pacman/zypper/apk via pkexec).
+    chained = _build_chained_command(
+        root_deps,
+        distro,
+        start_idx=len(user_deps) + 1,
+        total=total,
+        emit_done=True,
+    )
+
+    # Append (not truncate) when a userland pass already wrote to
+    # this log — otherwise we'd lose the pip output the dialog has
+    # already shown the user.
+    log_open_mode = "ab" if user_deps else "wb"
 
     # Prefer pkexec — native GUI password prompt, no terminal pop-up.
     if has_pkexec():
@@ -438,7 +807,7 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
         # appear within a fraction of a second of when it was
         # produced.
         try:
-            with log_path.open("wb") as log:
+            with log_path.open(log_open_mode) as log:
                 assert proc.stdout is not None
                 while True:
                     chunk = proc.stdout.read(4096)

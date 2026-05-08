@@ -37,6 +37,15 @@ dependencies = [
     # see boards arduino-cli identifies — Pi Pico, CH340 clones,
     # generic ESP boards in bootloader mode are missed.
     "pyserial>=3.5",
+    # MicroPython upload tool. Pure-Python (~5 MB), used by the
+    # Arduino panel's MicroPython upload path and the
+    # arduino-python-flash workflow. Shipping it as a hard dep means
+    # the panel's Upload button works on a fresh install without
+    # the user needing to chase down a separate ``pip install
+    # --user mpremote`` step. The first-run dependency dialog still
+    # flags it if the wheel somehow isn't installed (stale venv,
+    # broken packaging) — see core/dependency_check.py.
+    "mpremote>=1.20",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +53,13 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-qt>=4.4",
-    "ruff>=0.4",
+    # Pinned exact — ``ruff format`` output drifts slightly between
+    # minor releases, and an unpinned constraint means CI silently
+    # picks up the newest one on every run while developer venvs
+    # stay on whatever was installed last. The result: a green
+    # local ``ruff format --check`` followed by a red CI build.
+    # Bump this pin deliberately when adopting a new ruff version.
+    "ruff==0.15.12",
 ]
 
 [project.scripts]

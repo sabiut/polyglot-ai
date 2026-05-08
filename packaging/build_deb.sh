@@ -29,9 +29,12 @@ rm -rf "$STAGING"
 mkdir -p "$STAGING/DEBIAN"
 mkdir -p "$STAGING/opt/polyglot-ai"
 mkdir -p "$STAGING/usr/share/applications"
-mkdir -p "$STAGING/usr/share/icons/hicolor/256x256/apps"
-mkdir -p "$STAGING/usr/share/icons/hicolor/128x128/apps"
-mkdir -p "$STAGING/usr/share/icons/hicolor/48x48/apps"
+# Full hicolor size set — anything missing here gets downscaled by
+# the launcher at display time, which looks blurry on HiDPI menus.
+for sz in 16 32 48 128 256 512; do
+    mkdir -p "$STAGING/usr/share/icons/hicolor/${sz}x${sz}/apps"
+done
+mkdir -p "$STAGING/usr/share/icons/hicolor/scalable/apps"
 
 # Copy debian control files
 cp "$SCRIPT_DIR/debian/control" "$STAGING/DEBIAN/"
@@ -75,18 +78,19 @@ python3 -m pip download \
 # Copy desktop file
 cp "$SCRIPT_DIR/debian/polyglot-ai.desktop" "$STAGING/usr/share/applications/"
 
-# Copy icons
-if [ -f "$SCRIPT_DIR/assets/polyglot-ai-256.png" ]; then
-    cp "$SCRIPT_DIR/assets/polyglot-ai-256.png" \
-       "$STAGING/usr/share/icons/hicolor/256x256/apps/polyglot-ai.png"
-fi
-if [ -f "$SCRIPT_DIR/assets/polyglot-ai-128.png" ]; then
-    cp "$SCRIPT_DIR/assets/polyglot-ai-128.png" \
-       "$STAGING/usr/share/icons/hicolor/128x128/apps/polyglot-ai.png"
-fi
-if [ -f "$SCRIPT_DIR/assets/polyglot-ai-48.png" ]; then
-    cp "$SCRIPT_DIR/assets/polyglot-ai-48.png" \
-       "$STAGING/usr/share/icons/hicolor/48x48/apps/polyglot-ai.png"
+# Copy icons — every available hicolor size, plus the SVG for
+# vector-aware themes (KDE, modern GNOME).
+for sz in 16 32 48 128 256 512; do
+    if [ -f "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" ]; then
+        cp "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" \
+           "$STAGING/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png"
+    else
+        echo "warn: missing assets/polyglot-ai-${sz}.png — run packaging/generate_icons.sh first"
+    fi
+done
+if [ -f "$SCRIPT_DIR/assets/polyglot-ai.svg" ]; then
+    cp "$SCRIPT_DIR/assets/polyglot-ai.svg" \
+       "$STAGING/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg"
 fi
 
 # Build .deb

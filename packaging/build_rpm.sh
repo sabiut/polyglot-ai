@@ -27,7 +27,22 @@ mkdir -p "$RPMBUILD"/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
 # Copy sources
 cp "$PROJECT_DIR/dist/"*.whl "$RPMBUILD/SOURCES/"
 cp "$SCRIPT_DIR/debian/polyglot-ai.desktop" "$RPMBUILD/SOURCES/"
+# Ship every available hicolor size — anything missing here is
+# downscaled by the launcher and looks blurry on HiDPI menus.
+# The default 256 keeps the historic ``polyglot-ai.png`` name for
+# back-compat with anything that read it directly.
 cp "$SCRIPT_DIR/assets/polyglot-ai-256.png" "$RPMBUILD/SOURCES/polyglot-ai.png"
+for sz in 16 32 48 128 256 512; do
+    if [ -f "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" ]; then
+        cp "$SCRIPT_DIR/assets/polyglot-ai-${sz}.png" \
+           "$RPMBUILD/SOURCES/polyglot-ai-${sz}.png"
+    else
+        echo "warn: missing assets/polyglot-ai-${sz}.png — run packaging/generate_icons.sh first"
+    fi
+done
+if [ -f "$SCRIPT_DIR/assets/polyglot-ai.svg" ]; then
+    cp "$SCRIPT_DIR/assets/polyglot-ai.svg" "$RPMBUILD/SOURCES/polyglot-ai.svg"
+fi
 cp "$SCRIPT_DIR/rpm/polyglot-ai.spec" "$RPMBUILD/SPECS/"
 
 # Pre-download dependency wheels so %post can install offline (no

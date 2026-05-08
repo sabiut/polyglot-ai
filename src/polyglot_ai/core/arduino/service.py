@@ -28,13 +28,42 @@ Design rules
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
-import shutil
+import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from polyglot_ai.core.arduino.boards import Board, Language, board_for_usb
+from polyglot_ai.core.dependency_check import find_executable
+
+
+def _resolve_mpremote_argv() -> list[str] | None:
+    """Return the argv prefix needed to invoke mpremote, or None.
+
+    Resolution order:
+
+    1. ``mpremote`` console script on PATH or in a known userland
+       bin dir — fastest to launch and what most installs provide.
+    2. ``python -m mpremote`` against the *running* interpreter, if
+       the package is importable from our process. This is the
+       common case for users who installed Polyglot AI via the
+       wheel: mpremote is a hard dep so the venv has it, but the
+       venv's bin dir may not be exported into the subprocess
+       PATH on every launcher (AppImage, .desktop entries with
+       custom Exec lines, etc.).
+
+    Returns ``None`` only when neither resolves — that's the case
+    we tell the user to install mpremote.
+    """
+    cli = find_executable("mpremote")
+    if cli:
+        return [cli]
+    if importlib.util.find_spec("mpremote") is not None:
+        return [sys.executable, "-m", "mpremote"]
+    return None
+
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +148,24 @@ class ArduinoService:
     # ── Toolchain detection ────────────────────────────────────────
 
     def detect_toolchains(self) -> Toolchains:
-        """Return which CLIs are on PATH right now.
+        """Return which CLIs are on PATH (or in known userland bin dirs).
 
-        Cheap: ``shutil.which`` doesn't fork. Safe to call on every
-        panel refresh.
+        Cheap: ``find_executable`` is a thin wrapper around
+        ``shutil.which`` plus a handful of ``Path.is_file`` checks
+        on directories that don't change during a session. Safe to
+        call on every panel refresh.
+
+        Uses ``find_executable`` rather than raw ``shutil.which`` so
+        binaries installed under ``~/.local/bin`` (the default for
+        ``pip install --user`` and the upstream ``arduino-cli``
+        installer) are found even when ``$PATH`` doesn't include
+        that directory — same fix as the optional-features dialog.
+
+        ``mpremote`` is also satisfied by the bundled wheel (it's a
+        hard dep in pyproject.toml), so ``_resolve_mpremote_argv``
+        is consulted as a second signal — if mpremote is importable
+        in our interpreter we report it as available even when the
+        console-script wrapper isn't on PATH.
         """
         try:
             import serial  # noqa: F401  — presence check only
@@ -131,10 +174,16 @@ class ArduinoService:
         except ImportError:
             pyserial_ok = False
 
+        mpremote_argv = _resolve_mpremote_argv()
+        # Store the joined argv as a display string. Truthiness is
+        # all the ``can_micropython`` property cares about; the
+        # actual invocation path lives in ``_resolve_mpremote_argv``.
+        mpremote_display = " ".join(mpremote_argv) if mpremote_argv else None
+
         return Toolchains(
-            arduino_cli=shutil.which("arduino-cli"),
-            mpremote=shutil.which("mpremote"),
-            esptool=shutil.which("esptool.py") or shutil.which("esptool"),
+            arduino_cli=find_executable("arduino-cli"),
+            mpremote=mpremote_display,
+            esptool=find_executable("esptool.py") or find_executable("esptool"),
             pyserial_ok=pyserial_ok,
         )
 
@@ -208,7 +257,7 @@ class ArduinoService:
         back to a pyserial scan + USB-ID lookup so cheap clones and
         ESP/Pico boards are still recognised.
         """
-        cli = shutil.which("arduino-cli")
+        cli = find_executable("arduino-cli")
         if cli:
             boards = await self._list_via_arduino_cli(cli)
             if boards:
@@ -216,25 +265,47 @@ class ArduinoService:
         return await self._list_via_pyserial()
 
     async def _list_via_arduino_cli(self, cli_path: str) -> list[DetectedBoard]:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                cli_path,
-                "board",
-                "list",
-                "--format",
-                "json",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        except (asyncio.TimeoutError, OSError) as exc:
-            logger.warning("arduino-cli board list failed: %s", exc)
-            return []
+        # arduino-cli's ``board list`` is a short-running subprocess
+        # (typically 100–800 ms). We deliberately avoid
+        # ``asyncio.create_subprocess_exec`` here because it calls
+        # ``events.get_running_loop()`` internally and that raises
+        # ``RuntimeError: no running event loop`` whenever this
+        # coroutine is driven by a Qt timer tick through a qasync-
+        # backed loop — the same compat quirk already worked around
+        # in :meth:`_list_via_pyserial`. With board detection
+        # polling on a 2.5 s cadence, even one bad tick floods the
+        # log; a thread-executor + blocking ``subprocess.run`` is
+        # short, safe, and never touches the broken loop state.
+        import subprocess as _subprocess
 
-        if proc.returncode != 0:
+        def _run_sync() -> tuple[int, bytes, bytes]:
+            try:
+                result = _subprocess.run(
+                    [cli_path, "board", "list", "--format", "json"],
+                    capture_output=True,
+                    timeout=10,
+                )
+            except (OSError, _subprocess.TimeoutExpired) as exc:
+                logger.warning("arduino-cli board list failed: %s", exc)
+                return (1, b"", b"")
+            return (result.returncode, result.stdout, result.stderr)
+
+        # Push the blocking call into a thread so the UI stays
+        # responsive. If the loop itself isn't reachable (the same
+        # qasync edge case the pyserial path guards against), fall
+        # back to a direct sync call — the subprocess is fast enough
+        # that one frame of jank is preferable to the alternative
+        # of skipping detection entirely.
+        try:
+            loop = asyncio.get_running_loop()
+            rc, stdout, stderr = await loop.run_in_executor(None, _run_sync)
+        except RuntimeError:
+            rc, stdout, stderr = _run_sync()
+
+        if rc != 0:
             logger.warning(
                 "arduino-cli board list returned %d: %s",
-                proc.returncode,
+                rc,
                 stderr.decode("utf-8", errors="replace")[:200],
             )
             return []
@@ -347,7 +418,7 @@ class ArduinoService:
             yield u
 
     async def _compile_cpp(self, sketch_dir: Path, board: Board) -> AsyncIterator[StepUpdate]:
-        cli = shutil.which("arduino-cli")
+        cli = find_executable("arduino-cli")
         if cli is None:
             yield StepUpdate(
                 "Arduino CLI isn't installed yet. Open Settings → Arduino for help.",
@@ -380,7 +451,7 @@ class ArduinoService:
     async def upload_cpp(
         self, sketch_dir: Path, board: Board, port: str
     ) -> AsyncIterator[StepUpdate]:
-        cli = shutil.which("arduino-cli")
+        cli = find_executable("arduino-cli")
         if cli is None:
             yield StepUpdate("Arduino CLI isn't installed yet.", kind="fail")
             return
@@ -408,8 +479,8 @@ class ArduinoService:
 
     async def upload_micropython(self, script: Path, port: str) -> AsyncIterator[StepUpdate]:
         """Copy ``script`` to the board as ``main.py`` and soft-reset."""
-        mpremote = shutil.which("mpremote")
-        if mpremote is None:
+        mpremote_argv = _resolve_mpremote_argv()
+        if mpremote_argv is None:
             yield StepUpdate("MicroPython tools aren't installed yet.", kind="fail")
             return
         if not script.is_file():
@@ -418,7 +489,7 @@ class ArduinoService:
 
         yield StepUpdate("Sending your Python code to the board…")
         rc, _, stderr = await _run(
-            mpremote,
+            *mpremote_argv,
             "connect",
             port,
             "fs",
@@ -435,7 +506,7 @@ class ArduinoService:
             return
 
         yield StepUpdate("Restarting the board…")
-        rc, _, stderr = await _run(mpremote, "connect", port, "reset")
+        rc, _, stderr = await _run(*mpremote_argv, "connect", port, "reset")
         if rc != 0:
             # Reset failure is non-fatal — code is on the board, will
             # run on next power cycle. Surface as info, not error.
@@ -491,26 +562,55 @@ class ArduinoService:
 
 
 async def _run(*argv: str, timeout: float = 180.0) -> tuple[int, str, str]:
-    """Run a subprocess and return ``(rc, stdout, stderr)`` as text."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+    """Run a subprocess and return ``(rc, stdout, stderr)`` as text.
+
+    Implementation note — uses :mod:`subprocess` in a thread executor
+    rather than :func:`asyncio.create_subprocess_exec`. The latter
+    calls ``events.get_running_loop()`` internally and that fails
+    with ``RuntimeError: no running event loop`` when this coroutine
+    is driven by a Qt timer tick on a qasync-backed loop. Compile
+    and upload are user-initiated (one click → one subprocess), so
+    the loss of asyncio's child-watcher integration is irrelevant;
+    a thread executor keeps the UI responsive without exposing the
+    qasync compat quirk.
+    """
+    import subprocess as _subprocess
+
+    def _run_sync() -> tuple[int, str, str]:
+        try:
+            result = _subprocess.run(
+                list(argv),
+                capture_output=True,
+                timeout=timeout,
+            )
+        except FileNotFoundError as exc:
+            return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
+        except OSError as exc:
+            return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
+        except _subprocess.TimeoutExpired as exc:
+            partial_stdout = (exc.stdout or b"").decode("utf-8", errors="replace")
+            partial_stderr = (exc.stderr or b"").decode("utf-8", errors="replace")
+            return (
+                124,
+                partial_stdout,
+                partial_stderr + f"\n{argv[0]} timed out after {timeout:.0f}s",
+            )
+        return (
+            result.returncode or 0,
+            result.stdout.decode("utf-8", errors="replace"),
+            result.stderr.decode("utf-8", errors="replace"),
         )
-    except OSError as exc:
-        return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
+
+    # Prefer the loop's executor so the UI stays responsive. If the
+    # loop isn't reachable (a known qasync edge case during certain
+    # timer-driven flows), fall through to a direct sync call — the
+    # caller is already a coroutine, so there's nothing else useful
+    # we could do.
     try:
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return 124, "", f"{argv[0]} timed out after {timeout:.0f}s"
-    return (
-        proc.returncode or 0,
-        stdout_b.decode("utf-8", errors="replace"),
-        stderr_b.decode("utf-8", errors="replace"),
-    )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_sync)
+    except RuntimeError:
+        return _run_sync()
 
 
 def _parse_hex(value: object) -> int:
