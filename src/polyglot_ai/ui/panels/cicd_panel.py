@@ -618,6 +618,18 @@ class CICDPanel(QWidget):
             self._jobs_label.setText("Error: Failed to parse job data")
             return
 
+        # Cache job metadata keyed by run id so the log fetcher can
+        # use the per-job ``gh run view --job <id> --log`` endpoint
+        # instead of the run-level ``--log-failed`` flag (which
+        # downloads the *entire* run as a ZIP, even when only one
+        # job failed — typically 30–60 s of network I/O for a CI
+        # with two parallel jobs). Per-job log endpoints stream
+        # plain text and finish in a few seconds.
+        if not hasattr(self, "_cached_jobs"):
+            self._cached_jobs: dict[int, list[dict]] = {}
+        if hasattr(self, "_selected_run_id"):
+            self._cached_jobs[self._selected_run_id] = jobs
+
         self._jobs_table.setRowCount(len(jobs))
         for row, job in enumerate(jobs):
             status = job.get("conclusion") or job.get("status", "unknown")
@@ -638,6 +650,29 @@ class CICDPanel(QWidget):
 
         self._jobs_label.setText(f"{len(jobs)} jobs")
 
+    # ── Log fetching ────────────────────────────────────────────────
+    #
+    # The original implementation called ``gh run view <id> --log-failed``
+    # which downloads the run's *entire* log archive as a ZIP from
+    # the GitHub API, extracts it, and then locally filters to
+    # failed jobs. Even when a single job failed, the user paid for
+    # downloading every job's full log — empirically 30–60 s of
+    # silent network I/O on a normal CI with two parallel jobs.
+    #
+    # The new implementation uses the per-job log endpoint
+    # (``gh run view <id> --job <job_id> --log``), which streams
+    # only the requested job's plain text. We:
+    #
+    # 1. Reuse the cached job list (already fetched on row click)
+    # 2. Pick the failed jobs (or all if the run succeeded and the
+    #    user explicitly asked for full logs)
+    # 3. Fetch each job sequentially, with progress shown live in
+    #    the dialog
+    # 4. Cache the assembled output so re-clicking is instant
+    #
+    # A "Open on GitHub" button is also exposed on the dialog for
+    # users on flaky networks who'd rather just bail to the web UI.
+
     def _fetch_failed_logs(self) -> None:
         if not hasattr(self, "_selected_run_id"):
             return
@@ -646,64 +681,264 @@ class CICDPanel(QWidget):
         self._logs_btn.setEnabled(False)
         self._logs_btn.setText("Loading...")
 
-        # Determine if we should fetch failed logs or all logs
         row = self._runs_table.currentRow()
-        use_failed_only = False
+        is_failure = False
         title = f"Logs — Run #{run_id}"
         if 0 <= row < len(self._runs_data):
             conclusion = self._runs_data[row].get("conclusion", "")
             if conclusion == "failure":
-                use_failed_only = True
+                is_failure = True
                 title = f"Failed logs — Run #{run_id}"
 
-        # Open dialog immediately with loading state, then populate in background
+        # Show the dialog immediately so the user has feedback even
+        # if ``gh`` is slow to fetch the first byte. Set an explicit
+        # progress message right away — the dialog's generic timer
+        # is a fallback for when nothing else has anything to say,
+        # and "Connecting to GitHub…" is a much better first
+        # impression than "Loading logs… (3s)".
         self._log_dialog = _CICDLogDialog(title, self)
+        web_url = self._build_run_url(run_id)
+        if web_url:
+            self._log_dialog.set_web_url(web_url)
+        self._log_dialog.set_progress("Connecting to GitHub…")
         self._log_dialog.show()
 
-        log_flag = "--log-failed" if use_failed_only else "--log"
-
-        # Use Popen so we can kill the process if the user cancels
         if not self._check_gh():
             self._log_dialog.set_content("Error: GitHub CLI (gh) not found.")
             self._logs_btn.setEnabled(True)
             self._logs_btn.setText("View Logs")
             return
 
+        # Re-clicking the same run should be instant.
+        if not hasattr(self, "_logs_cache"):
+            self._logs_cache: dict[int, str] = {}
+        if run_id in self._logs_cache:
+            self._log_dialog.set_content(self._logs_cache[run_id])
+            self._logs_btn.setEnabled(True)
+            self._logs_btn.setText("View Logs")
+            return
+
+        # We need the job list to drive the per-job fetch. It's
+        # almost always already cached from the row-selection
+        # handler, but if the user clicked View Logs before that
+        # populated, fall back to fetching it inline.
+        cached_jobs = getattr(self, "_cached_jobs", {}).get(run_id)
+        if cached_jobs is None:
+            self._log_dialog.set_progress("Asking GitHub for the job list…")
+            self._fetch_jobs_then_logs(run_id, is_failure)
+            return
+
+        self._dispatch_per_job_fetch(run_id, cached_jobs, is_failure)
+
+    def _fetch_jobs_then_logs(self, run_id: int, is_failure: bool) -> None:
+        """Fetch the job list, then chain into the log fetcher.
+
+        Used when ``View Logs`` is clicked before the row-selection
+        handler has populated ``_cached_jobs`` — rare, but it can
+        happen when the panel is restored from session state.
+        """
         import threading
 
-        proc = subprocess.Popen(
-            ["gh", "run", "view", str(run_id), log_flag],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=self._project_root or None,
-        )
-        self._log_dialog.set_subprocess(proc)
-
-        def do_fetch():
-            try:
-                # 2-minute hard cap — after that, kill the process
-                stdout, stderr = proc.communicate(timeout=120)
-                code = proc.returncode
-                output = stdout if code == 0 else (stderr or stdout)
-            except subprocess.TimeoutExpired:
-                try:
-                    proc.kill()
-                    proc.communicate()
-                except Exception:
-                    pass
-                output = (
-                    "Timed out after 2 minutes. GitHub Actions logs for this run "
-                    "are too large to download. Try clicking on individual jobs in "
-                    "the table instead, or view the run directly in GitHub."
+        def worker() -> None:
+            logger.info("cicd: fetching job list for run %s", run_id)
+            output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
+            if code != 0:
+                logger.warning("cicd: job list fetch failed (rc=%s): %s", code, output[:200])
+                QTimer.singleShot(
+                    0, lambda: self._on_logs_loaded(f"Could not list jobs: {output[:500]}", 1)
                 )
-                code = 1
-            except Exception as exc:
-                output = f"Error: {exc}"
-                code = 1
-            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, code))
+                return
+            try:
+                jobs = json.loads(output).get("jobs", [])
+            except json.JSONDecodeError:
+                QTimer.singleShot(0, lambda: self._on_logs_loaded("Could not parse job list.", 1))
+                return
+            logger.info("cicd: got %d jobs for run %s", len(jobs), run_id)
+            if not hasattr(self, "_cached_jobs"):
+                self._cached_jobs = {}
+            self._cached_jobs[run_id] = jobs
+            QTimer.singleShot(0, lambda: self._dispatch_per_job_fetch(run_id, jobs, is_failure))
 
-        threading.Thread(target=do_fetch, daemon=True).start()
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _dispatch_per_job_fetch(self, run_id: int, jobs: list[dict], is_failure: bool) -> None:
+        """Spawn the worker that streams logs for each (failed) job."""
+        # When the run failed, only fetch the failed jobs — that's
+        # what the user actually wants to read and skipping passing
+        # jobs cuts download time roughly in half on a typical
+        # two-job CI. When the run succeeded, fetch all jobs.
+        targets = jobs
+        if is_failure:
+            targets = [j for j in jobs if j.get("conclusion") == "failure"]
+            if not targets:
+                # Edge case: gh reports failure on the run but no
+                # individual job matches. Fall back to all jobs so
+                # the user sees *something* useful.
+                targets = jobs
+
+        if not targets:
+            self._on_logs_loaded("(no jobs to fetch logs for)", 0)
+            return
+
+        # Show concrete progress synchronously, BEFORE spawning the
+        # worker. Without this, users on slow networks watch the
+        # generic "Still fetching…" placeholder for the first 30 s
+        # while ``gh`` opens its TLS connection and waits for the
+        # first byte. Setting progress here means the dialog reads
+        # "Fetching job 1/N: <name>…" within milliseconds of the
+        # click — no thread-scheduling roundtrip required.
+        first_name = targets[0].get("name") or f"job-{targets[0].get('databaseId')}"
+        if self._log_dialog is not None:
+            self._log_dialog.set_progress(f"Fetching job 1/{len(targets)}: {first_name}…")
+
+        import threading
+
+        def worker() -> None:
+            logger.info("cicd: streaming logs for %d job(s) of run %s", len(targets), run_id)
+            collected: list[str] = []
+            total = len(targets)
+            for idx, job in enumerate(targets, start=1):
+                job_id = job.get("databaseId")
+                name = job.get("name", f"job-{job_id}") or f"job-{job_id}"
+                conclusion = job.get("conclusion") or job.get("status", "")
+                if not job_id:
+                    continue
+
+                # idx==1 was already announced synchronously above,
+                # so only update for jobs 2..N. Saves one round-trip
+                # of UI churn on the common single-job case.
+                if idx > 1:
+                    QTimer.singleShot(
+                        0,
+                        lambda i=idx, n=name: self._update_log_progress(
+                            f"Fetching job {i}/{total}: {n}…"
+                        ),
+                    )
+
+                logger.info("cicd: gh run view --job %s --log (job %d/%d)", job_id, idx, total)
+                proc = subprocess.Popen(
+                    [
+                        "gh",
+                        "run",
+                        "view",
+                        str(run_id),
+                        "--job",
+                        str(job_id),
+                        "--log",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,  # line-buffered so we can stream
+                    cwd=self._project_root or None,
+                )
+                if self._log_dialog is not None:
+                    QTimer.singleShot(0, lambda p=proc: self._set_dialog_subprocess(p))
+
+                # Stream stdout line by line so the dialog fills
+                # progressively instead of staring at a frozen
+                # placeholder until the entire log finishes
+                # downloading. On a CI run with multi-MB logs
+                # (PyQt6 install output, etc.) this is the
+                # difference between "30 s of nothing then a wall
+                # of text" and "first lines visible in <2 s".
+                import time as _time
+
+                started = _time.monotonic()
+                lines: list[str] = []
+                last_push = started
+                # ``communicate`` can't be used alongside line-by-
+                # line iteration; manage the timeout ourselves.
+                # 45 s is well above typical (5-15 s) but short
+                # enough one stuck job doesn't block the rest.
+                per_job_timeout = 45
+                try:
+                    assert proc.stdout is not None
+                    for line in iter(proc.stdout.readline, ""):
+                        lines.append(line)
+                        # Push a partial progress update every
+                        # ~250 ms (or every 100 lines) so users
+                        # see the KB count climb. Frequent enough
+                        # to feel live; rare enough to skip the
+                        # cost of re-rendering after each line on
+                        # a 100k-line job log.
+                        now = _time.monotonic()
+                        if (now - last_push) >= 0.25 or (len(lines) % 100 == 0):
+                            partial_kb = sum(len(s) for s in lines) // 1024
+                            QTimer.singleShot(
+                                0,
+                                lambda i=idx, n=name, t=total, kb=partial_kb: (
+                                    self._update_log_progress(
+                                        f"Fetching job {i}/{t}: {n}… ({kb} KB)"
+                                    )
+                                ),
+                            )
+                            last_push = now
+                        if (now - started) > per_job_timeout:
+                            raise subprocess.TimeoutExpired(proc.args, per_job_timeout)
+                    proc.wait(timeout=2)
+                    body = "".join(lines)
+                    if proc.returncode != 0:
+                        stderr_text = (proc.stderr.read() if proc.stderr else "") or ""
+                        body = (
+                            f"(gh exited {proc.returncode} for job {name!r}: "
+                            f"{stderr_text[:300]})\n{body}"
+                        )
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        pass
+                    partial = "".join(lines)
+                    body = (
+                        f"(timed out after {per_job_timeout}s for job {name!r}; "
+                        f"showing partial log — try Open on GitHub for the full output)\n"
+                        f"{partial}"
+                    )
+                except Exception as exc:
+                    body = f"(error fetching log for job {name!r}: {exc})\n{''.join(lines)}"
+
+                header = f"\n{'=' * 70}\n=== Job: {name}  ({conclusion or 'unknown'})\n{'=' * 70}\n"
+                collected.append(header + body)
+
+            output = "".join(collected) if collected else "(no logs)"
+            self._logs_cache[run_id] = output
+            logger.info("cicd: per-job fetch complete (%d KB)", len(output) // 1024)
+            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, 0))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_log_progress(self, msg: str) -> None:
+        """Push a progress line into the open log dialog."""
+        if hasattr(self, "_log_dialog") and self._log_dialog is not None:
+            self._log_dialog.set_progress(msg)
+
+    def _set_dialog_subprocess(self, proc) -> None:
+        """Helper so the worker thread can register the in-flight ``gh``."""
+        if hasattr(self, "_log_dialog") and self._log_dialog is not None:
+            self._log_dialog.set_subprocess(proc)
+
+    def _build_run_url(self, run_id: int) -> str | None:
+        """Return ``https://github.com/<owner>/<repo>/actions/runs/<id>``.
+
+        Cached per-project; one ``gh repo view`` lookup per project
+        root for the lifetime of the panel.
+        """
+        if not self._project_root:
+            return None
+        if not hasattr(self, "_repo_slug_cache"):
+            self._repo_slug_cache: dict[str, str | None] = {}
+        cached = self._repo_slug_cache.get(self._project_root)
+        if cached is None and self._project_root not in self._repo_slug_cache:
+            output, code = self._run_gh(
+                ["repo", "view", "--json", "owner,name", "-q", '.owner.login + "/" + .name']
+            )
+            cached = output.strip() if code == 0 else None
+            self._repo_slug_cache[self._project_root] = cached
+        if not cached:
+            return None
+        return f"https://github.com/{cached}/actions/runs/{run_id}"
 
     def _on_logs_loaded(self, output: str, code: int) -> None:
         self._logs_btn.setEnabled(True)
@@ -803,6 +1038,27 @@ class _CICDLogDialog(QWidget):
         )
         h_layout.addWidget(self._count_label)
 
+        # "Open on GitHub" — instant escape hatch for users on
+        # flaky networks. Hidden by default; revealed via
+        # ``set_web_url`` when the panel resolves the run URL.
+        # ``tc.get`` raises KeyError on unknown tokens, so use one
+        # that's defined in every theme (bg_surface_raised) rather
+        # than a tentative ``or fallback`` lookup.
+        self._web_btn = QPushButton("Open on GitHub")
+        self._web_btn.setFixedHeight(24)
+        self._web_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._web_btn.setStyleSheet(
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 3px; "
+            f"padding: 0 10px; font-size: {tc.FONT_XS}px; margin-left: 8px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
+        )
+        self._web_btn.setVisible(False)
+        self._web_btn.clicked.connect(self._open_in_browser)
+        h_layout.addWidget(self._web_btn)
+        self._web_url: str | None = None
+
         self._cancel_btn = QPushButton("Cancel")
         self._cancel_btn.setFixedHeight(24)
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -817,7 +1073,9 @@ class _CICDLogDialog(QWidget):
 
         layout.addWidget(header)
 
-        # Process handle — set by the panel so cancel can kill it
+        # Process handle — set by the panel so cancel can kill the
+        # current ``gh`` invocation. Re-set on each per-job step so
+        # Cancel always targets the in-flight one.
         self._subprocess = None
 
         # Log viewer
@@ -833,11 +1091,16 @@ class _CICDLogDialog(QWidget):
         self._viewer.setPlainText("Loading logs...")
         layout.addWidget(self._viewer)
 
-        # Progress counter — updates every second while loading
+        # Progress counter — updates every second while loading.
+        # ``_has_progress_msg`` flips True once the per-job fetcher
+        # calls ``set_progress`` so the timer stops overwriting the
+        # specific "Fetching job N/M…" text with the generic
+        # "Loading logs…" placeholder.
         import time
 
         self._start_time = time.monotonic()
         self._loading = True
+        self._has_progress_msg = False
         self._progress_timer = QTimer(self)
         self._progress_timer.timeout.connect(self._tick_progress)
         self._progress_timer.start(1000)
@@ -849,19 +1112,54 @@ class _CICDLogDialog(QWidget):
         import time
 
         elapsed = int(time.monotonic() - self._start_time)
-        if elapsed < 10:
-            msg = f"Loading logs... ({elapsed}s)"
-        elif elapsed < 30:
-            msg = f"Downloading logs from GitHub... ({elapsed}s)"
-        elif elapsed < 60:
-            msg = f"Still downloading... this can take a while ({elapsed}s)"
-        else:
-            msg = f"Taking longer than usual... ({elapsed}s)"
-        self._viewer.setPlainText(msg)
+        # The viewer body is owned by ``set_progress`` once the
+        # per-job fetcher has something specific to say (e.g.
+        # "Fetching job 2/3: build-wheel"). Until then, we render
+        # a generic "loading" message that matches what the user
+        # sees with no per-job feedback yet. The count label always
+        # shows elapsed seconds so it's obvious time is passing.
+        if not self._has_progress_msg:
+            if elapsed < 10:
+                self._viewer.setPlainText(f"Loading logs... ({elapsed}s)")
+            elif elapsed < 30:
+                self._viewer.setPlainText(f"Fetching logs from GitHub... ({elapsed}s)")
+            else:
+                self._viewer.setPlainText(
+                    f"Still fetching... try Open on GitHub if this drags on. ({elapsed}s)"
+                )
         self._count_label.setText(f"{elapsed}s")
 
+    def set_progress(self, msg: str) -> None:
+        """Replace the body with a structured progress message.
+
+        Called by the per-job fetcher so the user sees exactly
+        which job is currently being downloaded ("Fetching job
+        2/3: build-wheel…") instead of a generic counter. Once
+        ``set_content`` arrives the timer stops touching the body.
+        """
+        self._has_progress_msg = True
+        if self._loading:
+            self._viewer.setPlainText(msg)
+
+    def set_web_url(self, url: str) -> None:
+        """Reveal the Open on GitHub button with the given URL."""
+        self._web_url = url
+        self._web_btn.setVisible(True)
+
+    def _open_in_browser(self) -> None:
+        if not self._web_url:
+            return
+        import webbrowser
+
+        webbrowser.open(self._web_url)
+
     def set_subprocess(self, proc) -> None:
-        """Register the running subprocess so Cancel can kill it."""
+        """Register the running subprocess so Cancel can kill it.
+
+        The per-job fetcher re-registers each new ``gh`` invocation
+        as it starts; the previous process has already exited by
+        then so dropping the reference here is safe.
+        """
         self._subprocess = proc
 
     def _cancel_loading(self) -> None:

@@ -83,7 +83,16 @@ class TestKidFriendlyMessaging:
         assert updates[-1].kind == "fail"
 
     def test_upload_micropython_when_tool_missing(self, monkeypatch):
+        # Simulate a fully-missing toolchain: no console script on PATH
+        # *and* the python module isn't importable. Patching only
+        # ``shutil.which`` would still let ``_resolve_mpremote_argv``
+        # fall through to ``python -m mpremote`` because mpremote is a
+        # hard dep of the project.
         monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr(
+            "polyglot_ai.core.arduino.service._resolve_mpremote_argv",
+            lambda: None,
+        )
         svc = ArduinoService()
         updates = _drain(svc.upload_micropython(Path("/tmp/x.py"), "/dev/ttyUSB0"))
         assert updates[-1].kind == "fail"
