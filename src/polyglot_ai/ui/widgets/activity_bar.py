@@ -109,6 +109,8 @@ class ActivityBarButton(QWidget):
             self._draw_today_icon(painter, ox, oy)
         elif self._icon_type == "arduino":
             self._draw_arduino_icon(painter, ox, oy)
+        elif self._icon_type == "claude":
+            self._draw_claude_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -320,6 +322,30 @@ class ActivityBarButton(QWidget):
         # Orientation notch
         p.drawArc(QRectF(ox + 9, oy + 5, 6, 4), 0, 180 * 16)
 
+    def _draw_claude_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Claude (subscription) — speech-bubble glyph with a sparkle.
+
+        Distinct from the chat tab's icon (which lives in the right-
+        pane tab bar, not here). The sparkle hints at "AI" without
+        leaning on Anthropic's official mark, which we shouldn't
+        copy into our binary.
+        """
+        # Speech bubble outline — rounded rect with a small tail.
+        bubble = QPainterPath()
+        bubble.addRoundedRect(QRectF(ox + 2, oy + 3, 20, 14), 3, 3)
+        # Tail at bottom-left
+        bubble.moveTo(ox + 7, oy + 17)
+        bubble.lineTo(ox + 5, oy + 21)
+        bubble.lineTo(ox + 11, oy + 17)
+        p.drawPath(bubble)
+
+        # Four-point sparkle inside the bubble (centered)
+        cx, cy = ox + 12, oy + 10
+        p.drawLine(QPointF(cx, cy - 4), QPointF(cx, cy + 4))
+        p.drawLine(QPointF(cx - 4, cy), QPointF(cx + 4, cy))
+        p.drawLine(QPointF(cx - 2.5, cy - 2.5), QPointF(cx + 2.5, cy + 2.5))
+        p.drawLine(QPointF(cx - 2.5, cy + 2.5), QPointF(cx + 2.5, cy - 2.5))
+
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
         cx, cy = ox + 12, oy + 12
@@ -401,6 +427,7 @@ class ActivityBar(QWidget):
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
             ("tests", "Tests (Ctrl+Shift+T)"),
             ("arduino", "Arduino (Ctrl+Shift+A)"),
+            ("claude", "Claude subscription chat"),
         ]
 
         for icon_type, tooltip in top_items:

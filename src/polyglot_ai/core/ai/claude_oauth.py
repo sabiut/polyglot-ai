@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import AsyncGenerator
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, BadRequestError
 
 from polyglot_ai.constants import (
     EVT_AI_ERROR,
@@ -51,6 +51,24 @@ def _is_oauth_unsupported_error(error_text: str) -> bool:
         return False
     needle = "oauth authentication is currently not supported"
     return needle in error_text.lower()
+
+
+def _is_temperature_deprecated_error(error_text: str) -> bool:
+    """Detect the 400 newer Claude models return for ``temperature``.
+
+    Anthropic's response is::
+
+        invalid_request_error: `temperature` is deprecated for this
+        model.
+
+    Claude Sonnet 4.5+ / Opus 4.7+ raise it; older models still
+    accept the parameter. Substring + case-insensitive match for
+    the same robustness reason as the OAuth check above.
+    """
+    if not error_text:
+        return False
+    lower = error_text.lower()
+    return "`temperature`" in lower and "deprecated" in lower
 
 
 class ClaudeOAuthClient(AIProvider):
@@ -289,7 +307,31 @@ class ClaudeOAuthClient(AIProvider):
             block_to_tool_idx: dict[int, int] = {}
             next_tool_idx = 0
 
-            async with self._client.messages.stream(**kwargs) as stream:
+            # Newer Claude models (Sonnet 4.5+, Opus 4.7+) reject the
+            # ``temperature`` parameter outright with a 400. The
+            # parameter is set on ``__aenter__`` of the stream context
+            # manager — i.e. before any chunk is yielded — so a clean
+            # one-shot retry without ``temperature`` is safe and
+            # transparent to the caller. Older models still accept it,
+            # so we try with it first.
+            stream_cm = self._client.messages.stream(**kwargs)
+            try:
+                stream = await stream_cm.__aenter__()
+            except BadRequestError as e:
+                from polyglot_ai.core.security import sanitize_error
+
+                if (
+                    _is_temperature_deprecated_error(sanitize_error(str(e)))
+                    and "temperature" in kwargs
+                ):
+                    logger.info("Model rejected temperature parameter; retrying without it")
+                    kwargs.pop("temperature", None)
+                    stream_cm = self._client.messages.stream(**kwargs)
+                    stream = await stream_cm.__aenter__()
+                else:
+                    raise
+
+            try:
                 async for event in stream:
                     if not hasattr(event, "type"):
                         continue
@@ -361,6 +403,12 @@ class ClaudeOAuthClient(AIProvider):
                             ),
                         }
                     )
+            finally:
+                # Mirror what ``async with`` would have done — close
+                # the stream and any open HTTP connections regardless
+                # of whether iteration succeeded, raised, or was
+                # cancelled (e.g. user cancelled mid-stream).
+                await stream_cm.__aexit__(None, None, None)
 
             self._event_bus.emit(EVT_AI_STREAM_DONE)
 
@@ -391,11 +439,18 @@ class ClaudeOAuthClient(AIProvider):
                         "doesn't currently accept OAuth bearer tokens; only "
                         "Claude Code's internal routing layer does, and that "
                         "isn't available to third-party apps.\n\n"
-                        "**Workaround**: open Settings → AI Providers → "
-                        "Anthropic and paste an API key from "
+                        "**Two ways forward:**\n\n"
+                        "1. **Use the subscription web view** — click the "
+                        "speech-bubble icon in the activity bar (left edge) "
+                        "to chat through the embedded ``claude.ai`` page. "
+                        "Your subscription works there. Trade-off: no tool "
+                        "calls, MCP, or workflow integration in that panel.\n\n"
+                        "2. **Add an API key** — open Settings → AI "
+                        "Providers → Anthropic and paste a key from "
                         "https://console.anthropic.com/settings/keys. "
-                        "Pick a Claude model from the dropdown again and it "
-                        "will route through the API-key provider instead."
+                        "Pick a Claude model from the dropdown again and "
+                        "all the IDE features (tool calls, MCP, workflows) "
+                        "keep working."
                     )
                 )
                 return

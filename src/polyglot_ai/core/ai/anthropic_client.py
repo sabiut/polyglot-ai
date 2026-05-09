@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncGenerator
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, BadRequestError
 
 from polyglot_ai.core.ai.models import StreamChunk
 from polyglot_ai.core.ai.provider import AIProvider, ModelListCache
@@ -182,7 +182,33 @@ class AnthropicClient(AIProvider):
             id_to_tool_idx: dict[str, int] = {}
             next_tool_idx = 0
 
-            async with self._client.messages.stream(**kwargs) as stream:
+            # Same temperature-deprecation handling as the OAuth path —
+            # newer Claude models (Sonnet 4.5+, Opus 4.7+) reject the
+            # parameter outright with a 400 raised on ``__aenter__``.
+            # Strip and retry once when that happens; older models
+            # still accept it, so we send it on the first attempt.
+            from polyglot_ai.core.ai.claude_oauth import (
+                _is_temperature_deprecated_error,
+            )
+
+            stream_cm = self._client.messages.stream(**kwargs)
+            try:
+                stream = await stream_cm.__aenter__()
+            except BadRequestError as e:
+                from polyglot_ai.core.security import sanitize_error
+
+                if (
+                    _is_temperature_deprecated_error(sanitize_error(str(e)))
+                    and "temperature" in kwargs
+                ):
+                    logger.info("Model rejected temperature parameter; retrying without it")
+                    kwargs.pop("temperature", None)
+                    stream_cm = self._client.messages.stream(**kwargs)
+                    stream = await stream_cm.__aenter__()
+                else:
+                    raise
+
+            try:
                 async for event in stream:
                     if not hasattr(event, "type"):
                         continue
@@ -255,6 +281,8 @@ class AnthropicClient(AIProvider):
                             ),
                         }
                     )
+            finally:
+                await stream_cm.__aexit__(None, None, None)
 
             self._emit_stream_done()
 

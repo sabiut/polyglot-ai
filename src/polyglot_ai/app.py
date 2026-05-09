@@ -102,6 +102,23 @@ def main() -> None:
     # used by the upcoming QApplication. Set it here.
     QGuiApplication.setDesktopFileName("polyglot-ai")
 
+    # Required for ``QtWebEngineWidgets`` (used by the Claude
+    # subscription web panel). Qt enforces that this attribute is
+    # set *before* ``QApplication`` is constructed; importing
+    # ``QWebEngineView`` later otherwise raises::
+    #
+    #     QtWebEngineWidgets must be imported or
+    #     Qt.AA_ShareOpenGLContexts must be set before a
+    #     QCoreApplication instance is created
+    #
+    # The attribute is harmless when QtWebEngine isn't installed —
+    # it just configures GL context sharing for any widgets that
+    # request it — so we set it unconditionally rather than
+    # gating on whether the optional dependency is available.
+    from PyQt6.QtCore import Qt
+
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
     # Qt application
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)

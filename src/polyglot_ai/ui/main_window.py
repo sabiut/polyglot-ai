@@ -32,6 +32,7 @@ from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
 from polyglot_ai.ui.panels.terminal_panel import TerminalPanel, TerminalWidget
 from polyglot_ai.ui.panels.arduino_panel import ArduinoPanel, ArduinoWindow
+from polyglot_ai.ui.panels.claude_web_panel import ClaudeWebPanel, ClaudeWebWindow
 from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 from polyglot_ai.ui.panels.test_panel import TestPanel
 from polyglot_ai.ui.panels.today_panel import TodayPanel
@@ -113,6 +114,13 @@ class MainWindow(QMainWindow):
         # chosen starter, status feed, etc.) instead of spawning a
         # blank one.
         self._arduino_window: ArduinoWindow | None = None
+
+        # Same lazy pattern for the Claude subscription web window.
+        # The web view's logged-in session would be lost if we
+        # rebuilt it on every open; lazy-and-keep preserves cookies
+        # for the lifetime of the app.
+        self._claude_web_panel: ClaudeWebPanel | None = None
+        self._claude_web_window: ClaudeWebWindow | None = None
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
         from PyQt6.QtWidgets import QTabWidget
@@ -207,6 +215,13 @@ class MainWindow(QMainWindow):
             self._show_arduino_window()
             return
 
+        # The Claude (subscription) web view also pops as its own
+        # window — claude.ai expects desktop dimensions and would
+        # be unusable wedged into the 200 px sidebar.
+        if view_name == "claude":
+            self._show_claude_web_window()
+            return
+
         view_map = {
             "files": 0,
             "search": 1,
@@ -243,6 +258,22 @@ class MainWindow(QMainWindow):
         if self._arduino_window is None:
             self._arduino_window = ArduinoWindow(self._arduino_panel, self)
         self._arduino_window.show_and_raise()
+
+    def _show_claude_web_window(self) -> None:
+        """Open the Claude (subscription) web view as its own window.
+
+        Constructs the panel and window lazily so the
+        ``QWebEngineView`` profile (and the ~50 MB Chromium runtime
+        it pulls in) only loads if the user actually clicks the
+        chip. Once opened, both are kept on ``self`` so re-clicks
+        raise the same window — and crucially the user's login
+        cookies survive the close → reopen cycle.
+        """
+        if self._claude_web_panel is None:
+            self._claude_web_panel = ClaudeWebPanel()
+        if self._claude_web_window is None:
+            self._claude_web_window = ClaudeWebWindow(self._claude_web_panel, self)
+        self._claude_web_window.show_and_raise()
 
     def _show_cicd_tab(self) -> None:
         """Switch to the CI/CD tab in the right panel."""
