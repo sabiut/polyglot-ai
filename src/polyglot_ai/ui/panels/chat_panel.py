@@ -2183,6 +2183,16 @@ class ChatPanel(QWidget):
         if provider is None:
             return
 
+        # Subscription OAuth has very tight per-minute rate limits;
+        # spending one of them on conversation categorisation (a
+        # background nicety, not user-visible work) burns slots the
+        # user would rather use for actual chat. Skip the classifier
+        # for that provider — the conversation just stays in "all"
+        # until the user picks a category manually.
+        if getattr(provider, "name", "") == "claude_oauth":
+            logger.debug("Auto-classify: skipping for claude_oauth provider (rate-limit-sensitive)")
+            return
+
         category = await _classify_conversation_category(messages, provider, model)
         if not category:
             return

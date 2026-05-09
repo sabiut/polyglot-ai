@@ -71,6 +71,26 @@ def _is_temperature_deprecated_error(error_text: str) -> bool:
     return "`temperature`" in lower and "deprecated" in lower
 
 
+def _is_rate_limit_error(error_text: str) -> bool:
+    """Detect Anthropic's 429 ``rate_limit_error``.
+
+    The body is typically::
+
+        Error code: 429 - {'type': 'error', 'error':
+        {'type': 'rate_limit_error', 'message': 'Error'}, ...}
+
+    Anthropic's subscription OAuth tier has tighter per-minute caps
+    than API-key access (subscription traffic on claude.ai already
+    counts against the same budget), so users hit this far more
+    quickly through this provider. We render it specially so users
+    see "wait and retry" instead of a generic ``Error`` dump.
+    """
+    if not error_text:
+        return False
+    lower = error_text.lower()
+    return "429" in lower or "rate_limit_error" in lower or "too many requests" in lower
+
+
 class ClaudeOAuthClient(AIProvider):
     """Claude provider using subscription via OAuth tokens from Claude Code."""
 
@@ -451,6 +471,27 @@ class ClaudeOAuthClient(AIProvider):
                         "Pick a Claude model from the dropdown again and "
                         "all the IDE features (tool calls, MCP, workflows) "
                         "keep working."
+                    )
+                )
+                return
+            if _is_rate_limit_error(error_msg):
+                yield StreamChunk(
+                    delta_content=(
+                        "\n\n**Anthropic rate-limited this request (HTTP 429).**\n\n"
+                        "Subscription OAuth has tighter per-minute caps than "
+                        "API-key access — subscription usage on claude.ai counts "
+                        "against the same budget, so heavy chat in either place "
+                        "trips the limit fast.\n\n"
+                        "**Options:**\n\n"
+                        "1. **Wait ~1 minute and retry.** The cap resets on a "
+                        "rolling window.\n"
+                        "2. **Use the subscription web view** (speech-bubble "
+                        "icon in the activity bar). Different rate limits than "
+                        "the API path.\n"
+                        "3. **Switch to an API key** — Settings → AI Providers "
+                        "→ Anthropic, paste a key from "
+                        "https://console.anthropic.com/settings/keys. API-key "
+                        "rate limits are much higher than subscription OAuth."
                     )
                 )
                 return
