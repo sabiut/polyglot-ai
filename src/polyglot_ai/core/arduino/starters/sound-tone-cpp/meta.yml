@@ -5,3 +5,4 @@ language: cpp
 boards: []
 entry_file: tune.ino
 suggested_project_name: tune
+post_upload_hint: Listen — your buzzer should play a short tune. No buzzer? Wire one to pin 8.

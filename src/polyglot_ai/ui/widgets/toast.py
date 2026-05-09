@@ -209,25 +209,71 @@ class ToastManager(QObject):
         # Toasts stack from the top down. Skip any that were dismissed
         # but haven't yet been GC'd to avoid painting a phantom row.
         y = _TOP_OFFSET
-        host_w = self._host.width()
+        try:
+            host_w = self._host.width()
+        except RuntimeError:
+            # Host QWidget already destroyed (window-close race
+            # during shutdown). Nothing to lay out against; bail
+            # quietly. The manager itself is parented to the host
+            # so it'll be cleaned up immediately afterwards.
+            return
         for toast in self._iter_alive():
-            x = host_w - toast.width() - _RIGHT_OFFSET
-            toast.move(max(0, x), y)
-            y += toast.height() + _TOAST_GAP
+            try:
+                tw = toast.width()
+                th = toast.height()
+            except RuntimeError:
+                # Same race — C++ side gone between iter_alive's
+                # liveness check and the move. Skip rather than
+                # crash; it'll be pruned on the next pass.
+                continue
+            x = host_w - tw - _RIGHT_OFFSET
+            try:
+                toast.move(max(0, x), y)
+            except RuntimeError:
+                continue
+            y += th + _TOAST_GAP
 
     def _iter_alive(self) -> Iterable[Toast]:
+        # Some toasts may have had their underlying C++ widget
+        # destroyed without going through ``_dismiss`` — the host
+        # window closing mid-stream is the usual cause. Calling
+        # any method on a dead wrapper raises ``RuntimeError:
+        # wrapped C/C++ object of type Toast has been deleted``,
+        # which used to take down the whole app on the next
+        # resize event. Prune dead refs in-place and skip them
+        # silently.
+        survivors: list[Toast] = []
+        had_dead = False
         for t in self._toasts:
-            # ``isVisible`` would be cheaper but a freshly-created
-            # toast hasn't been shown yet at the moment we reposition.
-            # ``isHidden()`` is the inverse and only true after
-            # ``hide()`` was called.
-            if not t.isHidden():
+            try:
+                # ``isVisible`` would be cheaper but a freshly-
+                # created toast hasn't been shown yet at the
+                # moment we reposition. ``isHidden()`` is the
+                # inverse and only true after ``hide()`` was
+                # called.
+                hidden = t.isHidden()
+            except RuntimeError:
+                had_dead = True
+                continue
+            survivors.append(t)
+            if not hidden:
                 yield t
+        # Update the canonical list only when we actually pruned
+        # something — avoids a needless list rebuild on every
+        # resize tick in the steady state.
+        if had_dead:
+            self._toasts = survivors
 
     # Reposition on host resize so toasts stay glued to the top-right.
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
-        if obj is self._host and event.type() == QEvent.Type.Resize:
-            self._reposition()
+        try:
+            if obj is self._host and event.type() == QEvent.Type.Resize:
+                self._reposition()
+        except RuntimeError:
+            # Host disappeared mid-event — Qt sometimes dispatches
+            # one queued event after the C++ widget is gone. Treat
+            # it as a no-op rather than a fatal crash.
+            return False
         return super().eventFilter(obj, event)
 
 

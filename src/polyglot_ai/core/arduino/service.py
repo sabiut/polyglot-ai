@@ -144,6 +144,41 @@ class ArduinoService:
         # panel via the "Ask AI for help" button rather than shown
         # to the kid in the main status area.
         self.last_error_detail: str = ""
+        # In-flight subprocess so the panel can cancel a long
+        # compile or upload mid-flight. ``cancel_current_upload``
+        # terminates whatever's stored here. Set by ``_run`` while
+        # a subprocess is alive, cleared in the ``finally``.
+        self._current_proc = None  # type: ignore[var-annotated]
+        # Set by ``cancel_current_upload`` to distinguish a clean
+        # exit from a user-initiated cancel. ``_run`` checks it
+        # after the subprocess returns and translates a non-zero
+        # rc into a ``-1`` "cancelled" signal so the panel doesn't
+        # surface a misleading "Compile failed" status.
+        self._cancel_requested = False
+
+    def cancel_current_upload(self) -> bool:
+        """Terminate the in-flight compile / upload subprocess.
+
+        Returns True iff a subprocess was actually running (so the
+        panel can decide whether to show a "Cancelled" status line
+        or a "nothing to cancel" hint). Idempotent — calling when
+        nothing is running is a quiet no-op.
+
+        Sends SIGTERM rather than SIGKILL so the child gets a
+        chance to finish writing partial output and clean up its
+        own temp files. ``_run`` falls through to ``proc.kill``
+        if the SIGTERM doesn't take effect within a couple of
+        seconds.
+        """
+        proc = self._current_proc
+        if proc is None:
+            return False
+        self._cancel_requested = True
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        return True
 
     # ── Toolchain detection ────────────────────────────────────────
 
@@ -186,6 +221,67 @@ class ArduinoService:
             esptool=find_executable("esptool.py") or find_executable("esptool"),
             pyserial_ok=pyserial_ok,
         )
+
+    @staticmethod
+    def find_circuitpython_drive(label: str = "CIRCUITPY") -> Path | None:
+        """Auto-discover a mounted CircuitPython USB drive.
+
+        CircuitPython boards expose themselves as a USB mass-
+        storage device labelled ``CIRCUITPY`` (the default — some
+        boards customise this via ``boot.py``). Linux mounts these
+        under ``/media/$USER/CIRCUITPY``, ``/run/media/$USER/CIRCUITPY``,
+        or — on systems with udisksd — ``/run/media/<uid>/CIRCUITPY``.
+        macOS uses ``/Volumes/CIRCUITPY``.
+
+        Without this helper, the panel told the user to "open
+        Advanced and pick the CIRCUITPY drive" — most kids don't
+        know what a drive label is, so this scan turns the typical
+        case into "press Upload, it just works."
+
+        Returns ``None`` when nothing matches; the panel falls
+        back to the manual picker.
+        """
+        import os
+        from pathlib import Path as _Path
+
+        # Roots in priority order. Modern udisksd uses
+        # ``/run/media``; older stacks still use ``/media``.
+        roots: list[_Path] = []
+        try:
+            user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+        except Exception:
+            user = ""
+        if user:
+            roots.extend([_Path(f"/run/media/{user}"), _Path(f"/media/{user}")])
+        # uid-named subdir variant (some Linux distros)
+        try:
+            uid = os.getuid()
+            roots.append(_Path(f"/run/media/{uid}"))
+        except Exception:
+            pass
+        # macOS / generic fallbacks
+        roots.extend([_Path("/Volumes"), _Path("/media"), _Path("/mnt")])
+
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if not root.is_dir():
+                    continue
+            except OSError:
+                continue
+            try:
+                for entry in root.iterdir():
+                    if entry.name == label and entry.is_dir():
+                        return entry
+            except (OSError, PermissionError):
+                # Some mount roots reject listing for non-owners
+                # (e.g. another user's /run/media subdir). Skip.
+                continue
+        return None
 
     @staticmethod
     def user_in_dialout_group() -> bool:
@@ -436,7 +532,11 @@ class ArduinoService:
             "--fqbn",
             board.fqbn,
             str(sketch_dir),
+            service=self,
         )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
         if rc != 0:
             self.last_error_detail = stderr
             yield StepUpdate(
@@ -465,7 +565,11 @@ class ArduinoService:
             "--port",
             port,
             str(sketch_dir),
+            service=self,
         )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
         if rc != 0:
             self.last_error_detail = stderr
             yield StepUpdate(
@@ -496,7 +600,11 @@ class ArduinoService:
             "cp",
             str(script),
             ":main.py",
+            service=self,
         )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
         if rc != 0:
             self.last_error_detail = stderr
             yield StepUpdate(
@@ -506,7 +614,7 @@ class ArduinoService:
             return
 
         yield StepUpdate("Restarting the board…")
-        rc, _, stderr = await _run(*mpremote_argv, "connect", port, "reset")
+        rc, _, stderr = await _run(*mpremote_argv, "connect", port, "reset", service=self)
         if rc != 0:
             # Reset failure is non-fatal — code is on the board, will
             # run on next power cycle. Surface as info, not error.
@@ -557,49 +665,286 @@ class ArduinoService:
             return
         yield StepUpdate("Done! 🎉", kind="ok")
 
+    # ── Erase user code ─────────────────────────────────────────────
+    #
+    # Per language, "erase" means different things — but the user-
+    # visible promise is the same: "your code is gone, the board is
+    # blank again." Crucially, none of these touch firmware (i.e.
+    # the MicroPython interpreter, the bootloader, the CircuitPython
+    # runtime) — only the user-written entry file. That's a
+    # deliberate safety choice: a kid can recover from any of these
+    # by running Upload again. ``esptool erase_flash`` would also
+    # wipe firmware and brick the board until the user knows how to
+    # re-flash it; that's an "advanced user with backup firmware
+    # ready" feature, not a panel button.
+
+    async def wipe_micropython(self, port: str) -> AsyncIterator[StepUpdate]:
+        """Delete ``main.py`` from a MicroPython board's filesystem."""
+        mpremote_argv = _resolve_mpremote_argv()
+        if mpremote_argv is None:
+            yield StepUpdate("MicroPython tools aren't installed yet.", kind="fail")
+            return
+        yield StepUpdate("Erasing your code (main.py)…")
+        rc, _, stderr = await _run(
+            *mpremote_argv,
+            "connect",
+            port,
+            "fs",
+            "rm",
+            ":main.py",
+            service=self,
+        )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
+        if rc != 0:
+            # mpremote rm of a non-existent file returns non-zero —
+            # treat that as "already empty" rather than an error,
+            # since the user-facing outcome is the same.
+            if "no such file" in (stderr or "").lower() or "OSError" in (stderr or ""):
+                yield StepUpdate(
+                    "There was no main.py on the board — it's already blank.",
+                    kind="ok",
+                )
+                return
+            self.last_error_detail = stderr
+            yield StepUpdate(
+                "Couldn't erase. Is the board in run mode and the cable plugged in?",
+                kind="fail",
+            )
+            return
+
+        # Soft-reset so the board stops running whatever was loaded.
+        yield StepUpdate("Restarting the board…")
+        await _run(*mpremote_argv, "connect", port, "reset", service=self)
+        yield StepUpdate("Erased — your board is blank again.", kind="ok")
+
+    async def wipe_circuitpython(self, drive: Path) -> AsyncIterator[StepUpdate]:
+        """Delete ``code.py`` from the mounted CIRCUITPY drive.
+
+        Pure file delete, no subprocess. The board notices the
+        write to its mass-storage filesystem and auto-reloads
+        within a second; the user sees the LED stop blinking (or
+        whatever the previous code was doing) and the board
+        becomes a blank slate.
+        """
+        if not drive.is_dir():
+            yield StepUpdate(
+                "Can't find the CIRCUITPY drive. Plug in your board and try again.",
+                kind="fail",
+            )
+            return
+        target = drive / "code.py"
+        if not target.exists():
+            yield StepUpdate(
+                "There's no code.py on the drive — your board is already blank.",
+                kind="ok",
+            )
+            return
+        yield StepUpdate("Erasing your code (code.py)…")
+        try:
+            from polyglot_ai.core.async_utils import run_blocking
+
+            def _delete() -> None:
+                target.unlink()
+
+            await run_blocking(_delete)
+        except OSError as exc:
+            self.last_error_detail = str(exc)
+            yield StepUpdate(
+                "Couldn't delete the file. Is the drive read-only?",
+                kind="fail",
+            )
+            return
+        yield StepUpdate("Erased — your board is blank again.", kind="ok")
+
+    async def wipe_cpp(
+        self, sketch_dir: Path, board: Board, port: str
+    ) -> AsyncIterator[StepUpdate]:
+        """Flash a minimal empty sketch to a C++ Arduino board.
+
+        Arduino C++ has no notion of "erase user code" — flash is
+        a single contiguous binary, the entire sketch is written
+        on every upload. The closest equivalent to "blank slate"
+        is uploading an empty sketch (``setup`` + ``loop`` with no
+        body) so the previous program stops running. We materialise
+        that empty sketch into a sibling ``.polyglot-wipe`` folder
+        next to the user's project so the build artefacts don't
+        contaminate the user's source tree.
+        """
+        cli = find_executable("arduino-cli")
+        if cli is None:
+            yield StepUpdate("Arduino CLI isn't installed yet.", kind="fail")
+            return
+
+        # Build the empty-sketch staging dir next to the user's
+        # project. Self-cleaning would be nice but ``arduino-cli``
+        # caches build artefacts inside the sketch dir, so leaving
+        # them around makes a re-wipe instant.
+        staging = sketch_dir.parent / ".polyglot-wipe"
+        try:
+            staging.mkdir(exist_ok=True)
+            (staging / "polyglot-wipe.ino").write_text(
+                "void setup() {\n  // Erased by Polyglot AI\n}\nvoid loop() {\n}\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self.last_error_detail = str(exc)
+            yield StepUpdate(
+                f"Couldn't prepare the empty sketch: {exc}",
+                kind="fail",
+            )
+            return
+
+        yield StepUpdate("Compiling an empty sketch…")
+        rc, _, stderr = await _run(
+            cli,
+            "compile",
+            "--fqbn",
+            board.fqbn,
+            str(staging),
+            service=self,
+        )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
+        if rc != 0:
+            self.last_error_detail = stderr
+            yield StepUpdate(
+                "Couldn't compile the empty sketch — that's surprising. "
+                "Click 'Ask AI for help' for details.",
+                kind="fail",
+            )
+            return
+
+        yield StepUpdate("Uploading the empty sketch…")
+        rc, _, stderr = await _run(
+            cli,
+            "upload",
+            "--fqbn",
+            board.fqbn,
+            "--port",
+            port,
+            str(staging),
+            service=self,
+        )
+        if rc == -1:
+            yield StepUpdate("Cancelled.", kind="fail")
+            return
+        if rc != 0:
+            self.last_error_detail = stderr
+            yield StepUpdate(
+                "Couldn't upload the empty sketch. Is the cable plugged in?",
+                kind="fail",
+            )
+            return
+        yield StepUpdate("Erased — your board is running an empty sketch.", kind="ok")
+
 
 # ── Helpers ───────────────────────────────────────────────────────
 
 
-async def _run(*argv: str, timeout: float = 180.0) -> tuple[int, str, str]:
+async def _run(
+    *argv: str,
+    timeout: float = 180.0,
+    service: "ArduinoService | None" = None,
+) -> tuple[int, str, str]:
     """Run a subprocess and return ``(rc, stdout, stderr)`` as text.
 
-    Implementation note — uses :mod:`subprocess` in a thread executor
-    rather than :func:`asyncio.create_subprocess_exec`. The latter
-    calls ``events.get_running_loop()`` internally and that fails
-    with ``RuntimeError: no running event loop`` when this coroutine
-    is driven by a Qt timer tick on a qasync-backed loop. Compile
-    and upload are user-initiated (one click → one subprocess), so
-    the loss of asyncio's child-watcher integration is irrelevant;
-    a thread executor keeps the UI responsive without exposing the
-    qasync compat quirk.
+    Implementation note — uses :mod:`subprocess.Popen` in a thread
+    executor rather than :func:`asyncio.create_subprocess_exec`.
+    The latter calls ``events.get_running_loop()`` internally and
+    that fails with ``RuntimeError: no running event loop`` when
+    this coroutine is driven by a Qt timer tick on a qasync-backed
+    loop. Compile and upload are user-initiated (one click → one
+    subprocess), so the loss of asyncio's child-watcher integration
+    is irrelevant; a thread executor keeps the UI responsive
+    without exposing the qasync compat quirk.
+
+    Cancellation: when ``service`` is supplied, the running ``Popen``
+    handle is registered as ``service._current_proc`` so a parallel
+    ``service.cancel_current_upload()`` can SIGTERM it. A successful
+    cancel returns rc ``-1`` ("cancelled"), distinguishable from a
+    normal failure (positive rc) and a launch failure (127).
     """
     import subprocess as _subprocess
 
     def _run_sync() -> tuple[int, str, str]:
+        # Reset cancel flag at the start so a stale True from the
+        # last run doesn't immediately terminate this one.
+        if service is not None:
+            service._cancel_requested = False
         try:
-            result = _subprocess.run(
+            proc = _subprocess.Popen(
                 list(argv),
-                capture_output=True,
-                timeout=timeout,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
             )
         except FileNotFoundError as exc:
             return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
         except OSError as exc:
             return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
-        except _subprocess.TimeoutExpired as exc:
-            partial_stdout = (exc.stdout or b"").decode("utf-8", errors="replace")
-            partial_stderr = (exc.stderr or b"").decode("utf-8", errors="replace")
+
+        # Register the Popen so cancel_current_upload can reach it.
+        # Cleared in finally regardless of how communicate exits.
+        if service is not None:
+            service._current_proc = proc
+
+        try:
+            try:
+                stdout_b, stderr_b = proc.communicate(timeout=timeout)
+            except _subprocess.TimeoutExpired as exc:
+                # Soft-kill first, then hard-kill if the child
+                # ignores SIGTERM. Same defensive pattern works
+                # for both the timeout case and the user-cancel
+                # case (cancel sets _cancel_requested then sends
+                # SIGTERM via cancel_current_upload).
+                try:
+                    proc.kill()
+                    extra_stdout, extra_stderr = proc.communicate(timeout=2)
+                except Exception:
+                    extra_stdout, extra_stderr = b"", b""
+                stdout_b = (exc.stdout or b"") + (extra_stdout or b"")
+                stderr_b = (exc.stderr or b"") + (extra_stderr or b"")
+                if service is not None and service._cancel_requested:
+                    return (
+                        -1,
+                        stdout_b.decode("utf-8", errors="replace"),
+                        stderr_b.decode("utf-8", errors="replace") + "\nCancelled by user.",
+                    )
+                return (
+                    124,
+                    stdout_b.decode("utf-8", errors="replace"),
+                    stderr_b.decode("utf-8", errors="replace")
+                    + f"\n{argv[0]} timed out after {timeout:.0f}s",
+                )
+            rc = proc.returncode or 0
+            # cancel_current_upload calls proc.terminate which
+            # makes communicate return normally with a non-zero
+            # rc. Translate that into the rc=-1 "cancelled"
+            # signal so the panel doesn't surface a misleading
+            # failure message.
+            if service is not None and service._cancel_requested:
+                return (
+                    -1,
+                    stdout_b.decode("utf-8", errors="replace"),
+                    (stderr_b.decode("utf-8", errors="replace") + "\nCancelled by user."),
+                )
             return (
-                124,
-                partial_stdout,
-                partial_stderr + f"\n{argv[0]} timed out after {timeout:.0f}s",
+                rc,
+                stdout_b.decode("utf-8", errors="replace"),
+                stderr_b.decode("utf-8", errors="replace"),
             )
-        return (
-            result.returncode or 0,
-            result.stdout.decode("utf-8", errors="replace"),
-            result.stderr.decode("utf-8", errors="replace"),
-        )
+        finally:
+            # Clear the registration regardless — leaving a stale
+            # handle would let a later cancel try to kill an
+            # already-exited process.
+            if service is not None:
+                service._current_proc = None
+                # Don't reset _cancel_requested here — the caller
+                # (the async generators) needs to see it to skip
+                # subsequent steps in the pipeline. ``_run`` resets
+                # it at the top of the *next* call.
 
     # Prefer the loop's executor so the UI stays responsive. If the
     # loop isn't reachable (a known qasync edge case during certain

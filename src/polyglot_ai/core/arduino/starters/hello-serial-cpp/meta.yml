@@ -5,3 +5,4 @@ language: cpp
 boards: []
 entry_file: hello.ino
 suggested_project_name: hello
+post_upload_hint: Open the serial monitor (we just did) — you should see 'Hello, world!' arriving.

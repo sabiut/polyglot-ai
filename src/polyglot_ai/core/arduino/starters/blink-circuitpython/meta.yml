@@ -5,3 +5,4 @@ language: circuitpython
 boards: [pico, pico-w, circuitplayground-express, feather-m4]
 entry_file: code.py
 suggested_project_name: blink
+post_upload_hint: Look at your board's tiny LED — it should blink once a second.

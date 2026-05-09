@@ -109,8 +109,8 @@ class ActivityBarButton(QWidget):
             self._draw_today_icon(painter, ox, oy)
         elif self._icon_type == "arduino":
             self._draw_arduino_icon(painter, ox, oy)
-        elif self._icon_type == "claude":
-            self._draw_claude_icon(painter, ox, oy)
+        elif self._icon_type == "video":
+            self._draw_video_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -322,29 +322,42 @@ class ActivityBarButton(QWidget):
         # Orientation notch
         p.drawArc(QRectF(ox + 9, oy + 5, 6, 4), 0, 180 * 16)
 
-    def _draw_claude_icon(self, p: QPainter, ox: float, oy: float) -> None:
-        """Claude (subscription) — speech-bubble glyph with a sparkle.
+    def _draw_video_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Video — film-strip glyph with sprocket holes top and bottom.
 
-        Distinct from the chat tab's icon (which lives in the right-
-        pane tab bar, not here). The sparkle hints at "AI" without
-        leaning on Anthropic's official mark, which we shouldn't
-        copy into our binary.
+        The strip reads instantly as "video / movie / footage" without
+        any provider branding. Two play-arrow chevrons inside the
+        frame area distinguish it from a generic "image" icon at
+        small sizes (24×24) where the sprocket holes alone can blur
+        into the strip outline.
         """
-        # Speech bubble outline — rounded rect with a small tail.
-        bubble = QPainterPath()
-        bubble.addRoundedRect(QRectF(ox + 2, oy + 3, 20, 14), 3, 3)
-        # Tail at bottom-left
-        bubble.moveTo(ox + 7, oy + 17)
-        bubble.lineTo(ox + 5, oy + 21)
-        bubble.lineTo(ox + 11, oy + 17)
-        p.drawPath(bubble)
+        # Outer film-strip frame
+        body = QRectF(ox + 3, oy + 4, 18, 16)
+        p.drawRect(body)
 
-        # Four-point sparkle inside the bubble (centered)
-        cx, cy = ox + 12, oy + 10
-        p.drawLine(QPointF(cx, cy - 4), QPointF(cx, cy + 4))
-        p.drawLine(QPointF(cx - 4, cy), QPointF(cx + 4, cy))
-        p.drawLine(QPointF(cx - 2.5, cy - 2.5), QPointF(cx + 2.5, cy + 2.5))
-        p.drawLine(QPointF(cx - 2.5, cy + 2.5), QPointF(cx + 2.5, cy - 2.5))
+        # Sprocket holes — three across the top, three across the
+        # bottom. Drawn as small filled rects so they read as cut-
+        # outs from the strip rather than empty circles that would
+        # disappear at small sizes.
+        prev_brush = p.brush()
+        from PyQt6.QtGui import QBrush
+
+        p.setBrush(QBrush(p.pen().color()))
+        for i in range(3):
+            x = ox + 5 + i * 6
+            p.drawRect(QRectF(x, oy + 5.5, 2, 2))  # top row
+            p.drawRect(QRectF(x, oy + 16.5, 2, 2))  # bottom row
+        p.setBrush(prev_brush)
+
+        # Inner play-arrow chevron — two stacked triangles pointing
+        # right, sized to fit the central "frame" area. Anchors the
+        # icon visually to "playable video" rather than just film.
+        path = QPainterPath()
+        path.moveTo(ox + 9, oy + 9.5)
+        path.lineTo(ox + 14, oy + 12)
+        path.lineTo(ox + 9, oy + 14.5)
+        path.closeSubpath()
+        p.fillPath(path, p.pen().color())
 
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
@@ -427,7 +440,7 @@ class ActivityBar(QWidget):
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
             ("tests", "Tests (Ctrl+Shift+T)"),
             ("arduino", "Arduino (Ctrl+Shift+A)"),
-            ("claude", "Claude subscription chat"),
+            ("video", "Video Editor (Ctrl+Shift+V)"),
         ]
 
         for icon_type, tooltip in top_items:

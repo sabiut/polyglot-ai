@@ -443,6 +443,30 @@ DEPENDENCIES: list[Dependency] = [
             "unknown": "https://git-scm.com/downloads",
         },
     ),
+    Dependency(
+        key="ffmpeg",
+        name="ffmpeg",
+        command="ffmpeg",
+        # Drives the Video editor panel — every operation the AI
+        # plans (trim, scale, format convert, audio extract,
+        # watermark, slideshow, …) shells out to ffmpeg via
+        # ``shell_exec``. The same package ships ``ffprobe``,
+        # which the panel uses on input load to display codec /
+        # duration / resolution / fps inline (no separate
+        # detection entry — they're inseparable in practice).
+        purpose=(
+            "Video editor panel — clip metadata (ffprobe) plus trim, "
+            "scale, convert, audio-extract via AI"
+        ),
+        install_urls={
+            "debian": "sudo apt install ffmpeg",
+            "fedora": "sudo dnf install ffmpeg",
+            "arch": "sudo pacman -S ffmpeg",
+            "opensuse": "sudo zypper install ffmpeg",
+            "alpine": "sudo apk add ffmpeg",
+            "unknown": "https://ffmpeg.org/download.html",
+        },
+    ),
 ]
 
 

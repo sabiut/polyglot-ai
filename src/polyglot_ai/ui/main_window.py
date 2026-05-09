@@ -32,7 +32,7 @@ from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
 from polyglot_ai.ui.panels.terminal_panel import TerminalPanel, TerminalWidget
 from polyglot_ai.ui.panels.arduino_panel import ArduinoPanel, ArduinoWindow
-from polyglot_ai.ui.panels.claude_web_panel import ClaudeWebPanel, ClaudeWebWindow
+from polyglot_ai.ui.panels.video_panel import VideoPanel, VideoWindow
 from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 from polyglot_ai.ui.panels.test_panel import TestPanel
 from polyglot_ai.ui.panels.today_panel import TodayPanel
@@ -115,12 +115,11 @@ class MainWindow(QMainWindow):
         # blank one.
         self._arduino_window: ArduinoWindow | None = None
 
-        # Same lazy pattern for the Claude subscription web window.
-        # The web view's logged-in session would be lost if we
-        # rebuilt it on every open; lazy-and-keep preserves cookies
-        # for the lifetime of the app.
-        self._claude_web_panel: ClaudeWebPanel | None = None
-        self._claude_web_window: ClaudeWebWindow | None = None
+        # Same lazy-and-keep pattern for the Video editor window.
+        # Once the user picks a clip and types a prompt, closing the
+        # window shouldn't lose that state.
+        self._video_panel: VideoPanel | None = None
+        self._video_window: VideoWindow | None = None
 
         # ── Right side: Chat + Review + Plan + Changes tabs ──
         from PyQt6.QtWidgets import QTabWidget
@@ -215,11 +214,11 @@ class MainWindow(QMainWindow):
             self._show_arduino_window()
             return
 
-        # The Claude (subscription) web view also pops as its own
-        # window — claude.ai expects desktop dimensions and would
-        # be unusable wedged into the 200 px sidebar.
-        if view_name == "claude":
-            self._show_claude_web_window()
+        # Video editor follows the same standalone-window pattern —
+        # the file picker + prompt area + status feed don't read
+        # well wedged into the 200 px sidebar.
+        if view_name == "video":
+            self._show_video_window()
             return
 
         view_map = {
@@ -259,21 +258,39 @@ class MainWindow(QMainWindow):
             self._arduino_window = ArduinoWindow(self._arduino_panel, self)
         self._arduino_window.show_and_raise()
 
-    def _show_claude_web_window(self) -> None:
-        """Open the Claude (subscription) web view as its own window.
+    def _show_video_window(self) -> None:
+        """Open the Video editor as a standalone top-level window.
 
-        Constructs the panel and window lazily so the
-        ``QWebEngineView`` profile (and the ~50 MB Chromium runtime
-        it pulls in) only loads if the user actually clicks the
-        chip. Once opened, both are kept on ``self`` so re-clicks
-        raise the same window — and crucially the user's login
-        cookies survive the close → reopen cycle.
+        Constructs the panel and window lazily on first click —
+        until then we don't pay the import cost or build the QSS-
+        heavy step cards. Re-clicks raise the same window so the
+        user's loaded clip and prompt survive a close → reopen
+        cycle.
         """
-        if self._claude_web_panel is None:
-            self._claude_web_panel = ClaudeWebPanel()
-        if self._claude_web_window is None:
-            self._claude_web_window = ClaudeWebWindow(self._claude_web_panel, self)
-        self._claude_web_window.show_and_raise()
+        if self._video_panel is None:
+            self._video_panel = VideoPanel()
+        if self._video_window is None:
+            self._video_window = VideoWindow(self._video_panel, self)
+        self._video_window.show_and_raise()
+
+    def _on_show_onboarding(self) -> None:
+        """Re-launch the onboarding wizard from the Help menu.
+
+        The dialog auto-marks itself as "seen" on close so users
+        aren't nagged on every launch — but that means there's no
+        other path back to it after the first dismissal. This
+        menu item is the formal escape hatch for users who skipped
+        too quickly or want a refresher tour.
+        """
+        from polyglot_ai.ui.dialogs.onboarding_dialog import OnboardingDialog
+
+        try:
+            dlg = OnboardingDialog(self)
+            dlg.exec()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("Failed to show onboarding")
 
     def _show_cicd_tab(self) -> None:
         """Switch to the CI/CD tab in the right panel."""
@@ -467,6 +484,15 @@ class MainWindow(QMainWindow):
 
         self._action_shortcuts = QAction("&Keyboard Shortcuts", self)
         help_menu.addAction(self._action_shortcuts)
+
+        # Re-trigger the onboarding wizard. Since the dialog now
+        # auto-marks itself as "seen" on close (so users aren't
+        # nagged on every launch), there's no other path back to
+        # it after the first dismissal — except this menu item.
+        # Useful for users who skipped too quickly and want a tour.
+        self._action_show_onboarding = QAction("Show &Onboarding…", self)
+        self._action_show_onboarding.triggered.connect(self._on_show_onboarding)
+        help_menu.addAction(self._action_show_onboarding)
 
         # Command palette shortcut
         self._action_command_palette = QAction("Command Palette", self)

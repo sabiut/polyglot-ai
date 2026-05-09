@@ -58,6 +58,7 @@ from polyglot_ai.core.arduino.project import (
     detect_in,
     language_for_file,
 )
+from polyglot_ai.core.arduino.serial_monitor import COMMON_BAUDS, SerialMonitor
 from polyglot_ai.core.arduino.service import (
     ArduinoService,
     DetectedBoard,
@@ -265,12 +266,29 @@ class ArduinoPanel(QWidget):
         # buttons. Set by :meth:`_load_project`.
         self._project: DetectedProject | None = None
 
+        # Slug of the starter the active project was scaffolded from
+        # (or ``None`` for blanks / opened-existing projects). Used
+        # by ``_after_success`` to surface a starter-specific
+        # post_upload_hint — turns "Done!" into "Done! Look at
+        # your board's LED — it should blink once a second."
+        self._active_starter_slug: str | None = None
+
         # Board detection state.
         self._detected: list[DetectedBoard] = []
         self._board: Board | None = None
         self._port: str | None = None
         self._cp_drive: Path | None = None
         self._busy = False
+
+        # Serial monitor — read-only stream of whatever the board
+        # is printing back via Serial.println / print(). Built once
+        # per panel and reused across reconnects so a user toggling
+        # connect/disconnect doesn't lose the output buffer.
+        self._serial_monitor = SerialMonitor()
+        self._serial_monitor.line_received.connect(self._on_serial_line)
+        self._serial_monitor.connected.connect(self._on_serial_connected)
+        self._serial_monitor.disconnected.connect(self._on_serial_disconnected)
+        self._serial_monitor.error.connect(self._on_serial_error)
 
         self._build_ui()
 
@@ -330,11 +348,23 @@ class ArduinoPanel(QWidget):
         col.addWidget(self._build_step1_project())
         col.addWidget(self._build_step2_board())
         col.addWidget(self._build_step3_upload())
+        col.addWidget(self._build_step4_monitor())
 
         # Advanced overrides (collapsed by default) sit at the foot.
         self._advanced_panel = self._build_advanced_panel()
         self._advanced_panel.setVisible(False)
         col.addWidget(self._advanced_panel)
+
+        # Toolchain status footer — small chip row showing
+        # arduino-cli ✓/✗, mpremote ✓/✗, pyserial ✓/✗ at a
+        # glance. Always visible (not gated by Advanced) because
+        # "what's missing on this machine?" is the most useful
+        # data point for *first-time* users — exactly the audience
+        # the audit flagged as needing it. Refreshed by the same
+        # board-detection poll that runs every 2.5s, so installing
+        # a missing tool flips the chip to green without a panel
+        # restart.
+        col.addWidget(self._build_toolchain_footer())
 
         col.addStretch()
 
@@ -431,9 +461,35 @@ class ArduinoPanel(QWidget):
         )
         v.addWidget(sub)
 
+        # Inline starter tiles — first three from the catalog. The
+        # full picker (with all starters + blank + open-existing
+        # tabs) is still one click away via "More starters…", but
+        # surfacing the most likely choices inline removes a modal
+        # for the common path: a kid sees "Blink a light", "Hello,
+        # world!", and "Press a button" right there and clicks one.
+        from polyglot_ai.core.arduino.starters import list_starters
+
+        try:
+            top_starters = list_starters()[:3]
+        except Exception:
+            logger.debug("arduino: failed to load starters for inline tiles", exc_info=True)
+            top_starters = []
+        if top_starters:
+            tile_row = QHBoxLayout()
+            tile_row.setSpacing(8)
+            for starter in top_starters:
+                tile_row.addWidget(self._build_starter_tile(starter))
+            tile_row.addStretch(1)
+            v.addLayout(tile_row)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        starter_btn = QPushButton("📦  Pick a starter")
+        # Primary CTA flips meaning depending on whether tiles are
+        # shown above. With tiles, "More starters…" is an honest
+        # description — they've already seen three, this opens the
+        # rest. Without (catalog failed to load), the original
+        # "Pick a starter" stays.
+        starter_btn = QPushButton("📦  More starters…" if top_starters else "📦  Pick a starter")
         starter_btn.setMinimumHeight(40)
         starter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         starter_btn.setStyleSheet(self._primary_button_qss())
@@ -454,6 +510,114 @@ class ArduinoPanel(QWidget):
         btn_row.addStretch()
         v.addLayout(btn_row)
         return page
+
+    def _build_starter_tile(self, starter) -> QWidget:
+        """One emoji + name + blurb tile that loads ``starter`` on click.
+
+        Tiles are deliberately light (no border, just hover
+        feedback) so the row reads as "options to try" rather than
+        "buttons to commit to." Click loads the starter directly
+        into the user's project home, mirroring the change-dialog
+        path so language/board/file all end up correct without
+        requiring the picker UI.
+        """
+        tile = QPushButton()
+        tile.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Floor the tile size to ``MinimumExpanding`` rather than
+        # ``Fixed`` so a tile with a longer blurb (e.g. the
+        # CircuitPython blink starter, whose description spans two
+        # lines) gets the height it needs to render its wrapped
+        # text. The earlier fixed 72 px cap was clipping the second
+        # line on long blurbs and reading as half-truncated text.
+        # The minimum width keeps narrow tiles from collapsing
+        # when three are crammed into a sidebar; the layout's
+        # stretch handles the rest.
+        tile.setMinimumWidth(170)
+        tile.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
+        # Compose the visible text on the button — emoji big,
+        # name bold, blurb thin and wrapped. ``setText`` doesn't
+        # render rich text, so we use a layout-on-button trick
+        # via QLabel children.
+        layout = QVBoxLayout(tile)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+
+        emoji_lbl = QLabel(f"{starter.emoji}  {starter.name}")
+        emoji_lbl.setStyleSheet(
+            f"color: {tc.get('text_primary')}; "
+            f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
+            "background: transparent; border: none;"
+        )
+        emoji_lbl.setWordWrap(True)
+        # Vertical alignment — wrapped emoji+name should hug the
+        # top so the blurb below sits flush, not centered.
+        emoji_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(emoji_lbl)
+
+        if starter.blurb:
+            blurb_lbl = QLabel(starter.blurb)
+            blurb_lbl.setWordWrap(True)
+            blurb_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            blurb_lbl.setStyleSheet(
+                f"color: {tc.get('text_secondary')}; "
+                f"font-size: {tc.FONT_XS}px; "
+                "background: transparent; border: none;"
+            )
+            layout.addWidget(blurb_lbl)
+        # Push everything to the top of the tile so all three tiles
+        # in a row line up at the same baseline regardless of how
+        # tall their individual content is.
+        layout.addStretch(1)
+
+        tile.setStyleSheet(
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"border: 1px solid {tc.get('border_subtle')}; "
+            f"border-radius: 6px; text-align: left; padding: 0; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+            f"border-color: {tc.get('accent_primary')}; }}"
+        )
+        tile.clicked.connect(lambda _checked=False, s=starter: self._load_starter_inline(s))
+        return tile
+
+    def _load_starter_inline(self, starter) -> None:
+        """Load a starter without going through the change dialog.
+
+        The change dialog asks for a target directory; for inline
+        tile clicks we use the same default the dialog seeds with
+        (the open project root, falling back to ``$HOME``) so a
+        tile click is one tap. Filename collisions fall back to
+        opening the picker so the user can pick a different
+        location instead of quietly failing.
+        """
+        target_dir = self._project_root if self._project_root is not None else Path.home()
+        try:
+            entry = copy_starter(starter, target_dir)
+        except FileExistsError:
+            # Defer to the picker so the user can pick a different
+            # destination instead of clobbering existing work.
+            self._append_status(
+                f"A '{starter.suggested_project_name}' folder already exists "
+                "at the default location — opening the picker so you can "
+                "choose where to put it.",
+                kind="hint",
+            )
+            self._open_change_dialog(initial_tab=0)
+            return
+        except Exception as exc:
+            self._append_status(
+                f"Couldn't copy '{starter.name}': {exc}",
+                kind="fail",
+            )
+            return
+        language = language_for_file(entry) or starter.language
+        project = DetectedProject(entry, entry.parent, language)
+        self._active_starter_slug = starter.slug
+        self._load_project(project, announce=True)
+        self._append_status(f"Loaded '{starter.name}' into {entry.parent}.", kind="ok")
+        self._announce_next_step()
 
     def _build_loaded_project_state(self) -> QWidget:
         page = QWidget()
@@ -539,7 +703,12 @@ class ArduinoPanel(QWidget):
         self._upload_button = QPushButton("Upload to Arduino")
         self._upload_button.setMinimumHeight(60)
         self._upload_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._upload_button.clicked.connect(self._on_upload_clicked)
+        # Click is dispatched through a single handler that picks
+        # between "start upload" and "cancel in-flight upload"
+        # based on ``self._busy``. Keeping the dispatch in one
+        # place means the button can't get into a state where its
+        # label and its click handler disagree.
+        self._upload_button.clicked.connect(self._on_upload_button_clicked)
         card.add_widget(self._upload_button)
 
         self._status_view = QTextEdit()
@@ -552,13 +721,26 @@ class ArduinoPanel(QWidget):
             f"border-radius: 6px; padding: 10px; "
             f"font-size: {tc.FONT_BASE}px; }}"
         )
+        # Chain the requirements in the placeholder so a brand-new
+        # user knows the order *before* they hunt around for the
+        # missing piece. The button label below already shows the
+        # current blocker; the placeholder shows the full path so
+        # the user can plan ahead.
         self._status_view.setPlaceholderText(
-            "Progress and any messages will appear here once you press Upload. ✨"
+            "Pick a project → plug in your board → press Upload.\n"
+            "Progress and messages will show up here. ✨"
         )
         card.add_widget(self._status_view)
 
+        # Ask-AI button — always visible from first show. Earlier
+        # the button was hidden until ``_on_step_update`` revealed
+        # it on failure, but a successful upload that misbehaves
+        # on the board (LED doesn't blink, sensor reads zero, etc.)
+        # is exactly when an AI handoff is most useful — and there
+        # was no path to it. Label flips between "Ask AI for help"
+        # (pre-run / success) and "Explain this error" (after a
+        # failure) via ``_refresh_ai_button``.
         self._ai_help_button = QPushButton("💬  Ask AI for help")
-        self._ai_help_button.setVisible(False)
         self._ai_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ai_help_button.setMinimumHeight(38)
         self._ai_help_button.clicked.connect(self._on_ask_ai)
@@ -566,14 +748,215 @@ class ArduinoPanel(QWidget):
         card.add_widget(self._ai_help_button)
         return card
 
+    def _refresh_ai_button(self) -> None:
+        """Pick the right label based on whether a fail was recent."""
+        has_error = bool(self._service.last_error_detail)
+        if has_error:
+            self._ai_help_button.setText("💬  Explain this error")
+        else:
+            self._ai_help_button.setText("💬  Ask AI for help")
+
+    # Step 4 — serial monitor --------------------------------------
+
+    def _build_step4_monitor(self) -> QWidget:
+        """The "See output" card — read-only serial stream.
+
+        Layout: a control row (Connect/Disconnect, baud dropdown,
+        Clear) above a monospace output area. Auto-connect happens
+        after a successful upload via ``_after_success`` — most
+        users want to see output the instant their code starts
+        running, so the iteration loop becomes
+        Upload → output streams → edit → Upload again with no
+        extra clicks.
+        """
+        card = _StepCard(4, "See output")
+
+        # Subtle helper line above the controls so a first-time
+        # user understands what this card is for.
+        helper = QLabel(
+            "Read what your board is printing — anything from "
+            "<code>Serial.println</code> (Arduino) or <code>print()</code> "
+            "(MicroPython) shows up here."
+        )
+        helper.setWordWrap(True)
+        helper.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; "
+            f"font-size: {tc.FONT_SM}px; "
+            "background: transparent;"
+        )
+        card.add_widget(helper)
+
+        # Control row — connect button + baud dropdown + clear.
+        control_row = QHBoxLayout()
+        control_row.setSpacing(8)
+
+        self._serial_connect_btn = QPushButton("▶  Start monitor")
+        self._serial_connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._serial_connect_btn.setStyleSheet(self._primary_button_qss())
+        self._serial_connect_btn.clicked.connect(self._on_serial_toggle)
+        control_row.addWidget(self._serial_connect_btn)
+
+        baud_label = QLabel("Speed:")
+        baud_label.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; "
+            f"font-size: {tc.FONT_SM}px; background: transparent;"
+        )
+        control_row.addWidget(baud_label)
+
+        self._baud_combo = QComboBox()
+        for baud in COMMON_BAUDS:
+            self._baud_combo.addItem(f"{baud}", baud)
+        # Default index 0 is the most common modern default
+        # (115200) — see ``COMMON_BAUDS``'s ordering.
+        self._baud_combo.setCurrentIndex(0)
+        self._baud_combo.setStyleSheet(
+            f"QComboBox {{ background: {tc.get('bg_input')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; padding: 4px 8px; "
+            f"font-size: {tc.FONT_SM}px; }}"
+        )
+        control_row.addWidget(self._baud_combo)
+
+        clear_btn = QPushButton("Clear")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_btn.setStyleSheet(self._secondary_button_qss())
+        clear_btn.clicked.connect(self._on_serial_clear)
+        control_row.addWidget(clear_btn)
+        control_row.addStretch(1)
+        card.add_layout(control_row)
+
+        # Output area — monospace, read-only, auto-scroll to the
+        # bottom on append. ``QPlainTextEdit`` (not ``QTextEdit``)
+        # because plain text views handle 100k+ lines without the
+        # rich-text overhead that would make a chatty board lag.
+        self._serial_view = QPlainTextEdit()
+        self._serial_view.setReadOnly(True)
+        self._serial_view.setMinimumHeight(160)
+        self._serial_view.setMaximumBlockCount(5000)  # cap memory
+        mono = QFont("Monospace", 10)
+        mono.setStyleHint(QFont.StyleHint.Monospace)
+        self._serial_view.setFont(mono)
+        self._serial_view.setStyleSheet(
+            f"QPlainTextEdit {{ background: {tc.get('bg_terminal')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 6px; padding: 8px; "
+            f"font-size: {tc.FONT_BASE}px; }}"
+        )
+        self._serial_view.setPlaceholderText(
+            "Press Start monitor after uploading code to see what "
+            "your board prints. We'll auto-start after a successful "
+            "upload."
+        )
+        card.add_widget(self._serial_view)
+
+        return card
+
+    # Toolchain footer ---------------------------------------------
+
+    def _build_toolchain_footer(self) -> QWidget:
+        """Always-visible chip row showing what's installed.
+
+        Three chips — one per tool the panel can use. Each is a
+        QLabel styled as a pill. Green when present, red when
+        missing. The label text is the tool name + ✓/✗; the
+        tooltip carries the install hint so a hover gives an
+        actionable "run this to fix it" line without needing
+        another popup.
+
+        ``_refresh_toolchain_chips`` is called from this method
+        (initial paint), from ``_kick_detect`` (so re-detection
+        also refreshes status — no separate timer needed), and
+        whenever a board is detected/lost.
+        """
+        wrap = QFrame()
+        wrap.setObjectName("toolchainFooter")
+        wrap.setStyleSheet(
+            f"#toolchainFooter {{ background: transparent; "
+            f"border-top: 1px solid {tc.get('border_subtle')}; "
+            f"padding: 8px 0 0 0; }}"
+        )
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 6, 0, 0)
+        row.setSpacing(8)
+
+        intro = QLabel("Toolchains:")
+        intro.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
+        row.addWidget(intro)
+
+        # Build a chip per tool. ``_toolchain_chips`` lets the
+        # refresh method find them again without scanning children.
+        self._toolchain_chips: dict[str, QLabel] = {}
+        for key, label in (
+            ("arduino-cli", "arduino-cli"),
+            ("mpremote", "mpremote"),
+            ("pyserial", "pyserial"),
+        ):
+            chip = QLabel(f"… {label}")
+            chip.setStyleSheet(self._chip_qss(present=False))
+            self._toolchain_chips[key] = chip
+            row.addWidget(chip)
+
+        row.addStretch(1)
+        # Initial paint with whatever the service reports right now.
+        self._refresh_toolchain_chips()
+        return wrap
+
+    def _chip_qss(self, *, present: bool) -> str:
+        """QSS for the chip pill — green for present, red for missing."""
+        bg = tc.get("accent_success") if present else tc.get("accent_danger")
+        return (
+            f"QLabel {{ background: {bg}; "
+            f"color: #fff; border-radius: 9px; "
+            f"padding: 2px 10px; font-size: {tc.FONT_XS}px; "
+            f"font-weight: 600; }}"
+        )
+
+    def _refresh_toolchain_chips(self) -> None:
+        """Paint each chip according to the current toolchain state.
+
+        Cheap — ``detect_toolchains`` is just ``shutil.which`` plus
+        an ``import serial`` probe. Safe to call on every detection
+        poll, which is exactly what we do.
+        """
+        if not hasattr(self, "_toolchain_chips"):
+            return
+        tcs = self._service.detect_toolchains()
+        states = {
+            "arduino-cli": (tcs.arduino_cli is not None, "Install Arduino CLI"),
+            "mpremote": (tcs.mpremote is not None, "pip install --user mpremote"),
+            "pyserial": (tcs.pyserial_ok, "pip install pyserial"),
+        }
+        for key, chip in self._toolchain_chips.items():
+            present, install_hint = states[key]
+            mark = "✓" if present else "✗"
+            chip.setText(f"{mark} {key}")
+            chip.setStyleSheet(self._chip_qss(present=present))
+            chip.setToolTip(
+                f"{key} is installed and ready."
+                if present
+                else f"{key} not found. Fix: {install_hint}"
+            )
+
     # Advanced panel ------------------------------------------------
 
     def _build_advanced_panel(self) -> QWidget:
         wrap = QFrame()
+        # Closing literals on plain (non-f) string lines must use a
+        # single ``}`` — ``}}`` in a plain string is two literal
+        # characters, which leaves a stray ``}`` mid-stylesheet
+        # that Qt reports as "Could not parse stylesheet". Same
+        # subtlety as the ``_StepCard`` ctor and the wipe button.
+        # All three rule closers below switched to f-strings (or
+        # single-``}`` plain strings) so the ``}}`` shorthand
+        # stays consistent across the whole multi-line literal.
         wrap.setStyleSheet(
             f"QFrame {{ background: {tc.get('bg_surface')}; "
             f"border: 1px solid {tc.get('border_secondary')}; "
-            "border-radius: 6px; }} "
+            f"border-radius: 6px; }} "
             f"QLabel {{ color: {tc.get('text_secondary')}; "
             f"font-size: {tc.FONT_SM}px; background: transparent; }} "
             f"QComboBox {{ background: {tc.get('bg_base')}; "
@@ -639,6 +1022,66 @@ class ArduinoPanel(QWidget):
         self._auto_ask_box.setChecked(_load_auto_ask_pref())
         self._auto_ask_box.toggled.connect(_save_auto_ask_pref)
         v.addWidget(self._auto_ask_box)
+
+        # ── Erase user code (destructive — Advanced only) ──
+        #
+        # Lives down in Advanced (not on the main wizard) precisely
+        # because it's destructive: a kid clicking around shouldn't
+        # be one tap away from wiping their work. The confirmation
+        # dialog spells out exactly what's about to disappear.
+        # Three language paths:
+        #
+        #   - MicroPython: ``mpremote rm :main.py`` + soft-reset
+        #   - CircuitPython: delete code.py from the CIRCUITPY drive
+        #   - Arduino C++: flash a minimal empty sketch (closest
+        #     analog to "blank slate" since flash is one binary)
+        #
+        # Firmware (the interpreter / bootloader) is never touched
+        # — every wipe is recoverable by uploading a new project.
+        v.addSpacing(8)
+        wipe_section = QLabel("Reset board")
+        wipe_section.setStyleSheet(
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_SM}px; "
+            "font-weight: 600; background: transparent; padding-top: 4px;"
+        )
+        v.addWidget(wipe_section)
+        wipe_blurb = QLabel(
+            "Remove your code from the board — useful when a buggy "
+            "program hangs, or you want to start fresh. Firmware stays "
+            "intact; you can upload again any time."
+        )
+        wipe_blurb.setWordWrap(True)
+        wipe_blurb.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; "
+            f"font-size: {tc.FONT_XS}px; background: transparent;"
+        )
+        v.addWidget(wipe_blurb)
+
+        self._wipe_button = QPushButton("🗑  Erase user code")
+        self._wipe_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._wipe_button.setMinimumHeight(34)
+        # NB: the closer for the ``:hover`` rule is a *plain*
+        # string, so it must use a single ``}`` — using ``}}`` in
+        # a non-f-string passes ``}}`` through verbatim and leaves
+        # a stray ``}`` mid-stylesheet, which Qt reports as
+        # "Could not parse stylesheet of object QPushButton". The
+        # ``_StepCard`` ctor up at line 134 has the same comment
+        # for the same reason — easy mistake to make when most
+        # lines around it are f-strings.
+        self._wipe_button.setStyleSheet(
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('accent_danger')}; "
+            f"border: 1px solid {tc.get('accent_danger')}; "
+            f"border-radius: 6px; padding: 4px 12px; "
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_danger')}; "
+            "color: #fff; }"
+            f"QPushButton:disabled {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('text_muted')}; "
+            f"border-color: {tc.get('border_secondary')}; }}"
+        )
+        self._wipe_button.clicked.connect(self._on_wipe_clicked)
+        v.addWidget(self._wipe_button)
         return wrap
 
     # ── Button styles (shared) ─────────────────────────────────────
@@ -715,12 +1158,16 @@ class ArduinoPanel(QWidget):
             entry = copy_starter(result.starter, result.target_dir)
             language = language_for_file(entry) or result.starter.language
             project = DetectedProject(entry, entry.parent, language)
+            self._active_starter_slug = result.starter.slug
             self._load_project(project, announce=True)
             self._append_status(f"Loaded '{result.starter.name}' into {entry.parent}.", kind="ok")
             self._announce_next_step()
             return
 
         if result.blank_name is not None and result.blank_language is not None:
+            # Blank scaffold isn't a starter — clear the slug so a
+            # later upload doesn't show the previous starter's hint.
+            self._active_starter_slug = None
             project = create_blank(result.target_dir, result.blank_name, result.blank_language)
             self._load_project(project, announce=True)
             self._append_status(f"Created blank project at {project.project_dir}.", kind="ok")
@@ -741,6 +1188,8 @@ class ArduinoPanel(QWidget):
             return
 
         if result.existing is not None:
+            # Existing-project loads aren't tied to a starter slug.
+            self._active_starter_slug = None
             self._load_project(result.existing, announce=True)
             self._append_status(
                 f"Opened existing project: {result.existing.entry_file}.",
@@ -755,6 +1204,38 @@ class ArduinoPanel(QWidget):
             logger.info("arduino: loaded project %s", project.entry_file)
         self._refresh_upload_button()
         self._publish_panel_state()
+        # Disambiguation hint — ``detect_in`` deterministically picks
+        # ``.ino`` over ``code.py`` / ``main.py`` when both exist in
+        # the same folder, but to a Python user that silent choice
+        # looks like a bug. Surface it on the status feed so the
+        # user knows which file's about to be flashed and how to
+        # switch.
+        self._maybe_warn_ambiguous_language(project)
+
+    def _maybe_warn_ambiguous_language(self, project: DetectedProject) -> None:
+        """Tell the user when more than one entry-file was found.
+
+        ``detect_in`` picks ``.ino`` first, then ``code.py`` for
+        CircuitPython, then ``main.py`` for MicroPython — silently.
+        When the user opens a folder containing more than one of
+        those, we say so explicitly and point at the override path.
+        """
+        folder = project.project_dir
+        candidates: list[str] = []
+        if next(folder.glob("*.ino"), None):
+            candidates.append("*.ino (Arduino)")
+        if (folder / "code.py").is_file():
+            candidates.append("code.py (CircuitPython)")
+        if (folder / "main.py").is_file():
+            candidates.append("main.py (MicroPython)")
+        if len(candidates) <= 1:
+            return
+        active = project.entry_file.name
+        self._append_status(
+            f"This folder has both {', '.join(candidates)}. Using <b>{active}</b>. "
+            "Use Change project… to switch.",
+            kind="hint",
+        )
 
     # ── Snapshot for the chat panel ────────────────────────────────
 
@@ -972,11 +1453,57 @@ class ArduinoPanel(QWidget):
     def _kick_detect(self) -> None:
         if getattr(self, "_detecting", False):
             return
+        # Refresh the toolchain footer on every detection tick so a
+        # newly-installed tool flips its chip from red to green
+        # without requiring a panel restart. ``detect_toolchains``
+        # is just ``shutil.which`` + an import probe — same cost
+        # as the empty-state branch in ``_on_boards_detected``.
+        self._refresh_toolchain_chips()
+        # Same cadence for CircuitPython drive auto-discovery —
+        # cheap (a few ``Path.is_dir`` checks) and means the user
+        # gets "Drive: CIRCUITPY ✓" without needing to dig through
+        # Advanced after plugging the board in.
+        self._maybe_autodetect_cp_drive()
         self._detecting = True
         try:
             asyncio.ensure_future(self._run_detect())
         except RuntimeError:
             self._detecting = False
+
+    def _maybe_autodetect_cp_drive(self) -> None:
+        """Scan common mount roots for a CircuitPython drive.
+
+        Only runs when:
+          - the active project is CircuitPython (no point scanning
+            for a drive when the user is uploading C++ / MicroPython)
+          - no drive is currently set (don't override a user's
+            explicit override from Advanced)
+
+        ``ArduinoService.find_circuitpython_drive`` does a few
+        ``Path.is_dir`` checks against /run/media/$USER, /media/$USER,
+        /Volumes — milliseconds per call.
+        """
+        if self._project is None:
+            return
+        if self._language is not Language.CIRCUITPYTHON:
+            return
+        if self._cp_drive is not None:
+            return
+        # Pull the label from the catalog when we know the board,
+        # otherwise default to ``CIRCUITPY`` which is what every
+        # off-the-shelf Adafruit board uses.
+        label = "CIRCUITPY"
+        if self._board is not None and self._board.cp_drive_label:
+            label = self._board.cp_drive_label
+        found = self._service.find_circuitpython_drive(label)
+        if found is None:
+            return
+        self._cp_drive = found
+        self._append_status(
+            f"Found your CircuitPython drive at <code>{found}</code> — you can press Upload now.",
+            kind="ok",
+        )
+        self._refresh_upload_button()
 
     async def _run_detect(self) -> None:
         try:
@@ -1000,11 +1527,17 @@ class ArduinoPanel(QWidget):
             # When detection comes up empty, mention the limitation
             # only if we know it's *because* pyserial is missing —
             # otherwise the user really does just need to plug in.
+            #
+            # Copy is intentionally written so the user understands
+            # detection is *automatic* (we re-poll every 2.5s) —
+            # the previous wording made it sound like the only way
+            # to detect was the manual button, and patient users
+            # would sit waiting after plugging in.
             tc_state = self._service.detect_toolchains()
             if not tc_state.pyserial_ok and not tc_state.can_cpp:
                 self._detection_label.setText(
-                    "🔌  Plug in your board with the USB cable, then press "
-                    "<b>Look again</b>.<br>"
+                    "🔌  Plug in your board with the USB cable — "
+                    "we'll spot it automatically.<br>"
                     f"<span style='color:{tc.get('text_muted')}; "
                     f"font-size:{tc.FONT_SM}px;'>"
                     "Tip: install pyserial and arduino-cli to detect "
@@ -1012,7 +1545,11 @@ class ArduinoPanel(QWidget):
                 )
             else:
                 self._detection_label.setText(
-                    "🔌  Plug in your board with the USB cable, then press <b>Look again</b>."
+                    "🔌  Plug in your board with the USB cable — "
+                    "we'll spot it automatically.<br>"
+                    f"<span style='color:{tc.get('text_muted')}; "
+                    f"font-size:{tc.FONT_SM}px;'>"
+                    "Or press <b>Look again</b> to re-scan now.</span>"
                 )
             self._detection_label.setStyleSheet(
                 f"color: {tc.get('text_secondary')}; "
@@ -1064,13 +1601,15 @@ class ArduinoPanel(QWidget):
             self._publish_panel_state()
 
     def _maybe_warn_dialout_group(self) -> None:
-        """One-shot warning when the user isn't in dialout/uucp.
+        """One-shot, kid-friendly warning about dialout group membership.
 
-        Without group membership the kernel rejects the open() on
-        ``/dev/ttyUSB0`` and arduino-cli upload exits with a
-        permission-denied diagnostic that's hard to act on. Posting
-        a clear hint up front (with the exact ``usermod`` command)
-        saves the user a confusing failed-upload + Google search.
+        Without group membership the kernel rejects the ``open()``
+        on ``/dev/ttyUSB0`` and arduino-cli upload fails with a
+        permission-denied error a 10-year-old can't act on. We
+        surface a friendly hint with a one-click *Copy command*
+        button and grown-up framing — "ask a grown-up to run this
+        in a terminal" — instead of expecting the kid to know
+        what ``sudo`` is.
 
         Latched per-panel so the message appears once when the
         first board is plugged in, not every poll.
@@ -1086,13 +1625,43 @@ class ArduinoPanel(QWidget):
             user = getpass.getuser()
         except Exception:
             user = "$USER"
+        cmd = f"sudo usermod -aG dialout {user}"
+
         self._append_status(
-            f"Heads up: your user '{user}' isn't in the 'dialout' group, "
-            "so uploads will probably fail with a permission error.\n"
-            f"Fix it with:  sudo usermod -aG dialout {user}\n"
-            "Then log out and back in.",
+            "Your computer needs one-time permission to talk to your board. "
+            "Ask a grown-up to run this in a terminal, then log out and back in:",
             kind="hint",
         )
+        self._append_status(f"<code>{cmd}</code>", kind="hint")
+
+        # ``QApplication.clipboard`` works without any prior import
+        # — qApp is always available once QApplication exists. Done
+        # via QTimer so the slot runs on the GUI thread regardless
+        # of which thread fired the dialout warning. (Today it's
+        # always the GUI thread, but the indirection costs nothing.)
+        from PyQt6.QtWidgets import QApplication
+
+        def copy_to_clipboard() -> None:
+            QApplication.clipboard().setText(cmd)
+            self._append_status(
+                "Command copied to clipboard. Paste it into a terminal.",
+                kind="ok",
+            )
+
+        # Inline button below the hint — one tap, kid-actionable.
+        copy_btn = QPushButton("📋  Copy the command")
+        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setMinimumHeight(32)
+        copy_btn.setStyleSheet(self._secondary_button_qss())
+        copy_btn.clicked.connect(copy_to_clipboard)
+        # Insert into the upload card under the AI help button so it
+        # sits in the same visual region as other one-shot actions.
+        # ``parent()`` walk avoids hard-coding the card index.
+        ai_btn_parent = self._ai_help_button.parent()
+        if ai_btn_parent is not None:
+            layout = ai_btn_parent.layout()
+            if layout is not None:
+                layout.addWidget(copy_btn)
 
     # ── Advanced overrides ─────────────────────────────────────────
 
@@ -1138,11 +1707,21 @@ class ArduinoPanel(QWidget):
 
     def _refresh_upload_button(self) -> None:
         ready, why = self._upload_readiness()
-        self._upload_button.setEnabled(ready and not self._busy)
-        self._upload_button.setStyleSheet(self._upload_button_qss(ready))
-        self._upload_button.setToolTip("" if ready else why)
+        # Cancel-while-busy: when an upload is in flight the
+        # button stays enabled but flips to ``Cancel`` and routes
+        # to ``_on_cancel_clicked``. The previous behaviour
+        # (disable + label "Working…") left the user with no way
+        # to abort a wrong-board upload, forcing them to wait out
+        # the 180 s timeout.
+        self._upload_button.setEnabled(self._busy or (ready and not self._busy))
+        self._upload_button.setStyleSheet(
+            self._cancel_button_qss() if self._busy else self._upload_button_qss(ready)
+        )
+        self._upload_button.setToolTip(
+            "Cancel the upload and release the board." if self._busy else ("" if ready else why)
+        )
         if self._busy:
-            label = "Working…"
+            label = "✕  Cancel upload"
         elif not ready:
             # Show the *blocker* as the button text — "Plug in your
             # board first" is honest about what to do next; just
@@ -1159,9 +1738,23 @@ class ArduinoPanel(QWidget):
     def _upload_readiness(self) -> tuple[bool, str]:
         if self._project is None:
             return False, "Pick or create a project first."
+
+        # Toolchain gate — surface a missing CLI as the upload
+        # blocker rather than letting the user click Upload, watch
+        # compile or upload spin, then see "Arduino CLI isn't
+        # installed yet" in the status feed. We've already told
+        # them via the first-launch dependency dialog; the button
+        # label keeps the same actionable message visible.
+        language = self._language
+        if language is not None:
+            tc_state = self._service.detect_toolchains()
+            if language is Language.CPP and not tc_state.can_cpp:
+                return False, "Install Arduino CLI first"
+            if language is Language.MICROPYTHON and not tc_state.can_micropython:
+                return False, "Install mpremote first"
+
         if self._board is None:
             return False, "Plug in your board first."
-        language = self._language
         assert language is not None
         if not self._board.supports(language):
             return False, (f"This board doesn't run {_LANGUAGE_DISPLAY[language]}.")
@@ -1195,6 +1788,192 @@ class ArduinoPanel(QWidget):
             "QPushButton:pressed { padding-top: 2px; }"
         )
 
+    def _cancel_button_qss(self) -> str:
+        """Red, attention-grabbing style for the in-flight Cancel state."""
+        return (
+            "QPushButton { "
+            f"background: {tc.get('accent_danger')}; "
+            "color: #fff; border: none; border-radius: 10px; "
+            f"font-size: {tc.FONT_XL}px; font-weight: 700; "
+            "}"
+            "QPushButton:hover { background: #d43f3f; }"
+            "QPushButton:pressed { padding-top: 2px; }"
+        )
+
+    def _on_upload_button_clicked(self) -> None:
+        """Dispatch button click — start upload or cancel one in flight."""
+        if self._busy:
+            self._on_cancel_clicked()
+            return
+        self._on_upload_clicked()
+
+    # ── Erase user code ─────────────────────────────────────────────
+
+    def _on_wipe_clicked(self) -> None:
+        """Confirm with the user, then dispatch to the right wipe path.
+
+        The confirmation dialog spells out exactly what's going to
+        disappear (the file path + language) so a kid can't blow
+        away their work by misclicking. ``Yes`` runs the wipe,
+        anything else cancels.
+        """
+        if self._busy:
+            self._append_status(
+                "Wait for the current operation to finish first.",
+                kind="hint",
+            )
+            return
+
+        # Figure out *what* we'd be erasing so the dialog can quote
+        # it back. None of the wipe paths needs a project loaded —
+        # the user might want to wipe a buggy upload from yesterday
+        # without re-loading its project — but they all need a
+        # board / drive.
+        language = self._language
+        target_desc, target_extra = self._describe_wipe_target()
+        if target_desc is None:
+            self._append_status(target_extra or "Plug in a board first.", kind="fail")
+            return
+
+        from PyQt6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Erase user code?")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"This will erase <b>{target_desc}</b>.")
+        box.setInformativeText(
+            f"{target_extra}\n\n"
+            "Firmware on your board stays intact — you can upload again "
+            "any time. But your current code will be gone."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        # Style the destructive button red so a thumbed-through
+        # confirm doesn't quietly land on Yes by muscle memory.
+        yes_btn = box.button(QMessageBox.StandardButton.Yes)
+        if yes_btn is not None:
+            yes_btn.setText("Erase")
+            yes_btn.setStyleSheet(
+                f"QPushButton {{ background: {tc.get('accent_danger')}; "
+                "color: #fff; border: none; border-radius: 4px; "
+                "padding: 4px 14px; font-weight: 600; }}"
+            )
+
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        # Release the serial port — the wipe shells out to the same
+        # tools that need exclusive port access, exactly like the
+        # upload path. Auto-reconnect doesn't fire here (there'd be
+        # nothing to read from a blank board) but the user can
+        # press Start monitor manually if they want to verify.
+        if self._serial_monitor.is_connected:
+            self._serial_monitor.disconnect()
+
+        self._busy = True
+        self._service.last_error_detail = ""
+        self._refresh_ai_button()
+        self._refresh_upload_button()
+        self._append_status("— Erasing —")
+        try:
+            asyncio.ensure_future(self._run_wipe(language))
+        except RuntimeError:
+            self._busy = False
+            self._refresh_upload_button()
+            self._append_status(
+                "Couldn't start the wipe — no event loop. Try restarting the app.",
+                kind="fail",
+            )
+
+    def _describe_wipe_target(self) -> tuple[str | None, str]:
+        """Return (file/target description, longer explanation).
+
+        Returns ``(None, reason)`` when the wipe can't be performed
+        — e.g. no board plugged in. The first half is a short
+        bold-able label for the dialog title; the second is a
+        sentence's worth of context for the body.
+        """
+        language = self._language
+        if language is Language.CIRCUITPYTHON:
+            if self._cp_drive is None:
+                return None, (
+                    "No CIRCUITPY drive detected. Plug in your board and "
+                    "wait for it to mount, then try again."
+                )
+            return (
+                f"code.py on {self._cp_drive.name}",
+                f"Your program at {self._cp_drive / 'code.py'} will be deleted.",
+            )
+        if not self._port:
+            return None, "No serial port detected. Plug in your board and try again."
+        if language is Language.MICROPYTHON:
+            return (
+                "main.py on your board",
+                f"Your MicroPython program (main.py) at port {self._port} will be deleted.",
+            )
+        # Default / C++ branch — also covers the case where we
+        # have a board but no project loaded yet, since wiping is
+        # a board-level operation.
+        if self._board is None:
+            return None, "No board detected. Plug in your board and try again."
+        return (
+            "your sketch",
+            f"An empty sketch will be flashed to {self._board.display_name} on "
+            f"{self._port}, replacing whatever's currently running.",
+        )
+
+    async def _run_wipe(self, language) -> None:
+        """Drive the right wipe coroutine for the active language."""
+        try:
+            if language is Language.CIRCUITPYTHON and self._cp_drive is not None:
+                async for u in self._service.wipe_circuitpython(self._cp_drive):
+                    self._step_received.emit(u)
+            elif language is Language.MICROPYTHON and self._port:
+                async for u in self._service.wipe_micropython(self._port):
+                    self._step_received.emit(u)
+            else:
+                # Default to the C++ path. Needs both a port and a
+                # board for the empty-sketch flash. If the user is
+                # in the "no project loaded yet" state, we still
+                # have access to the detected board, but we need
+                # *some* sketch dir for arduino-cli's staging
+                # call. Use a temp dir under the project root or
+                # the user's home as a sane default.
+                if self._board is None or not self._port:
+                    self._step_received.emit(
+                        StepUpdate("No board or port — can't wipe.", kind="fail")
+                    )
+                    return
+                base = (
+                    self._project.project_dir.parent if self._project is not None else Path.home()
+                )
+                async for u in self._service.wipe_cpp(base, self._board, self._port):
+                    self._step_received.emit(u)
+        except Exception:
+            logger.exception("arduino: wipe failed")
+            self._step_received.emit(StepUpdate("Something went wrong. Try again?", kind="fail"))
+        finally:
+            self._busy = False
+            QTimer.singleShot(0, self._refresh_upload_button)
+
+    def _on_cancel_clicked(self) -> None:
+        """Terminate the in-flight compile/upload subprocess.
+
+        ``cancel_current_upload`` SIGTERMs the running subprocess.
+        ``_run`` translates that into a ``rc=-1`` "cancelled"
+        signal, the corresponding async generator stops yielding,
+        and ``_run_upload``'s finally block resets ``_busy = False``
+        so ``_refresh_upload_button`` flips the button back to
+        the green Upload state.
+        """
+        cancelled = self._service.cancel_current_upload()
+        if cancelled:
+            self._append_status("Cancelling — waiting for the process to exit…", kind="hint")
+        else:
+            # Race: between the button flip and the click,
+            # ``_run`` finished naturally. Nothing to do.
+            self._append_status("Already finished — nothing to cancel.", kind="hint")
+
     def _on_upload_clicked(self) -> None:
         if self._busy:
             return
@@ -1202,9 +1981,20 @@ class ArduinoPanel(QWidget):
         if not ready:
             self._append_status(why, kind="fail")
             return
+        # Release the serial port before re-flashing — arduino-cli
+        # needs exclusive access to the port to drive the bootloader,
+        # and a second Serial open would either fail or compete for
+        # bytes mid-upload. The monitor auto-reconnects in
+        # ``_after_success`` once the new code is on the board.
+        if self._serial_monitor.is_connected:
+            self._serial_monitor.disconnect()
         self._busy = True
-        self._ai_help_button.setVisible(False)
+        # Reset AI button label — clearing ``last_error_detail`` and
+        # then refreshing flips "Explain this error" back to the
+        # neutral "Ask AI for help" so a returning user with a fresh
+        # session doesn't see a stale error label.
         self._service.last_error_detail = ""
+        self._refresh_ai_button()
         self._refresh_upload_button()
         self._append_status("— Starting —")
         try:
@@ -1246,14 +2036,125 @@ class ArduinoPanel(QWidget):
             self._step_received.emit(StepUpdate("Something went wrong. Try again?", kind="fail"))
         finally:
             self._busy = False
+            # Empty ``last_error_detail`` after a non-exception run
+            # means every yield from the service was a success or
+            # in-progress; flip into the celebrate state.
+            succeeded = not self._service.last_error_detail
             QTimer.singleShot(0, self._refresh_upload_button)
+            if succeeded:
+                # Queued *after* the refresh so this runs second and
+                # wins the "what does the button say" race — if we
+                # didn't, the refresh would set "Upload to Arduino"
+                # and we'd never get the celebrated label.
+                QTimer.singleShot(0, self._after_success)
+
+    def _after_success(self) -> None:
+        """Acknowledge a successful upload and invite a re-upload.
+
+        Three cues — together they take the panel from "and then
+        it just goes silent" to "your code is on the board, here's
+        what to try next":
+
+        1. Re-style the upload button label to ``Upload again ↻``
+           so a returning user knows the button is still alive and
+           targets the same project + board.
+        2. Append a short hint line to the status feed pointing at
+           the iteration loop — most beginners' next move is to
+           tweak a delay or a pin and re-flash.
+        3. Auto-start the serial monitor on the same port the
+           upload used. Closes the *biggest* feedback gap in the
+           wizard — the user uploaded code that prints something,
+           the panel was about to go quiet, now they see output
+           appearing in step 4 within a second.
+        """
+        self._upload_button.setText("Upload again ↻")
+        self._append_status(
+            "Edit your code and press Upload again to flash the new version.",
+            kind="hint",
+        )
+
+        # Starter-specific post-upload coaching. Tells a kid what
+        # to *look for* now that their code is on the board ("Look
+        # at your board's tiny LED — it should blink once a
+        # second"). Only fires for projects scaffolded from a
+        # starter — blanks and opened-existing projects don't have
+        # a meaningful canned hint.
+        if self._active_starter_slug:
+            try:
+                from polyglot_ai.core.arduino.starters import list_starters
+
+                starter = next(
+                    (s for s in list_starters() if s.slug == self._active_starter_slug),
+                    None,
+                )
+                if starter is not None and starter.post_upload_hint:
+                    self._append_status(starter.post_upload_hint, kind="hint")
+            except Exception:
+                # Failure to load starter metadata is purely
+                # cosmetic — silently skip the hint.
+                logger.debug("arduino: post_upload_hint lookup failed", exc_info=True)
+
+        # Auto-connect the monitor only when:
+        #   - we have a serial port (CircuitPython upload-via-USB-
+        #     drive doesn't, and there's nothing for ``pyserial``
+        #     to talk to in that case)
+        #   - the user isn't already monitoring (a second connect
+        #     call would be a no-op anyway, but skipping the call
+        #     also skips the "Connected" status line)
+        if self._port and not self._serial_monitor.is_connected:
+            baud = int(self._baud_combo.currentData() or 115200)
+            # Tiny grace period so arduino-cli's port reset has
+            # finished before we try to open it ourselves. Without
+            # this, the open often races against the bootloader's
+            # final port-relinquish and fails with "device busy."
+            QTimer.singleShot(800, lambda: self._serial_monitor.connect_to(self._port, baud))
+
+    # ── Serial monitor handlers ────────────────────────────────────
+
+    def _on_serial_toggle(self) -> None:
+        """Connect or disconnect the monitor based on current state."""
+        if self._serial_monitor.is_connected:
+            self._serial_monitor.disconnect()
+            return
+        if not self._port:
+            self._append_status(
+                "Plug in a board first — the monitor needs a serial port to read.",
+                kind="fail",
+            )
+            return
+        baud = int(self._baud_combo.currentData() or 115200)
+        self._serial_monitor.connect_to(self._port, baud)
+
+    def _on_serial_connected(self, port: str, baud: int) -> None:
+        self._serial_connect_btn.setText("⏹  Stop monitor")
+        # Keep the same primary-button QSS — just the label flips.
+        # Append a marker line so the user can tell where one
+        # session ends and the next begins.
+        self._serial_view.appendPlainText(f"── connected to {port} @ {baud} ──")
+
+    def _on_serial_disconnected(self) -> None:
+        self._serial_connect_btn.setText("▶  Start monitor")
+        self._serial_view.appendPlainText("── disconnected ──")
+
+    def _on_serial_error(self, message: str) -> None:
+        self._append_status(f"Serial monitor: {message}", kind="fail")
+
+    def _on_serial_line(self, line: str) -> None:
+        """Append one line of board output to the monitor view."""
+        self._serial_view.appendPlainText(line)
+
+    def _on_serial_clear(self) -> None:
+        self._serial_view.clear()
 
     # ── Status & AI handoff ────────────────────────────────────────
 
     def _on_step_update(self, update: StepUpdate) -> None:
         self._append_status(update.message, kind=update.kind)
         if update.kind == "fail" and self._service.last_error_detail:
-            self._ai_help_button.setVisible(True)
+            # Button stays visible the whole session now (see
+            # _build_step3_upload). Just flip the label so the user
+            # sees an action verb that matches the new state.
+            self._refresh_ai_button()
             if _load_auto_ask_pref():
                 # Opt-in path: pre-fill the chat with the error +
                 # context AND press Send for the user. The chat

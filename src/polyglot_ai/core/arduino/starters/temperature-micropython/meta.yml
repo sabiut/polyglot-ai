@@ -5,3 +5,4 @@ language: micropython
 boards: [pico, pico-w, esp32, esp32-s3]
 entry_file: main.py
 suggested_project_name: temperature
+post_upload_hint: Open the serial monitor — you should see a temperature reading every second.

@@ -42,6 +42,12 @@ class Starter:
     entry_file: str
     suggested_project_name: str
     source_dir: Path
+    # Optional one-line "what to look for" hint surfaced in the
+    # status feed after a successful upload of this starter. Lets
+    # a kid know "Look at your board's LED" or "Open the monitor —
+    # your sensor reading should appear" without needing to read
+    # docs first. Empty string when no hint exists.
+    post_upload_hint: str = ""
 
     def supports_board(self, board: Board) -> bool:
         if not board.supports(self.language):
@@ -104,6 +110,7 @@ def list_starters() -> list[Starter]:
                 entry_file=entry_file,
                 suggested_project_name=str(data.get("suggested_project_name") or folder.name),
                 source_dir=folder,
+                post_upload_hint=str(data.get("post_upload_hint") or ""),
             )
         )
     return out

@@ -16,10 +16,15 @@ logger = logging.getLogger(__name__)
 def migrate_legacy_data() -> None:
     """Migrate data from Codex Desktop (old name) to Polyglot AI (new name).
 
-    Performs three migrations:
+    Performs four migrations:
     1. Data directory: ~/.local/share/codex-desktop → ~/.local/share/polyglot-ai
     2. Config directory: ~/.config/codex-desktop → ~/.config/polyglot-ai
     3. Keyring entries: service "codex-desktop" → "polyglot-ai"
+    4. Remove the orphaned ``claude-web-profile`` directory left
+       behind when the embedded ``claude.ai`` panel was removed.
+       Used to live at ~/.local/share/polyglot-ai/claude-web-profile;
+       can be tens of MB of Chromium cookies, IndexedDB, and cache
+       no part of the app touches anymore.
 
     All operations are idempotent and exception-safe.
     Migration failures are logged but never block startup.
@@ -36,8 +41,38 @@ def migrate_legacy_data() -> None:
             "config",
         )
         _migrate_keyring()
+        _remove_orphaned_claude_web_profile()
     except Exception:
         logger.exception("Migration failed (non-fatal, continuing startup)")
+
+
+def _remove_orphaned_claude_web_profile() -> None:
+    """Delete the leftover Chromium profile from the removed web view.
+
+    The embedded ``claude.ai`` panel was removed in favor of the
+    native API path. Its persistent profile lived at
+    ``~/.local/share/polyglot-ai/claude-web-profile`` and held
+    cookies, IndexedDB, LevelDB, cache, and service-worker data —
+    can easily be 30–80 MB of dead bytes. Idempotent: a no-op
+    after the first successful removal.
+    """
+    profile_dir = Path.home() / ".local" / "share" / "polyglot-ai" / "claude-web-profile"
+    if not profile_dir.exists():
+        return
+    try:
+        # Compute size before deleting so the log line is informative.
+        size_bytes = sum(p.stat().st_size for p in profile_dir.rglob("*") if p.is_file())
+    except OSError:
+        size_bytes = 0
+    try:
+        shutil.rmtree(profile_dir)
+        logger.info(
+            "Removed orphaned Chromium profile %s (%.1f MB freed)",
+            profile_dir,
+            size_bytes / 1_000_000,
+        )
+    except OSError as e:
+        logger.warning("Could not remove orphaned profile %s: %s", profile_dir, e)
 
 
 def _migrate_directory(old: Path, new: Path, label: str) -> None:

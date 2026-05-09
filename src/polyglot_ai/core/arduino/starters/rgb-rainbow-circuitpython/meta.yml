@@ -5,3 +5,4 @@ language: circuitpython
 boards: [circuitplayground-express, feather-m4]
 entry_file: code.py
 suggested_project_name: rainbow
+post_upload_hint: Watch the NeoPixels — they should cycle through the rainbow smoothly.

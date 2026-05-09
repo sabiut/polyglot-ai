@@ -411,13 +411,51 @@ class MCPClient:
         except _asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("MCP '%s': session cleanup failed: %s", server_name, e)
+            self._log_cleanup_exception(server_name, "session", e)
         try:
             await transport_ctx.__aexit__(None, None, None)
         except _asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("MCP '%s': transport cleanup failed: %s", server_name, e)
+            self._log_cleanup_exception(server_name, "transport", e)
+
+    @staticmethod
+    def _log_cleanup_exception(server_name: str, stage: str, exc: Exception) -> None:
+        """Log MCP context cleanup failures, suppressing one anyio race.
+
+        anyio's CancelScope is strict about which task entered and
+        exited a scope. When the MCP session is created during
+        ``connect`` (one asyncio task) and torn down during
+        ``disconnect_all`` from the qasync shutdown drain (a
+        different task), anyio raises::
+
+            RuntimeError: Attempted to exit cancel scope in a
+            different task than it was entered in
+
+        The cleanup *did* succeed — the session and transport
+        objects are released and the MCP subprocess gets reaped on
+        the next event-loop tick — but anyio insists on warning
+        loudly. Every emission of this specific message is paired
+        with a successful "Disconnected from MCP server: <name>"
+        line in the log; downgrading it to DEBUG keeps the noise
+        out of the default log without hiding actual transport /
+        session bugs (those still come through as WARNING).
+
+        Mirrors the pattern in ``app.py``'s
+        ``_quiet_anyio_shutdown_noise`` for the sister
+        "no running event loop" race during the same shutdown.
+        """
+        msg = str(exc)
+        if "exit cancel scope in a different task" in msg:
+            logger.debug(
+                "MCP '%s': %s cleanup hit anyio task-identity race "
+                "(harmless, see _log_cleanup_exception): %s",
+                server_name,
+                stage,
+                msg,
+            )
+            return
+        logger.warning("MCP '%s': %s cleanup failed: %s", server_name, stage, msg)
 
     async def disconnect(self, server_name: str) -> None:
         """Disconnect from an MCP server."""
@@ -439,11 +477,11 @@ class MCPClient:
                         except _asyncio.CancelledError:
                             raise
                         except Exception as e:
-                            logger.warning(
-                                "MCP '%s': legacy context cleanup failed: %s",
-                                server_name,
-                                e,
-                            )
+                            # Same anyio task-identity race as the
+                            # split (transport, session) path —
+                            # downgrade for consistency so a legacy
+                            # config doesn't leak the noise back.
+                            self._log_cleanup_exception(server_name, "legacy context", e)
             except _asyncio.CancelledError:
                 raise
             except Exception as e:

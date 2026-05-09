@@ -5,3 +5,4 @@ language: cpp
 boards: []
 entry_file: button.ino
 suggested_project_name: button
+post_upload_hint: Press the button you wired to pin 2 — the LED should light while it's held.

@@ -5,8 +5,15 @@ from __future__ import annotations
 import logging
 from typing import AsyncGenerator
 
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncAnthropic,
+    BadRequestError,
+    RateLimitError,
+)
 
+from polyglot_ai.constants import EVT_AI_ERROR
 from polyglot_ai.core.ai.models import StreamChunk
 from polyglot_ai.core.ai.provider import AIProvider, ModelListCache
 from polyglot_ai.core.bridge import EventBus
@@ -286,6 +293,51 @@ class AnthropicClient(AIProvider):
 
             self._emit_stream_done()
 
+        except (APITimeoutError, APIConnectionError) as e:
+            # Transient network blip — DNS, TLS handshake, edge
+            # outage, captive portal. Don't dump a 30-line stack
+            # trace into the user's chat for something that almost
+            # always resolves on retry.
+            from polyglot_ai.core.security import sanitize_error
+
+            logger.info("Anthropic transient network issue: %s", sanitize_error(str(e))[:200])
+            self._event_bus.emit(EVT_AI_ERROR, error=sanitize_error(str(e)))
+            yield StreamChunk(
+                delta_content=(
+                    "\n\n**Couldn't reach Anthropic just now.**\n\n"
+                    "The connection to ``api.anthropic.com`` timed out or "
+                    "was refused. Almost always transient — try the prompt "
+                    "again. If it keeps failing, check your network or "
+                    "switch to a different provider in the model dropdown."
+                )
+            )
+            return
+        except RateLimitError as e:
+            # Show a friendly explanation instead of the raw 429
+            # JSON dump. API-key quotas are per-organization and
+            # reset on a sliding window — Retry-After tells us how
+            # long, when present.
+            from polyglot_ai.core.ai.claude_oauth import _retry_after_hint
+            from polyglot_ai.core.security import sanitize_error
+
+            logger.warning("Anthropic rate limit hit: %s", sanitize_error(str(e))[:200])
+            self._event_bus.emit(EVT_AI_ERROR, error=sanitize_error(str(e)))
+            wait_hint = _retry_after_hint(e)
+            yield StreamChunk(
+                delta_content=(
+                    "\n\n**Anthropic rate limit reached.**\n\n"
+                    f"Your API key has hit its per-minute quota{wait_hint}. "
+                    "Anthropic enforces these per organization; bursts add up "
+                    "across every app on the same key.\n\n"
+                    "**What to do:**\n\n"
+                    "1. Wait a minute and retry the same prompt.\n"
+                    "2. Switch to a different provider in the model dropdown "
+                    "for now.\n"
+                    "3. If you hit this often, your tier may need a bump — "
+                    "see https://console.anthropic.com/settings/limits."
+                )
+            )
+            return
         except Exception as e:
             yield self._handle_stream_error(e)
 
