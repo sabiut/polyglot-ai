@@ -205,3 +205,189 @@ async def test_two_sequential_tool_calls_keep_distinct_indices():
     assert by_idx[1][0]["id"] == "call_B"
     assert by_idx[1][0]["function"]["name"] == "read_file"
     assert "".join(t["function"]["arguments"] for t in by_idx[1]) == '{"path":"b"}'
+
+
+# ── error-handling regression tests ────────────────────────────────
+#
+# Lock in the friendly catches for ``httpx`` streaming-network drops
+# and ``openai.RateLimitError`` so a future refactor can't quietly
+# revert to dumping 30-line stack traces into the chat. The original
+# trigger was a DeepSeek mid-stream connection drop seen in
+# production (200 OK, then ``httpx.ReadError`` six seconds later);
+# the rate-limit case is by symmetry with the request-time wrap the
+# SDK does for HTTP 429 responses.
+
+
+class _RaisingMidStream:
+    """Async iterator that yields nothing before raising ``exc``.
+
+    Mirrors the production scenario where the HTTP request to the
+    provider succeeded (200 OK), the SDK opened the stream, and
+    then the underlying TCP connection died before any chunk
+    could be parsed.
+    """
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise self._exc
+
+
+class _RaisingCompletions:
+    """``chat.completions`` whose ``create`` returns a raising stream."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    async def create(self, **kwargs):
+        return _RaisingMidStream(self._exc)
+
+
+class _RaisingAtCreateCompletions:
+    """``chat.completions`` whose ``create`` raises before the stream opens.
+
+    This is the rate-limit shape — the SDK wraps the 429 response
+    into ``RateLimitError`` and raises it at ``create`` time, not
+    during iteration.
+    """
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    async def create(self, **kwargs):
+        raise self._exc
+
+
+def _make_client_with_exc(exc, raise_at_create: bool = False):
+    """Build a client whose underlying SDK raises ``exc`` on next stream chunk.
+
+    Set ``raise_at_create=True`` for errors that fire before the
+    stream opens (the SDK's request-time wraps like
+    ``RateLimitError`` / ``APIConnectionError``).
+    """
+    bus = EventBus()
+    client = OpenAIClient.__new__(OpenAIClient)
+    AIProvider.__init__(client, bus)
+    client._provider_name = "deepseek"
+    client._provider_display_name = "DeepSeek"
+    client._default_models = ["deepseek-v4-pro"]
+    client._model_filter = ("deepseek",)
+    client._enable_stream_options = True
+    client._reasoning_prefixes = ()
+    client._base_url = None
+    fake_completions = (
+        _RaisingAtCreateCompletions(exc) if raise_at_create else _RaisingCompletions(exc)
+    )
+    client._client = SimpleNamespace(chat=SimpleNamespace(completions=fake_completions))
+    return client, bus
+
+
+@pytest.mark.asyncio
+async def test_httpx_read_error_mid_stream_yields_friendly_message():
+    """The exact production failure mode: 200 OK then ``httpx.ReadError``.
+
+    Asserts (a) the user-facing chunk is the friendly markdown,
+    not a stack trace, (b) the event bus gets a sanitised
+    summary rather than the raw exception text, and (c) the
+    stream ends cleanly (no unhandled re-raise).
+    """
+    import httpx
+
+    client, bus = _make_client_with_exc(httpx.ReadError("connection reset by peer"))
+    bus_errors: list[str] = []
+    from polyglot_ai.constants import EVT_AI_ERROR
+
+    bus.subscribe(EVT_AI_ERROR, lambda error: bus_errors.append(error))
+
+    out = []
+    async for chunk in client.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek-v4-pro",
+    ):
+        out.append(chunk)
+
+    bodies = [c.delta_content for c in out if c.delta_content]
+    combined = "".join(bodies)
+
+    # Friendly markdown made it through
+    assert "Couldn't finish reading the response from DeepSeek" in combined
+    # Partial-content acknowledgement (suggestion #5 from the review)
+    assert "Any text above this line" in combined
+    # No leaked stack trace tokens
+    assert "Traceback" not in combined
+    assert "httpcore" not in combined
+    # Event bus got a *summary*, not the raw exception text
+    assert bus_errors == ["DeepSeek connection dropped"]
+
+
+@pytest.mark.asyncio
+async def test_httpx_connect_error_takes_same_friendly_path():
+    """Sister httpx errors (ConnectError, RemoteProtocolError, …) flow the same way."""
+    import httpx
+
+    client, _ = _make_client_with_exc(httpx.ConnectError("dns failed"))
+    out = []
+    async for chunk in client.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek-v4-pro",
+    ):
+        out.append(chunk)
+    body = "".join(c.delta_content for c in out if c.delta_content)
+    assert "Couldn't finish reading" in body
+
+
+@pytest.mark.asyncio
+async def test_openai_rate_limit_error_yields_friendly_message():
+    """``RateLimitError`` at request time gets its own friendly branch."""
+    from openai import RateLimitError
+
+    # ``RateLimitError`` needs a fake response to construct cleanly.
+    # The test only cares that ``isinstance(e, RateLimitError)`` fires;
+    # constructing via ``__new__`` skips the response requirement.
+    exc = RateLimitError.__new__(RateLimitError)
+    Exception.__init__(exc, "you are being rate limited")
+
+    client, bus = _make_client_with_exc(exc, raise_at_create=True)
+    bus_errors: list[str] = []
+    from polyglot_ai.constants import EVT_AI_ERROR
+
+    bus.subscribe(EVT_AI_ERROR, lambda error: bus_errors.append(error))
+
+    out = []
+    async for chunk in client.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek-v4-pro",
+    ):
+        out.append(chunk)
+
+    body = "".join(c.delta_content for c in out if c.delta_content)
+    assert "rate limit reached" in body.lower()
+    assert "switch to a different provider" in body.lower()
+    assert "Traceback" not in body
+    # Sanitised event-bus summary
+    assert bus_errors == ["DeepSeek rate limit reached"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_exception_falls_through_to_generic_handler():
+    """Non-network, non-rate-limit errors hit ``_handle_stream_error``."""
+
+    class _RandomFail(Exception):
+        pass
+
+    client, _ = _make_client_with_exc(_RandomFail("something else broke"))
+    out = []
+    async for chunk in client.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek-v4-pro",
+    ):
+        out.append(chunk)
+    body = "".join(c.delta_content for c in out if c.delta_content)
+    # Generic handler prefixes with "**Error:**" — that's the
+    # signal we hit the fallback path, not one of the friendly
+    # branches.
+    assert "**Error:**" in body

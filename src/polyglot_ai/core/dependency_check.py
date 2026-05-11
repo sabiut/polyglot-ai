@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -270,6 +271,37 @@ def detect_distro() -> Distro:
     return "unknown"
 
 
+def _pip_install_cmd(package: str) -> str:
+    """Build a ``pip install`` command that targets the running interpreter.
+
+    Critical correctness detail: a bare ``pip install --user X``
+    lands in ``~/.local/lib/pythonX.Y/site-packages`` — which a
+    venv-installed app **does not see** (venvs don't include
+    ``~/.local`` in ``sys.path`` by default). The dependency
+    dialog used to use the bare command, run the install, report
+    success, and the running app would still fail to import the
+    package on its next launch.
+
+    Use ``sys.executable -m pip install …`` so the install always
+    lands in the exact Python interpreter the app is running.
+    Add ``--user`` only when we're NOT in a venv — system
+    Pythons typically can't write to system site-packages without
+    sudo, and ``--user`` is the correct user-level fallback there.
+
+    The path to ``sys.executable`` is shell-quoted because venv
+    paths can contain spaces (e.g. ``~/My Projects/polyglot-ai``).
+    """
+    py = sys.executable
+    # ``sys.prefix != sys.base_prefix`` is the canonical "we are
+    # in a venv" check; works for both ``venv`` and ``virtualenv``.
+    in_venv = sys.prefix != sys.base_prefix
+    user_flag = "" if in_venv else " --user"
+    # ``shlex.quote`` would be ideal but it's overkill here — venv
+    # paths are user-controlled and we trust them. Plain double-
+    # quoting handles spaces.
+    return f'"{py}" -m pip install{user_flag} {package}'
+
+
 #: The full set of optional dependencies that unlock features in the app.
 #: Order matters — displayed top-to-bottom in the first-run dialog.
 DEPENDENCIES: list[Dependency] = [
@@ -384,12 +416,15 @@ DEPENDENCIES: list[Dependency] = [
         command="mpremote",
         purpose="Arduino panel — upload Python code to MicroPython boards",
         install_urls={
-            "debian": "pip install --user mpremote",
-            "fedora": "pip install --user mpremote",
-            "arch": "pip install --user mpremote",
-            "opensuse": "pip install --user mpremote",
-            "alpine": "pip install --user mpremote",
-            "unknown": "pip install --user mpremote",
+            # Same command on every distro — pip is pip. Built
+            # via _pip_install_cmd so the install lands in the
+            # exact Python the app is running (venv-aware).
+            "debian": _pip_install_cmd("mpremote"),
+            "fedora": _pip_install_cmd("mpremote"),
+            "arch": _pip_install_cmd("mpremote"),
+            "opensuse": _pip_install_cmd("mpremote"),
+            "alpine": _pip_install_cmd("mpremote"),
+            "unknown": _pip_install_cmd("mpremote"),
         },
         # mpremote is now a hard dep in pyproject.toml, so for any
         # standard install it's importable from the running app's
@@ -415,14 +450,40 @@ DEPENDENCIES: list[Dependency] = [
             "for cheap clones (CH340, ESP, Pico) it doesn't recognise."
         ),
         install_urls={
-            "debian": "pip install --user pyserial",
-            "fedora": "pip install --user pyserial",
-            "arch": "pip install --user pyserial",
-            "opensuse": "pip install --user pyserial",
-            "alpine": "pip install --user pyserial",
-            "unknown": "pip install --user pyserial",
+            "debian": _pip_install_cmd("pyserial"),
+            "fedora": _pip_install_cmd("pyserial"),
+            "arch": _pip_install_cmd("pyserial"),
+            "opensuse": _pip_install_cmd("pyserial"),
+            "alpine": _pip_install_cmd("pyserial"),
+            "unknown": _pip_install_cmd("pyserial"),
         },
         importable_module="serial",
+        requires_root=False,
+    ),
+    Dependency(
+        key="mcp",
+        name="MCP Python SDK",
+        # No executable — the MCP client imports it as ``import mcp``
+        # to drive every configured server (playwright, memory,
+        # fetch, sequential-thinking, git, …). Without it, all MCP
+        # servers fail to connect on launch and the user gets a
+        # working app with zero tools available. Pure-Python wheel,
+        # detection via ``importable_module``.
+        command="",
+        purpose=(
+            "MCP servers — playwright, memory, fetch, sequential-thinking, "
+            "git, and any other server configured in mcp_servers.json. "
+            "Without it every configured server fails to connect."
+        ),
+        install_urls={
+            "debian": _pip_install_cmd("mcp"),
+            "fedora": _pip_install_cmd("mcp"),
+            "arch": _pip_install_cmd("mcp"),
+            "opensuse": _pip_install_cmd("mcp"),
+            "alpine": _pip_install_cmd("mcp"),
+            "unknown": _pip_install_cmd("mcp"),
+        },
+        importable_module="mcp",
         requires_root=False,
     ),
     Dependency(

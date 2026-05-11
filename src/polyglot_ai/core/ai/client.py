@@ -247,6 +247,110 @@ class OpenAIClient(AIProvider):
                 )
                 yield StreamChunk(delta_content=friendly)
                 return
+
+            # Network errors during a streaming request leak out
+            # as raw ``httpx`` exceptions: the OpenAI SDK wraps
+            # request-time failures into ``APIConnectionError`` /
+            # ``APITimeoutError``, but once the stream is open,
+            # mid-stream drops bubble up unwrapped. We saw this
+            # with DeepSeek (200 OK followed by a mid-stream
+            # ``httpx.ReadError`` with a 30-line stack trace in
+            # the log). Catch both the request-side OpenAI wraps
+            # and the response-side raw httpx errors here so the
+            # user gets a friendly "try again" message; real bugs
+            # (auth failures, protocol errors, etc.) still fall
+            # through to ``_handle_stream_error``.
+            #
+            # Imports are module-level deps (``openai`` is the
+            # whole point of this file; ``httpx`` is its transport)
+            # so we import them inline here without a guard — both
+            # are required by ``pyproject.toml`` and any import
+            # failure would have killed the module load far above.
+            import httpx
+            from openai import APIConnectionError, APITimeoutError, RateLimitError
+
+            network_errors: tuple[type, ...] = (
+                APIConnectionError,
+                APITimeoutError,
+                httpx.ReadError,
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                httpx.RemoteProtocolError,
+            )
+
+            if isinstance(e, network_errors):
+                # Sanitised summary, not the raw exception text —
+                # ``str(e)`` for httpx errors can include request
+                # URLs, header values, and internal paths that
+                # don't belong in the UI's event bus. The friendly
+                # markdown body below is what the user actually
+                # sees; the log line keeps the type name + a
+                # trimmed-and-sanitised message for diagnostics.
+                from polyglot_ai.core.security import sanitize_error
+
+                sanitised = sanitize_error(err_text)[:200]
+                # Logged at WARNING (not ERROR) because transient
+                # network blips are expected and resolve on
+                # retry. ERROR-level entries imply "user must
+                # act" which isn't the case here.
+                logger.warning(
+                    "%s: streaming connection dropped (%s) — %s",
+                    self._provider_display_name,
+                    type(e).__name__,
+                    sanitised,
+                )
+                self._event_bus.emit(
+                    EVT_AI_ERROR,
+                    error=f"{self._provider_display_name} connection dropped",
+                )
+                yield StreamChunk(
+                    delta_content=(
+                        f"\n\n**Couldn't finish reading the response from "
+                        f"{self._provider_display_name}.**\n\n"
+                        "The streaming connection dropped before the model "
+                        "finished. Any text above this line is what made it "
+                        "through before the drop; the rest didn't arrive. "
+                        "Usually a transient blip — the provider timed out, "
+                        "the network hiccupped, or their edge had a bad "
+                        "second.\n\n"
+                        "**Try:**\n\n"
+                        "1. Send the prompt again — your previous turn is "
+                        "preserved in the conversation.\n"
+                        "2. If it keeps failing, switch to a different "
+                        "provider in the model dropdown."
+                    )
+                )
+                return
+
+            # Rate limit — same pattern, separate friendly message.
+            # OpenAI / DeepSeek surface this as ``RateLimitError``
+            # at request time (it's an HTTP 429 with a JSON body,
+            # so the SDK gets to wrap it before the stream opens).
+            if isinstance(e, RateLimitError):
+                from polyglot_ai.core.security import sanitize_error
+
+                sanitised = sanitize_error(err_text)[:200]
+                logger.warning(
+                    "%s: rate limit hit — %s",
+                    self._provider_display_name,
+                    sanitised,
+                )
+                self._event_bus.emit(
+                    EVT_AI_ERROR,
+                    error=f"{self._provider_display_name} rate limit reached",
+                )
+                yield StreamChunk(
+                    delta_content=(
+                        f"\n\n**{self._provider_display_name} rate limit "
+                        "reached.**\n\n"
+                        "Wait a minute and try again, or switch to a "
+                        "different provider in the model dropdown for now. "
+                        "If you hit this often, the provider's pricing page "
+                        "covers tier upgrades."
+                    )
+                )
+                return
+
             yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:

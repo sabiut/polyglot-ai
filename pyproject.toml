@@ -46,6 +46,14 @@ dependencies = [
     # flags it if the wheel somehow isn't installed (stale venv,
     # broken packaging) — see core/dependency_check.py.
     "mpremote>=1.20",
+    # MCP Python SDK — used by ``core/mcp_client.py`` to drive every
+    # configured MCP server (playwright, memory, fetch, sequential-
+    # thinking, git, …). Without it, the client logs
+    # ``MCP SDK not installed. Run: pip install mcp`` once per
+    # server and every server fails to connect — the user gets a
+    # working app but no MCP tools at all. Hard dep so a fresh
+    # ``pip install -e .`` brings everything in one step.
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]
