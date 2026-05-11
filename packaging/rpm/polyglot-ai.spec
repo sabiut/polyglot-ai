@@ -28,13 +28,6 @@ Requires:       libXtst
 Recommends:     gnome-keyring
 Recommends:     git
 Recommends:     arduino-cli
-# Subscription web-chat panel uses QtWebEngine. Optional — when
-# absent the panel falls back to opening claude.ai in the user's
-# default browser. Package name varies by distro: Fedora 40+ ships
-# ``python3-pyqt6-webengine``; older RHEL clones may use
-# ``python3-qt6-webengine``. The Recommends is best-effort and
-# silently skipped when neither name resolves.
-Recommends:     python3-pyqt6-webengine
 BuildArch:      x86_64
 
 %description

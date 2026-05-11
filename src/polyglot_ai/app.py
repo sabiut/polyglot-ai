@@ -459,6 +459,34 @@ def main() -> None:
         await chat._init_builtin_templates()
         if provider_manager.has_providers:
             await chat.populate_models()
+        else:
+            # No providers configured — user either skipped
+            # onboarding or has no keys / OAuth tokens. Without
+            # this nudge the chat panel just sits there with an
+            # empty model dropdown and the user has no clue what
+            # to do next. We surface a persistent statusbar
+            # message + a chat-input placeholder pointing at the
+            # Help → Show Onboarding… menu item (which we added
+            # earlier this session) so the path forward is one
+            # click away.
+            try:
+                window.statusBar().showMessage(
+                    "No AI providers configured — open Help → Show Onboarding "
+                    "to sign in or paste an API key.",
+                    0,  # persistent until cleared
+                )
+                # Also update the chat input placeholder so users
+                # who land in the chat tab first (not the menubar)
+                # see the same hint inline.
+                input_widget = getattr(chat, "_input", None) or getattr(
+                    chat, "_message_input", None
+                )
+                if input_widget is not None and hasattr(input_widget, "setPlaceholderText"):
+                    input_widget.setPlaceholderText(
+                        "No AI providers yet — open Help → Show Onboarding to set one up."
+                    )
+            except Exception:
+                logger.exception("post_show_init: could not show no-provider hint")
 
     safe_task(post_show_init(), name="post_show_init")
 

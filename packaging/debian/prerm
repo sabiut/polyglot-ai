@@ -4,7 +4,15 @@ set -e
 # Remove symlink
 rm -f /usr/local/bin/polyglot-ai
 
-# Remove venv
+# Remove venv built at postinst time
 rm -rf /opt/polyglot-ai/venv
+
+# Remove the bundled wheel cache too — dpkg owns the .whl files
+# under /opt/polyglot-ai (they're shipped in the .deb), but the
+# ``wheels/`` subdir is populated by ``build_deb.sh``'s
+# pre-download step and isn't tracked as a regular file list.
+# Without this line, ``apt remove`` leaves ~150 MB of dead bytes
+# until the user runs ``apt purge``.
+rm -rf /opt/polyglot-ai/wheels
 
 echo "Polyglot AI uninstalled."

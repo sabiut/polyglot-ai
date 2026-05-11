@@ -68,7 +68,14 @@ Download the latest release from [Releases](https://github.com/sabiut/polyglot-a
 | `.deb` | Ubuntu/Debian | `sudo dpkg -i polyglot-ai_*.deb` |
 | `.rpm` | Fedora/RHEL | `sudo rpm -i polyglot-ai-*.rpm` |
 | `.AppImage` | Any Linux | `chmod +x Polyglot_AI-*.AppImage && ./Polyglot_AI-*.AppImage` |
-| `.whl` | pip | `pip install polyglot_ai-*.whl` |
+| `.whl` | pip (pipx recommended) | `pipx install polyglot_ai-*.whl` |
+
+> **Note on the wheel install:** modern distros (Ubuntu 23.04+, Fedora 38+,
+> Debian 12+) ship Python with PEP 668's `externally-managed-environment`
+> marker, so a bare `pip install` errors with a hint to use a venv or
+> [`pipx`](https://pipx.pypa.io/). `pipx` is the friendliest path — it
+> isolates the install in its own venv and adds `polyglot-ai` to your
+> `PATH` automatically.
 
 ### From source
 

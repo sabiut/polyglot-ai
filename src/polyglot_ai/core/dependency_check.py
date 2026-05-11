@@ -487,6 +487,49 @@ DEPENDENCIES: list[Dependency] = [
         requires_root=False,
     ),
     Dependency(
+        key="codex",
+        name="OpenAI Codex CLI",
+        # ``codex`` is delivered via npm (``@openai/codex``) and
+        # invoked through ``npx`` by ``openai_oauth.run_codex_login``.
+        # The CLI itself isn't necessarily on ``PATH`` — what
+        # matters is that ``npx`` can resolve it. Detection via
+        # the alias matches both layouts.
+        command="codex",
+        aliases=("npx",),
+        purpose=(
+            "Sign in with ChatGPT subscription — the OAuth flow shells "
+            "out to ``npx @openai/codex login``."
+        ),
+        install_urls={
+            "debian": "npm install -g @openai/codex",
+            "fedora": "npm install -g @openai/codex",
+            "arch": "npm install -g @openai/codex",
+            "opensuse": "npm install -g @openai/codex",
+            "alpine": "npm install -g @openai/codex",
+            "unknown": "npm install -g @openai/codex",
+        },
+        # Userland — global npm installs land under the user's
+        # nvm / npm prefix on most setups.
+        requires_root=False,
+    ),
+    Dependency(
+        key="claude-cli",
+        name="Claude Code CLI",
+        command="claude",
+        purpose=(
+            "Sign in with Claude Pro / Max / Team subscription — the "
+            "OAuth flow shells out to ``claude login``."
+        ),
+        install_urls={
+            "debian": "https://claude.com/download",
+            "fedora": "https://claude.com/download",
+            "arch": "https://claude.com/download",
+            "opensuse": "https://claude.com/download",
+            "alpine": "https://claude.com/download",
+            "unknown": "https://claude.com/download",
+        },
+    ),
+    Dependency(
         key="git",
         name="Git",
         command="git",

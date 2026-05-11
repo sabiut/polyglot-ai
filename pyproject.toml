@@ -21,6 +21,12 @@ dependencies = [
     "PyQt6-QScintilla>=2.14",
     "openai>=1.30",
     "anthropic>=0.40",
+    # ``openai`` and ``anthropic`` both pull ``httpx`` in
+    # transitively today, but ``core/ai/openai_oauth.py`` does a
+    # top-level ``import httpx`` to construct its own client. Pin
+    # explicitly so a future SDK release dropping the transitive
+    # dep can't silently break provider registration at startup.
+    "httpx>=0.27",
     "google-genai>=1.0",
     "google-auth-oauthlib>=1.0",
     "google-auth-httplib2>=0.2",

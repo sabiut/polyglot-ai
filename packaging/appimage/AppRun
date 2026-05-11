@@ -6,11 +6,24 @@ export APPDIR
 # Use bundled Python
 export PATH="$APPDIR/usr/bin:$PATH"
 export PYTHONHOME="$APPDIR/usr"
-export PYTHONPATH="$APPDIR/usr/lib/python3.11/site-packages:$PYTHONPATH"
+
+# Detect the actual Python lib dir bundled inside the AppImage.
+# Previous versions hard-coded ``python3.11`` here, which broke
+# any AppImage built on a host with a different Python (3.10 on
+# old LTS, 3.12+ on rolling releases). The AppImage launched but
+# ``PYTHONHOME`` shadowed system site discovery and PyQt6 failed
+# to import. Glob for ``lib/python3.*`` and take the first match
+# — the venv builder only puts one Python in there.
+PY_LIB="$(ls -d "$APPDIR"/usr/lib/python3.* 2>/dev/null | head -n 1)"
+if [ -z "$PY_LIB" ]; then
+    echo "AppRun: bundled Python lib dir not found under $APPDIR/usr/lib" >&2
+    exit 1
+fi
+export PYTHONPATH="$PY_LIB/site-packages:$PYTHONPATH"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
 
-# Qt platform plugin path
-export QT_PLUGIN_PATH="$APPDIR/usr/lib/python3.11/site-packages/PyQt6/Qt6/plugins"
+# Qt platform plugin path — same version-agnostic resolution.
+export QT_PLUGIN_PATH="$PY_LIB/site-packages/PyQt6/Qt6/plugins"
 
 # Self-register a launcher entry on first run so the AppImage
 # shows up in the user's app menu without requiring appimaged or
@@ -26,27 +39,42 @@ export QT_PLUGIN_PATH="$APPDIR/usr/lib/python3.11/site-packages/PyQt6/Qt6/plugin
 if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
     USER_APPS="$HOME/.local/share/applications"
     USER_ICONS="$HOME/.local/share/icons/hicolor"
-    mkdir -p "$USER_APPS"
-    if [ -f "$APPDIR/polyglot-ai.desktop" ]; then
-        sed "s|Exec=polyglot-ai|Exec=$APPIMAGE|" \
-            "$APPDIR/polyglot-ai.desktop" > "$USER_APPS/polyglot-ai.desktop"
-    fi
-    for sz in 16 32 48 128 256 512; do
-        src="$APPDIR/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png"
-        if [ -f "$src" ]; then
-            mkdir -p "$USER_ICONS/${sz}x${sz}/apps"
-            cp -f "$src" "$USER_ICONS/${sz}x${sz}/apps/polyglot-ai.png"
+    # Marker so we don't re-run the slow ``update-desktop-database``
+    # + ``gtk-update-icon-cache`` calls on every launch — they
+    # spawn subprocesses and add 200-500ms of cold-start delay on
+    # HDD-backed laptops. First launch (or after the AppImage
+    # binary changes) writes the marker; subsequent launches skip
+    # everything in this branch.
+    MARKER="$HOME/.local/share/polyglot-ai/.appimage-registered"
+    MARKER_FOR="$(cat "$MARKER" 2>/dev/null)"
+    if [ "$MARKER_FOR" != "$APPIMAGE" ]; then
+        mkdir -p "$USER_APPS"
+        if [ -f "$APPDIR/polyglot-ai.desktop" ]; then
+            sed "s|Exec=polyglot-ai|Exec=$APPIMAGE|" \
+                "$APPDIR/polyglot-ai.desktop" > "$USER_APPS/polyglot-ai.desktop"
         fi
-    done
-    svg="$APPDIR/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg"
-    if [ -f "$svg" ]; then
-        mkdir -p "$USER_ICONS/scalable/apps"
-        cp -f "$svg" "$USER_ICONS/scalable/apps/polyglot-ai.svg"
+        for sz in 16 32 48 128 256 512; do
+            src="$APPDIR/usr/share/icons/hicolor/${sz}x${sz}/apps/polyglot-ai.png"
+            if [ -f "$src" ]; then
+                mkdir -p "$USER_ICONS/${sz}x${sz}/apps"
+                cp -f "$src" "$USER_ICONS/${sz}x${sz}/apps/polyglot-ai.png"
+            fi
+        done
+        svg="$APPDIR/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg"
+        if [ -f "$svg" ]; then
+            mkdir -p "$USER_ICONS/scalable/apps"
+            cp -f "$svg" "$USER_ICONS/scalable/apps/polyglot-ai.svg"
+        fi
+        command -v update-desktop-database >/dev/null 2>&1 && \
+            update-desktop-database -q "$USER_APPS" >/dev/null 2>&1 || true
+        command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+            gtk-update-icon-cache -f -t "$USER_ICONS" >/dev/null 2>&1 || true
+        # Record which AppImage path we registered for — if the
+        # user moves or replaces the AppImage, the path no longer
+        # matches and we re-register on the next launch.
+        mkdir -p "$(dirname "$MARKER")"
+        printf '%s\n' "$APPIMAGE" > "$MARKER"
     fi
-    command -v update-desktop-database >/dev/null 2>&1 && \
-        update-desktop-database -q "$USER_APPS" >/dev/null 2>&1 || true
-    command -v gtk-update-icon-cache >/dev/null 2>&1 && \
-        gtk-update-icon-cache -f -t "$USER_ICONS" >/dev/null 2>&1 || true
 fi
 
 exec "$APPDIR/usr/bin/python3" -m polyglot_ai.app "$@"

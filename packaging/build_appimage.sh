@@ -39,9 +39,37 @@ for sz in 16 32 48 128 256 512; do
 done
 mkdir -p "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 
-# Install the wheel
+# Pre-download every wheel into a sibling directory first, then
+# install with ``--no-index --find-links`` so the build itself is
+# the only step that needs network. The previous setup ran a bare
+# ``pip install`` against PyPI at build time; if the CI runner
+# lost network mid-build, the AppImage would silently embed a
+# partially-installed venv and ship to users. Mirrors the
+# offline-bundle pattern already used by .deb / .rpm.
+mkdir -p "$SCRIPT_DIR/appimage/wheels"
+echo "Pre-downloading wheels for offline AppImage install..."
 "$APPDIR/usr/bin/pip" install --upgrade pip
-"$APPDIR/usr/bin/pip" install "$PROJECT_DIR/dist/"*.whl
+"$APPDIR/usr/bin/pip" download \
+    --dest "$SCRIPT_DIR/appimage/wheels" \
+    --only-binary=:all: \
+    --platform manylinux2014_x86_64 \
+    --platform manylinux_2_17_x86_64 \
+    --platform manylinux_2_28_x86_64 \
+    --platform any \
+    "$PROJECT_DIR/dist/"*.whl \
+    || {
+        echo "Strict platform download failed; retrying with host resolver…"
+        "$APPDIR/usr/bin/pip" download \
+            --dest "$SCRIPT_DIR/appimage/wheels" \
+            "$PROJECT_DIR/dist/"*.whl
+    }
+
+# Install entirely from the bundled wheels — no live PyPI access.
+# ``--no-index`` forbids contacting PyPI and ``--find-links`` makes
+# the resolver use the bundled wheels exclusively.
+"$APPDIR/usr/bin/pip" install --no-index \
+    --find-links "$SCRIPT_DIR/appimage/wheels" \
+    "$PROJECT_DIR/dist/"*.whl
 
 # Copy desktop file and icons
 cp "$SCRIPT_DIR/appimage/polyglot-ai.desktop" "$APPDIR/"

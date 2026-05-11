@@ -272,6 +272,12 @@ def run_onboarding(window, settings, keyring_store, provider_manager, event_bus)
         onboarding = OnboardingDialog(window)
         if onboarding.exec():
             if onboarding.api_key:
-                keyring_store.store_key("openai", onboarding.api_key)
+                # Route the key to the right keyring slot based on
+                # the provider the user picked in the dropdown.
+                # Previous behaviour hardcoded "openai" — anyone
+                # with an Anthropic / Google / DeepSeek key ended
+                # up with their key stored under the wrong service
+                # name and the provider never loaded.
+                keyring_store.store_key(onboarding.api_key_provider, onboarding.api_key)
                 register_ai_providers(provider_manager, keyring_store, event_bus)
             safe_task(settings.set("app.onboarding_done", True), name="save_onboarding")

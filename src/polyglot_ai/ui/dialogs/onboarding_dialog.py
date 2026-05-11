@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -13,6 +14,23 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+# (display name, keyring slot, placeholder, "where to get a key" URL).
+# Order matters — the first entry is the default in the combo box.
+# Switching the dropdown rewrites the label, placeholder, and the
+# clickable "Get a key →" link below the field.
+_PROVIDER_CHOICES: list[tuple[str, str, str, str]] = [
+    ("OpenAI", "openai", "sk-...", "https://platform.openai.com/api-keys"),
+    (
+        "Anthropic (Claude)",
+        "anthropic",
+        "sk-ant-...",
+        "https://console.anthropic.com/settings/keys",
+    ),
+    ("Google (Gemini)", "google", "AIza...", "https://aistudio.google.com/apikey"),
+    ("DeepSeek", "deepseek", "sk-...", "https://platform.deepseek.com/api_keys"),
+]
 
 
 class OnboardingDialog(QDialog):
@@ -254,10 +272,36 @@ class OnboardingDialog(QDialog):
         layout.addLayout(or_row)
         layout.addSpacing(12)
 
-        # API key input
-        key_label = QLabel("OpenAI API Key:")
-        key_label.setStyleSheet("font-size: 12px; color: #bbb;")
-        layout.addWidget(key_label)
+        # Provider picker — the four supported providers in a
+        # single dropdown. The previous version hardcoded
+        # "OpenAI API Key" and dropped the key into the wrong
+        # keyring slot for anyone with an Anthropic / Google /
+        # DeepSeek key. Now the user picks which provider their
+        # key belongs to *first*, and the keyring write goes to
+        # the matching slot.
+        provider_row = QHBoxLayout()
+        provider_row.setSpacing(8)
+        provider_lbl = QLabel("Provider:")
+        provider_lbl.setStyleSheet("font-size: 12px; color: #bbb;")
+        provider_row.addWidget(provider_lbl)
+        self._provider_combo = QComboBox()
+        for display, _slot, _placeholder, _url in _PROVIDER_CHOICES:
+            self._provider_combo.addItem(display)
+        self._provider_combo.setStyleSheet(
+            "QComboBox { background: #161616; color: #d4d4d4; "
+            "border: 1px solid #3a3a3a; border-radius: 6px; "
+            "padding: 6px 10px; font-size: 12px; }"
+            "QComboBox::drop-down { border: none; }"
+        )
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        provider_row.addWidget(self._provider_combo, stretch=1)
+        layout.addLayout(provider_row)
+        layout.addSpacing(8)
+
+        # Key input — placeholder updates when the provider changes.
+        self._key_label = QLabel("OpenAI API Key:")
+        self._key_label.setStyleSheet("font-size: 12px; color: #bbb;")
+        layout.addWidget(self._key_label)
 
         self._key_input = QLineEdit()
         self._key_input.setPlaceholderText("sk-...")
@@ -269,12 +313,40 @@ class OnboardingDialog(QDialog):
         )
         layout.addWidget(self._key_input)
 
+        # "Get a key →" link — clickable hyperlink that opens the
+        # provider's API-key console in the user's default browser.
+        # The label uses HTML so the URL is rendered as a real link
+        # (non-technical users won't know what "platform.openai.com"
+        # is unless it's clickable).
+        self._key_url_label = QLabel()
+        self._key_url_label.setOpenExternalLinks(True)
+        self._key_url_label.setStyleSheet("font-size: 11px; color: #888; margin-top: 4px;")
+        layout.addWidget(self._key_url_label)
+
         skip_label = QLabel("You can skip this and configure later in Settings.")
         skip_label.setStyleSheet("font-size: 11px; color: #666; margin-top: 8px;")
         layout.addWidget(skip_label)
 
+        # Set initial state — defaults to the first entry (OpenAI).
+        self._on_provider_changed(0)
+
         layout.addStretch()
         return page
+
+    def _on_provider_changed(self, idx: int) -> None:
+        """Re-render the API-key field for the selected provider.
+
+        Called by the combo's ``currentIndexChanged`` signal and
+        once during construction to seed the initial state.
+        """
+        if not (0 <= idx < len(_PROVIDER_CHOICES)):
+            return
+        display, _slot, placeholder, url = _PROVIDER_CHOICES[idx]
+        self._key_label.setText(f"{display} API Key:")
+        self._key_input.setPlaceholderText(placeholder)
+        self._key_url_label.setText(
+            f'<a href="{url}" style="color:#0078d4;">Get a {display} API key →</a>'
+        )
 
     def _create_features_page(self) -> QWidget:
         page = QWidget()
@@ -427,8 +499,21 @@ class OnboardingDialog(QDialog):
     def _login_chatgpt(self) -> None:
         from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
 
-        if not OpenAIOAuthClient.is_codex_available():
-            self._chatgpt_status.setText("Node.js required. Install: sudo apt install nodejs npm")
+        # Three-state probe so the message matches the *actual*
+        # failure mode. Telling the user to install Node when Node
+        # is already installed (just broken) leaves them stuck.
+        availability = OpenAIOAuthClient.codex_availability()
+        if not availability.ok:
+            if availability.reason == "missing":
+                self._chatgpt_status.setText(
+                    "Node.js required. Install: sudo apt install nodejs npm"
+                )
+            else:  # "broken"
+                detail = (availability.detail or "")[:60]
+                self._chatgpt_status.setText(
+                    "npx is installed but errored. Run `npx --version` in a "
+                    f"terminal for details. {('(' + detail + '…)' if detail else '')}"
+                )
             self._chatgpt_status.setStyleSheet("font-size: 11px; color: #f44747;")
             return
 
@@ -493,3 +578,17 @@ class OnboardingDialog(QDialog):
     @property
     def api_key(self) -> str:
         return self._api_key
+
+    @property
+    def api_key_provider(self) -> str:
+        """Keyring slot for the chosen provider (``openai`` / ``anthropic`` / …).
+
+        Exposed so the caller can route the entered key to the
+        right keyring entry instead of always storing it under
+        ``openai``. Reads from the combo on demand so closing
+        without changing it still returns the default.
+        """
+        idx = self._provider_combo.currentIndex() if hasattr(self, "_provider_combo") else 0
+        if not (0 <= idx < len(_PROVIDER_CHOICES)):
+            idx = 0
+        return _PROVIDER_CHOICES[idx][1]

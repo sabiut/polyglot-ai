@@ -48,16 +48,34 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 
 # Hint that Arduino uploads need the user to be in the dialout
-# group. Posix-portable ``id -nG`` since ``getent group dialout``
-# might not be installed on minimal images.
-if ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw dialout; then
-    if [ -n "$SUDO_USER" ]; then
-        echo ""
-        echo "Heads up: to use the Arduino upload feature you'll need"
-        echo "to be in the 'dialout' group. Run:"
-        echo "    sudo usermod -aG dialout $SUDO_USER"
-        echo "and log out / back in."
-    fi
+# group. Resolve the target user via a small fallback chain
+# because graphical software-centres (gnome-software, KDE
+# Discover) run dpkg via polkit and leave ``$SUDO_USER`` empty —
+# the hint would silently never appear and the user would later
+# hit "Permission denied on /dev/ttyUSB0" with no context.
+#
+# Resolution order:
+#   1. ``$SUDO_USER`` (terminal-style ``sudo apt install ./…``)
+#   2. ``$PKEXEC_UID`` (polkit-mediated installs)
+#   3. ``logname`` (active TTY's login user)
+#   4. First non-system user from ``/etc/passwd`` (UID >= 1000)
+TARGET_USER="${SUDO_USER:-}"
+if [ -z "$TARGET_USER" ] && [ -n "${PKEXEC_UID:-}" ]; then
+    TARGET_USER="$(getent passwd "$PKEXEC_UID" 2>/dev/null | cut -d: -f1)"
+fi
+if [ -z "$TARGET_USER" ]; then
+    TARGET_USER="$(logname 2>/dev/null || true)"
+fi
+if [ -z "$TARGET_USER" ]; then
+    TARGET_USER="$(awk -F: '$3 >= 1000 && $3 < 65000 {print $1; exit}' /etc/passwd 2>/dev/null || true)"
+fi
+
+if [ -n "$TARGET_USER" ] && ! id -nG "$TARGET_USER" 2>/dev/null | grep -qw dialout; then
+    echo ""
+    echo "Heads up: to use the Arduino upload feature you'll need"
+    echo "to be in the 'dialout' group. Run:"
+    echo "    sudo usermod -aG dialout $TARGET_USER"
+    echo "and log out / back in."
 fi
 
 echo "Polyglot AI installed successfully."

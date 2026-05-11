@@ -5,6 +5,7 @@ Priority: optional
 Architecture: amd64
 Depends: python3 (>= 3.11),
  python3-venv,
+ python3-pip,
  libgl1,
  libegl1,
  libxcb-xinerama0,
@@ -22,8 +23,7 @@ Depends: python3 (>= 3.11),
  libxtst6
 Recommends: gnome-keyring | libsecret-1-0,
  git,
- arduino-cli,
- python3-pyqt6.qtwebengine
+ arduino-cli
 Maintainer: Polyglot AI Contributors
 Description: AI-powered coding assistant desktop app
  Polyglot AI is a desktop coding assistant for Linux that supports

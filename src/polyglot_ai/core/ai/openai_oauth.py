@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -36,6 +37,44 @@ DEFAULT_MODELS = [
     "gpt-5.5",
     "gpt-5.4",
 ]
+
+
+@dataclass(frozen=True)
+class CodexAvailability:
+    """Three-state result of probing for a working npx/Codex install.
+
+    ``ok=True`` means a Codex login attempt will at least reach
+    the OAuth flow. ``ok=False`` requires the dialog to surface
+    *different* messages depending on ``reason`` — telling the
+    user to install Node when Node *is* installed (just broken)
+    leaves them stuck.
+    """
+
+    ok: bool
+    reason: str  # one of: "ok", "missing", "broken"
+    detail: str  # short stderr/exception text for the broken case
+
+    @classmethod
+    def from_probe(cls) -> "CodexAvailability":
+        """Run ``npx --version`` with a 10s timeout and classify."""
+        try:
+            result = subprocess.run(["npx", "--version"], capture_output=True, timeout=10)
+        except FileNotFoundError:
+            # ``npx`` not on PATH at all — actual missing-Node case.
+            return cls(ok=False, reason="missing", detail="")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # ``npx`` exists but doesn't run (permission denied,
+            # hung, broken symlink). Treat as broken — the binary
+            # is there, something else is wrong.
+            return cls(ok=False, reason="broken", detail=str(exc)[:200])
+
+        if result.returncode == 0:
+            return cls(ok=True, reason="ok", detail="")
+        # ``npx`` ran and exited non-zero — broken install (bad npm
+        # cache, missing modules, EACCES on ~/.npm, etc.). Capture
+        # stderr so the dialog can quote it back.
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        return cls(ok=False, reason="broken", detail=stderr[:200])
 
 
 class OpenAIOAuthClient(AIProvider):
@@ -211,30 +250,32 @@ class OpenAIOAuthClient(AIProvider):
         """Return True iff ``npx`` is on PATH, answers within 10s, AND
         exits cleanly.
 
-        The previous implementation only checked that ``subprocess.run``
-        didn't raise — but a broken Node install (missing modules, bad
-        npm config, permission errors on the cache dir) causes ``npx``
-        to print to stderr and exit non-zero. Reporting "Codex
-        available" in that state misled the UI.
-
-        Narrow catch: ``OSError`` covers the "npx missing / not
-        executable" cases (FileNotFoundError, PermissionError) and
-        ``TimeoutExpired`` covers a hung invocation. Any other exception
-        is a bug and should surface.
+        Backward-compat wrapper around :meth:`codex_availability`.
+        Prefer that method for UI flows so the message can
+        differentiate "missing" from "broken".
         """
-        try:
-            result = subprocess.run(["npx", "--version"], capture_output=True, timeout=10)
-            if result.returncode != 0:
-                logger.debug(
-                    "npx --version exited %d: %s",
-                    result.returncode,
-                    result.stderr[:200].decode(errors="replace") if result.stderr else "",
-                )
-                return False
-            return True
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.debug("npx availability check failed: %s", exc)
-            return False
+        return CodexAvailability.from_probe().ok
+
+    @staticmethod
+    def codex_availability() -> "CodexAvailability":
+        """Three-state Codex/npx probe for UI flows.
+
+        Returns one of:
+
+        * ``ok=True`` — Node + npx work.
+        * ``ok=False`` with ``reason="missing"`` — ``npx`` isn't on
+          PATH at all. The fix is "install Node.js".
+        * ``ok=False`` with ``reason="broken"`` — ``npx`` is on PATH
+          but errored (broken npm cache, bad permissions on the
+          cache dir, corrupt symlinks). The fix is "run ``npx
+          --version`` in a terminal and look at the error" — telling
+          the user to install Node would just confuse them when
+          Node IS installed.
+
+        Separating the two halves means the dialog can show the
+        right call-to-action instead of a one-size-fits-all message.
+        """
+        return CodexAvailability.from_probe()
 
     def _get_headers(self) -> dict:
         return {
