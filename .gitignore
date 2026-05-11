@@ -54,3 +54,15 @@ recorded-test-raw.txt
 *.swp
 *.swo
 *~
+
+# Office-doc exports from AI skills (code reviews, design docs,
+# meeting notes, etc.) — these get created as throwaway outputs
+# at the repo root and should never be checked in. Source of
+# truth for any decisions captured this way lives in commit
+# messages, ADRs under docs/, or the issue tracker.
+*.docx
+*.pptx
+*.xlsx
+*.odt
+*.ods
+*.odp
