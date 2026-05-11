@@ -167,20 +167,10 @@ async def db_get_schema(args: dict) -> str:
     if not conn:
         return f"Error: Connection '{conn_name}' not found. Available: {', '.join(mgr.connection_names) or '(none)'}"
 
-    # Ensure connected
     try:
-        if conn.db_type == "sqlite" and not conn._sqlite_conn:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting to '{conn_name}': {msg}"
-        elif conn.db_type == "postgresql" and not conn._pg_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting to '{conn_name}': {msg}"
-        elif conn.db_type == "mysql" and not conn._mysql_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting to '{conn_name}': {msg}"
+        ok, msg = await conn.ensure_connected()
+        if not ok:
+            return f"Error connecting to '{conn_name}': {msg}"
     except Exception as e:
         return f"Error: {_sanitize_db_error(e)}"
 
@@ -224,20 +214,10 @@ async def db_query(args: dict) -> str:
     if not conn:
         return f"Error: Connection '{conn_name}' not found. Available: {', '.join(mgr.connection_names) or '(none)'}"
 
-    # Ensure connected
     try:
-        if conn.db_type == "sqlite" and not conn._sqlite_conn:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
-        elif conn.db_type == "postgresql" and not conn._pg_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
-        elif conn.db_type == "mysql" and not conn._mysql_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
+        ok, msg = await conn.ensure_connected()
+        if not ok:
+            return f"Error connecting: {msg}"
     except Exception as e:
         return f"Error: {_sanitize_db_error(e)}"
 
@@ -300,20 +280,10 @@ async def db_execute(args: dict) -> str:
             "Enable write access in the Database panel to run write statements."
         )
 
-    # Ensure connected
     try:
-        if conn.db_type == "sqlite" and not conn._sqlite_conn:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
-        elif conn.db_type == "postgresql" and not conn._pg_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
-        elif conn.db_type == "mysql" and not conn._mysql_pool:
-            ok, msg = await conn.connect()
-            if not ok:
-                return f"Error connecting: {msg}"
+        ok, msg = await conn.ensure_connected()
+        if not ok:
+            return f"Error connecting: {msg}"
     except Exception as e:
         return f"Error: {_sanitize_db_error(e)}"
 

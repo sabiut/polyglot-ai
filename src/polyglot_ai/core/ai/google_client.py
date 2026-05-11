@@ -26,7 +26,8 @@ class GoogleClient(AIProvider):
 
     def __init__(self, api_key: str, event_bus: EventBus) -> None:
         super().__init__(event_bus)
-        self._api_key = api_key
+        # Do not store the raw API key as an attribute — pass it directly to
+        # the SDK so it cannot appear in heap dumps or repr() output.
         self._client = genai.Client(api_key=api_key)
         self._model_cache = ModelListCache(DEFAULT_MODELS, "Google")
 
@@ -39,7 +40,6 @@ class GoogleClient(AIProvider):
         return "Google"
 
     def update_api_key(self, api_key: str) -> None:
-        self._api_key = api_key
         self._client = genai.Client(api_key=api_key)
 
     async def list_models(self) -> list[str]:
@@ -196,12 +196,13 @@ class GoogleClient(AIProvider):
             yield self._handle_stream_error(e)
 
     async def test_connection(self) -> tuple[bool, str]:
-        # The genai SDK's list() is synchronous, so wrap it in an async
-        # lambda for the shared helper. An empty-list case reports
-        # success-ish (connected but no models) — treat it the same as
-        # a successful connection rather than a failure, matching the
-        # other providers' "Connection successful" outcome.
+        # The genai SDK's models.list() is a synchronous blocking iterator
+        # (same as in list_models). Calling it directly on the event loop
+        # freezes the UI for ~1 s on a cold call. Run it on a worker
+        # thread via asyncio.to_thread, matching the pattern used above.
+        import asyncio as _asyncio
+
         async def _check() -> list[str]:
-            return list(self._client.models.list())
+            return await _asyncio.to_thread(lambda: list(self._client.models.list()))
 
         return await self._test_connection_via_list(_check)

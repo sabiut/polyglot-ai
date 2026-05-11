@@ -97,7 +97,8 @@ class Database:
         await self._run_migrations()
 
     async def _run_migrations(self) -> None:
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         current = await self._get_version()
 
         # Each migration is an explicit function for clarity and maintainability
@@ -229,7 +230,8 @@ class Database:
         Only accepts identifiers from the internal allowlist to prevent
         SQL injection if this method is ever called with external input.
         """
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         if table not in self._VALID_TABLES:
             raise ValueError(f"Invalid table name: {table}")
         if column not in self._VALID_COLUMNS:
@@ -239,7 +241,8 @@ class Database:
         return any(row[1] == column for row in rows)
 
     async def _get_version(self) -> int:
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         try:
             cursor = await self._conn.execute("SELECT MAX(version) FROM schema_version")
             row = await cursor.fetchone()
@@ -254,7 +257,8 @@ class Database:
 
     async def execute(self, sql: str, params: tuple = ()) -> aiosqlite.Cursor:
         """Execute a trusted SQL statement. Use parameterized queries only."""
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         if not isinstance(params, tuple):
             raise TypeError("params must be a tuple — use (value,) for single values")
         cursor = await self._conn.execute(sql, params)
@@ -263,7 +267,8 @@ class Database:
 
     async def execute_many(self, statements: list[tuple[str, tuple]]) -> None:
         """Execute multiple trusted statements in a single transaction."""
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         try:
             for sql, params in statements:
                 await self._conn.execute(sql, params)
@@ -274,7 +279,8 @@ class Database:
 
     async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
         """Fetch one row from a trusted SQL query."""
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         cursor = await self._conn.execute(sql, params)
         row = await cursor.fetchone()
         if row is None:
@@ -283,7 +289,8 @@ class Database:
 
     async def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
         """Fetch all rows from a trusted SQL query."""
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         cursor = await self._conn.execute(sql, params)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -461,7 +468,8 @@ class Database:
 
         Runs in a single transaction for atomicity and performance.
         """
-        assert self._conn is not None
+        if self._conn is None:
+            raise RuntimeError("Database not initialised — call await db.init() first")
         conv = await self.fetchone(
             "SELECT title, model FROM conversations WHERE id = ?",
             (conv_id,),
@@ -470,7 +478,8 @@ class Database:
             raise ValueError(f"Conversation {conv_id} not found")
 
         messages = await self.fetchall(
-            "SELECT id, role, content, tool_calls, tool_call_id, model, tokens_in, tokens_out "
+            "SELECT id, role, content, tool_calls, tool_call_id, model, tokens_in, tokens_out, "
+            "reasoning_content "
             "FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id",
             (conv_id, fork_message_id),
         )
@@ -503,8 +512,8 @@ class Database:
                 cursor2 = await self._conn.execute(
                     """INSERT INTO messages
                        (conversation_id, role, content, tool_calls, tool_call_id,
-                        model, tokens_in, tokens_out)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        model, tokens_in, tokens_out, reasoning_content)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         new_conv_id,
                         msg["role"],
@@ -514,6 +523,7 @@ class Database:
                         msg["model"],
                         msg["tokens_in"],
                         msg["tokens_out"],
+                        msg["reasoning_content"],
                     ),
                 )
                 new_msg_id = cursor2.lastrowid

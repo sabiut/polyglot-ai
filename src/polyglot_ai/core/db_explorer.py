@@ -92,6 +92,27 @@ class DatabaseConnection:
         self._mysql_pool = None  # aiomysql connection pool
         self._lock = asyncio.Lock()  # Prevent concurrent connect/disconnect/query
 
+    @property
+    def is_connected(self) -> bool:
+        """Return True if the underlying connection/pool is open."""
+        if self.db_type == "sqlite":
+            return self._sqlite_conn is not None
+        if self.db_type == "postgresql":
+            return self._pg_pool is not None
+        if self.db_type == "mysql":
+            return self._mysql_pool is not None
+        return False
+
+    async def ensure_connected(self) -> tuple[bool, str]:
+        """Connect if not already connected. Returns (success, message).
+
+        Callers should check the bool and surface the message on failure
+        rather than probing private connection attributes directly.
+        """
+        if self.is_connected:
+            return True, ""
+        return await self.connect()
+
     async def connect(self) -> tuple[bool, str]:
         """Test and establish connection. Returns (success, message)."""
         async with self._lock:

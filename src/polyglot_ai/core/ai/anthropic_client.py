@@ -263,18 +263,15 @@ class AnthropicClient(AIProvider):
                             yield self._tool_call_args_chunk(tidx, delta.partial_json)
 
                     elif event_type == "message_delta":
-                        if hasattr(event, "usage") and event.usage:
-                            reason = event.delta.stop_reason
-                            if reason == "tool_use":
-                                reason = "tool_calls"
-                            yield StreamChunk(
-                                finish_reason=reason,
-                                usage={
-                                    "prompt_tokens": 0,
-                                    "completion_tokens": event.usage.output_tokens,
-                                    "total_tokens": event.usage.output_tokens,
-                                },
-                            )
+                        # Emit finish_reason only — usage is intentionally omitted here.
+                        # get_final_message() below emits a complete chunk with both
+                        # prompt_tokens and completion_tokens. Emitting partial usage
+                        # here (prompt_tokens=0) caused double-counting of completion
+                        # tokens in any consumer that sums usage across chunks.
+                        reason = event.delta.stop_reason
+                        if reason == "tool_use":
+                            reason = "tool_calls"
+                        yield StreamChunk(finish_reason=reason)
 
                 # Get final usage while stream is still open
                 final_message = await stream.get_final_message()
