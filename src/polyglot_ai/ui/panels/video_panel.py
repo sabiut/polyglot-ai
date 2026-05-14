@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.core.async_utils import run_blocking, safe_task
 from polyglot_ai.core.dependency_check import find_executable
 from polyglot_ai.ui import theme_colors as tc
 
@@ -62,6 +63,41 @@ _VIDEO_FILTER = "Video files (*.mp4 *.mov *.mkv *.webm *.avi *.flv *.wmv *.m4v);
 # we hit the picker styling and avoids a confusing "not a video"
 # error after the fact.
 _VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".flv", ".wmv", ".m4v"}
+
+
+# Quick-action templates. Each chip prefills the prompt with a
+# concrete, AI-friendly instruction. The strings are deliberately
+# unambiguous (timecode placeholders use the format the AI is
+# trained on) so the AI can either run them as-is or treat them as
+# a clear starting point for follow-up dialogue.
+#
+# Ordering is value-by-frequency — Trim and Resize are by far the
+# most common ffmpeg requests in the wild, GIF/Subtitles less so.
+# Adding a chip is one tuple here; no other changes needed.
+QUICK_CHIPS: tuple[tuple[str, str, str], ...] = (
+    ("🎬", "Trim", "Trim from 0:00 to 0:30"),
+    (
+        "📐",
+        "Resize",
+        "Scale to 1080p, keep the aspect ratio (no letterboxing)",
+    ),
+    ("🎵", "Audio", "Extract just the audio as a 192 kbps MP3"),
+    (
+        "📦",
+        "Compress",
+        "Compress to roughly half the file size while keeping watchable quality",
+    ),
+    (
+        "🎞️",
+        "GIF",
+        "Convert to a high-quality GIF — max 480p wide, 10 fps, loop",
+    ),
+    (
+        "💬",
+        "Subtitles",
+        "Burn the subtitles from subs.srt into the video",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -393,14 +429,30 @@ class VideoPanel(QWidget):
     def _build_step2_prompt(self) -> _StepCard:
         card = _StepCard(2, "What to do")
 
+        # Quick-action chip row — one-click prompt templates for the
+        # most common operations. Clicking a chip REPLACES the prompt
+        # textarea contents rather than appending: chips are intended
+        # as "starting points", and the user can always edit before
+        # pressing Process. Wrapping rather than scrolling lets the
+        # row stay readable on narrow windows.
+        chips_label = QLabel("Quick actions")
+        chips_label.setStyleSheet(
+            f"color: {tc.get('text_muted')}; "
+            f"font-size: {tc.FONT_SM}px; "
+            f"background: transparent; padding-bottom: 2px;"
+        )
+        card.add_widget(chips_label)
+
+        chip_row = self._build_chip_row()
+        card.add_layout(chip_row)
+
         self._prompt_input = QTextEdit()
         self._prompt_input.setPlaceholderText(
-            "Describe the edit in plain language. Examples:\n"
+            "Describe the edit in plain language, or click a quick action above.\n\n"
+            "More examples:\n"
             "  • Trim from 0:30 to 1:15 and add a half-second fade-out\n"
-            "  • Scale to 1080p and convert to MP4 with H.264\n"
-            "  • Extract just the audio as a 192 kbps MP3\n"
-            "  • Burn the subtitles in subs.srt into the video\n"
-            "  • Crop to a 1:1 square centered on the frame"
+            "  • Crop to a 1:1 square centered on the frame\n"
+            "  • Rotate 90° clockwise"
         )
         self._prompt_input.setMinimumHeight(120)
         mono = QFont("Monospace", 11)
@@ -462,6 +514,67 @@ class VideoPanel(QWidget):
             f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
         )
 
+    def _chip_button_qss(self) -> str:
+        """QSS for the quick-action chips above the prompt textarea.
+
+        Lighter and rounder than the primary action buttons so they
+        read as "preset suggestions" rather than "submit" actions —
+        the eye lands on the green Process button as the actual
+        commit, with the chips as helpers above.
+        """
+        return (
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_subtle')}; "
+            f"border-radius: 14px; padding: 4px 12px; "
+            f"font-size: {tc.FONT_SM}px; font-weight: 500; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+            f"border-color: {tc.get('accent_primary')}; }}"
+            f"QPushButton:pressed {{ background: {tc.get('accent_primary')}; "
+            f"color: {tc.get('text_on_accent')}; }}"
+        )
+
+    def _build_chip_row(self):
+        """Build the wrap-friendly row of quick-action chips.
+
+        Uses a plain ``QHBoxLayout`` for the common case (chips fit
+        on one line). On a narrow window Qt's layout system will
+        clip rather than wrap — acceptable for v1 since the chip
+        count is small (~6) and the window is otherwise resizable.
+        Each chip prefills the prompt via :meth:`_apply_chip`.
+        """
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        for icon, label, template in QUICK_CHIPS:
+            btn = QPushButton(f"{icon}  {label}")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(self._chip_button_qss())
+            btn.setToolTip(template)
+            # Capture template by default-arg to dodge Python's
+            # late-binding closure trap that bites every for-loop +
+            # lambda combination.
+            btn.clicked.connect(lambda _checked=False, t=template: self._apply_chip(t))
+            row.addWidget(btn)
+        row.addStretch(1)
+        return row
+
+    def _apply_chip(self, template: str) -> None:
+        """Replace the prompt textarea contents with ``template``.
+
+        Replace, not append — chips are starting points for edits,
+        and appending would produce a confusing concatenation if the
+        user clicked two in a row. The user can always tweak the
+        text after the chip lands; the prompt textarea keeps focus
+        so the next keystroke continues the edit naturally.
+        """
+        self._prompt_input.setPlainText(template)
+        # Move the cursor to the end so users typing follow-up text
+        # land after the template instead of inside it.
+        cursor = self._prompt_input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._prompt_input.setTextCursor(cursor)
+        self._prompt_input.setFocus()
+
     # ── Handlers ───────────────────────────────────────────────────
 
     def _on_pick_video(self) -> None:
@@ -479,36 +592,96 @@ class VideoPanel(QWidget):
         """Set the active clip and refresh the UI.
 
         Shared by the picker dialog and the drag-and-drop drop
-        handler so both entry points produce identical state —
-        same metadata probe, same label rendering, same readiness
-        recompute. Resolves the path to absolute first so a
-        clipboard/drop relative path doesn't surprise the AI prompt
-        composer later.
+        handler so both entry points produce identical state.
+        Resolves the path to absolute first so a clipboard/drop
+        relative path doesn't surprise the AI prompt composer later.
+
+        ffprobe runs **off the GUI thread** via ``run_blocking`` —
+        normal media takes <100 ms but pathological inputs (4K HEVC
+        with broken indices, network-mounted files) can take seconds.
+        The label updates immediately with name+path; the metadata
+        line fills in when the probe returns.
         """
         self._input_path = path.expanduser().resolve()
-        # ffprobe is cheap (under ~100 ms for normal media); doing
-        # it inline keeps the picker→info-display step one mental
-        # beat. Falls back to ``None`` cleanly when ffprobe isn't
-        # installed.
-        self._input_metadata = probe_video(self._input_path)
+        # Metadata is cleared up front — the previous clip's
+        # numbers must not leak into the new clip's readout if the
+        # probe is slow or fails.
+        self._input_metadata = None
 
-        meta_html = ""
-        if self._input_metadata is not None:
+        # Optimistic UI: show name + path right away so the user
+        # gets immediate feedback. The metadata banner fills in
+        # later via ``_on_metadata_ready``.
+        self._render_input_label(metadata=None, probing=True)
+        self._refresh_process_button()
+
+        # Capture the target path so a stale probe (user picked a
+        # second file before the first one finished) doesn't
+        # overwrite the current state with the wrong metadata.
+        target = self._input_path
+        safe_task(self._probe_in_background(target), name="video_probe")
+
+    async def _probe_in_background(self, path: Path) -> None:
+        """Worker coroutine that probes ``path`` and hands the
+        result back to the GUI thread.
+
+        Uses ``run_blocking`` from ``async_utils`` so the synchronous
+        ``probe_video`` call runs in the default thread pool — same
+        pattern the Arduino board-detector and other panels use.
+        """
+        metadata = await run_blocking(probe_video, path)
+        # Stale-probe guard: if the user picked another file while
+        # this one was probing, the cached ``self._input_path`` will
+        # have changed. Drop the result on the floor in that case.
+        if self._input_path != path:
+            logger.debug("probe_video: discarding stale result for %s", path)
+            return
+        self._on_metadata_ready(metadata)
+
+    def _on_metadata_ready(self, metadata: VideoMetadata | None) -> None:
+        """Slot invoked when the background ffprobe call returns."""
+        self._input_metadata = metadata
+        self._render_input_label(metadata=metadata, probing=False)
+
+    def _render_input_label(
+        self,
+        *,
+        metadata: VideoMetadata | None,
+        probing: bool,
+    ) -> None:
+        """Paint the input-file label.
+
+        Three states:
+        - ``probing=True`` → show name + path + a muted "probing…" hint
+        - ``metadata=None`` (probe done, no metadata) → just name + path
+        - ``metadata`` present → name + path + the green metadata line
+        """
+        assert self._input_path is not None
+        small = tc.FONT_SM
+        muted = tc.get("text_muted")
+        accent = tc.get("accent_primary")
+
+        if probing:
             meta_html = (
-                f"<br><span style='color:{tc.get('accent_primary')}; "
-                f"font-size:{tc.FONT_SM}px;'>"
-                f"{self._input_metadata.short_summary()}</span>"
+                f"<br><span style='color:{muted}; font-size:{small}px;'>"
+                "Probing video metadata…</span>"
             )
+        elif metadata is not None:
+            meta_html = (
+                f"<br><span style='color:{accent}; font-size:{small}px;'>"
+                f"{metadata.short_summary()}</span>"
+            )
+        else:
+            meta_html = ""
+
         self._input_label.setText(
             f"<b>{self._input_path.name}</b>"
-            f"<br><span style='color:{tc.get('text_muted')}; "
-            f"font-size:{tc.FONT_SM}px;'>{self._input_path}</span>"
+            f"<br><span style='color:{muted}; font-size:{small}px;'>"
+            f"{self._input_path}</span>"
             f"{meta_html}"
         )
         self._input_label.setStyleSheet(
             f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent;"
         )
-        self._refresh_process_button()
 
     def _on_clear_input(self) -> None:
         self._input_path = None
@@ -535,19 +708,26 @@ class VideoPanel(QWidget):
     # weird cases on load.
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        # No URL payload at all (text drag, internal Qt drag, etc.) —
+        # explicitly reject so the event bubbles to a parent that
+        # might want it. The earlier ``return`` left the event in
+        # an indeterminate state and the drop indicator stayed on
+        # screen until the user moved off the widget.
         if not event.mimeData().hasUrls():
+            event.ignore()
             return
         for url in event.mimeData().urls():
             local = url.toLocalFile()
             if local and Path(local).suffix.lower() in _VIDEO_EXTS:
                 event.acceptProposedAction()
                 return
-        # No video found in the drop — let the event fall through
-        # in case a child widget wants it.
+        # URLs present but none look like videos — let the event
+        # fall through in case a child widget wants it.
         event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         if not event.mimeData().hasUrls():
+            event.ignore()
             return
         for url in event.mimeData().urls():
             local = url.toLocalFile()
@@ -697,25 +877,38 @@ class VideoPanel(QWidget):
         )
 
     def _raise_chat_window(self) -> None:
+        """Bring the main window forward and switch to the Chat tab.
+
+        Failures here aren't fatal — the workflow command is already
+        prefilled in the chat panel, so even if we can't visually
+        raise the window, the user still gets their result by
+        pressing Alt+Tab to the main window. We log so the silent
+        failure is debuggable instead of mysterious, and skip the
+        toast-style status feed update because the user's already
+        getting the "Sent to AI" confirmation right after this call.
+        """
         host = self.window()
         parent = host.parent() if host is not None else None
         main_window = parent if parent is not None else None
         if main_window is None:
+            logger.debug("video_panel: no parent main window — skipping raise")
             return
-        # Activate the chat tab if MainWindow has the helper.
+        # Activate the chat tab if MainWindow has the helper. Try
+        # both name conventions — older code used ``_show_chat_tab``,
+        # newer code might expose ``show_chat_tab`` publicly.
         for attr in ("_show_chat_tab", "show_chat_tab"):
             fn = getattr(main_window, attr, None)
             if callable(fn):
                 try:
                     fn()
                 except Exception:
-                    pass
+                    logger.exception("video_panel: %s() failed while raising chat tab", attr)
                 break
         try:
             main_window.raise_()
             main_window.activateWindow()
         except Exception:
-            pass
+            logger.exception("video_panel: failed to activate main window")
 
     def _find_chat_panel(self):
         """Walk the parent chain to the chat panel.
