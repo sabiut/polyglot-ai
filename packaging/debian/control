@@ -23,7 +23,11 @@ Depends: python3 (>= 3.11),
  libxtst6
 Recommends: gnome-keyring | libsecret-1-0,
  git,
- arduino-cli
+ arduino-cli,
+ ffmpeg,
+ gstreamer1.0-plugins-good,
+ gstreamer1.0-plugins-bad,
+ gstreamer1.0-libav
 Maintainer: Polyglot AI Contributors
 Description: AI-powered coding assistant desktop app
  Polyglot AI is a desktop coding assistant for Linux that supports

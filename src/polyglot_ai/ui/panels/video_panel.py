@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -48,6 +49,7 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.async_utils import run_blocking, safe_task
 from polyglot_ai.core.dependency_check import find_executable
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.widgets.video_preview import VideoPreviewWidget
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +347,11 @@ class VideoPanel(QWidget):
         # and in the AI prompt sent on Process (so the model can
         # quote duration / resolution back without having to ask).
         self._input_metadata: VideoMetadata | None = None
+        # Latch for the optional preview widget. ``True`` means a
+        # previous construction failed (e.g. missing gstreamer
+        # plugins) — don't keep retrying on every load. Set by
+        # ``_ensure_preview``.
+        self._preview_init_failed = False
         # Accept drag-and-drop of video files anywhere on the
         # panel. Quicker than the picker for the common case
         # (drag from a file manager). The actual filtering happens
@@ -424,7 +431,45 @@ class VideoPanel(QWidget):
 
         button_row.addStretch(1)
         card.add_layout(button_row)
+
+        # Inline preview + trim slider — hidden until a clip is
+        # loaded so the empty state doesn't show a black rectangle.
+        # The widget is created lazily (and only constructed once)
+        # because QMediaPlayer pulls in QtMultimedia / gstreamer at
+        # import time; users who never load a clip pay zero cost.
+        self._preview: VideoPreviewWidget | None = None
+        self._preview_container = QWidget()
+        preview_layout = QVBoxLayout(self._preview_container)
+        preview_layout.setContentsMargins(0, 8, 0, 0)
+        preview_layout.setSpacing(0)
+        self._preview_container.setVisible(False)
+        card.add_widget(self._preview_container)
         return card
+
+    def _ensure_preview(self) -> VideoPreviewWidget | None:
+        """Lazy-construct the preview widget on first use.
+
+        Returns ``None`` when QtMultimedia or gstreamer plugins
+        aren't available so the rest of the panel keeps working —
+        the user just doesn't get an inline preview. Failures are
+        logged once; subsequent calls return ``None`` cheaply.
+        """
+        if self._preview is not None:
+            return self._preview
+        if self._preview_init_failed:
+            return None
+        try:
+            self._preview = VideoPreviewWidget(self._preview_container)
+            self._preview.trim_confirmed.connect(self._on_trim_confirmed)
+            self._preview.playback_error.connect(self._on_preview_error)
+            layout = self._preview_container.layout()
+            assert layout is not None
+            layout.addWidget(self._preview)
+            return self._preview
+        except Exception:
+            logger.exception("video_panel: failed to construct preview widget")
+            self._preview_init_failed = True
+            return None
 
     def _build_step2_prompt(self) -> _StepCard:
         card = _StepCard(2, "What to do")
@@ -641,6 +686,71 @@ class VideoPanel(QWidget):
         """Slot invoked when the background ffprobe call returns."""
         self._input_metadata = metadata
         self._render_input_label(metadata=metadata, probing=False)
+        # Hand the file off to the inline preview now that we've
+        # at least confirmed it's a real path (whether or not
+        # ffprobe parsed it cleanly). If preview construction
+        # fails the container stays hidden — the rest of the
+        # panel keeps working.
+        self._load_preview()
+
+    def _load_preview(self) -> None:
+        """Show the preview widget for the current clip.
+
+        Lazy-constructs the widget on first call so users who
+        never load a video pay nothing for the QtMultimedia /
+        gstreamer import cost. Stays hidden when construction
+        fails (e.g. missing codec plugins) — the panel still
+        works, the user just doesn't get inline playback.
+        """
+        if self._input_path is None:
+            self._preview_container.setVisible(False)
+            return
+        preview = self._ensure_preview()
+        if preview is None:
+            self._preview_container.setVisible(False)
+            return
+        preview.load(self._input_path)
+        self._preview_container.setVisible(True)
+
+    def _on_trim_confirmed(self, start_ms: int, end_ms: int) -> None:
+        """The preview widget's "Use trim" button was clicked.
+
+        Replace the prompt with a concrete "Trim from X to Y"
+        instruction that matches the chip-template style. The
+        user can still edit before pressing Process — this is
+        a fast path to a precise instruction without typing
+        timecodes by hand.
+        """
+        # Reuse the helper from this module so the format matches
+        # the metadata banner / VideoMetadata.short_summary output.
+        start_tc = _format_duration(start_ms / 1000)
+        end_tc = _format_duration(end_ms / 1000)
+        self._prompt_input.setPlainText(f"Trim from {start_tc} to {end_tc}")
+        # Move the cursor to the end so any follow-up typing
+        # extends the instruction rather than splitting it.
+        cursor = self._prompt_input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._prompt_input.setTextCursor(cursor)
+        self._append_status(
+            f"Trim {start_tc} → {end_tc} set as the edit. Adjust the prompt or press Process.",
+            kind="info",
+        )
+
+    def _on_preview_error(self, message: str) -> None:
+        """The media player reported a decode / codec / source error.
+
+        Bubble it to the status feed so the user sees the cause
+        ("codec not supported", "file not found", etc.) instead of
+        a silent black rectangle. The panel can still process the
+        clip — the AI plans ffmpeg server-side and ffmpeg may
+        well succeed even when Qt's gstreamer pipeline can't
+        preview the file.
+        """
+        self._append_status(
+            f"Inline preview can't play this file: {message}. "
+            "ffmpeg may still be able to edit it — the preview is optional.",
+            kind="warn",
+        )
 
     def _render_input_label(
         self,
@@ -696,6 +806,13 @@ class VideoPanel(QWidget):
             f"color: {tc.get('text_secondary')}; "
             f"font-size: {tc.FONT_MD}px; background: transparent;"
         )
+        # Tear down preview state and hide the widget — no clip,
+        # no preview. The widget itself is kept around for the
+        # next load so we don't repeatedly pay the QMediaPlayer
+        # construction cost.
+        if self._preview is not None:
+            self._preview.clear()
+        self._preview_container.setVisible(False)
         self._refresh_process_button()
 
     # ── Drag-and-drop ──────────────────────────────────────────────
@@ -956,7 +1073,12 @@ class VideoWindow(QWidget):
     def __init__(self, panel: VideoPanel, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("Video Editor — Polyglot AI")
-        self.resize(960, 760)
+        # Slightly taller default than the pre-preview version: the
+        # inline preview adds ~270 px when a clip is loaded, and a
+        # window that comes up showing scrollbars on first launch
+        # reads as cramped. The scroll area still kicks in if the
+        # user shrinks the window below this.
+        self.resize(960, 900)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if parent is not None:
             icon = parent.windowIcon()
@@ -966,7 +1088,25 @@ class VideoWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(panel)
+
+        # The panel content can exceed window height once a clip is
+        # loaded (preview + chips + prompt + status feed). Wrap it
+        # in a scroll area so the user can always reach the Process
+        # button instead of fighting a clipped layout.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(panel)
+        layout.addWidget(scroll)
+
+        # Forward drag-and-drop from the window down to the panel.
+        # Drops on the QScrollArea's viewport reach the panel
+        # directly via Qt's hit-testing, but drops on the
+        # scrollbars or title-bar area would otherwise be lost.
+        # Setting acceptDrops on the window + delegating in
+        # ``dragEnterEvent`` / ``dropEvent`` covers both cases.
+        self.setAcceptDrops(True)
+
         self._panel = panel
 
         # Friendly hint if ffmpeg is missing — first-time visitors
@@ -988,3 +1128,15 @@ class VideoWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    # Drag-drop forwarding — delegate to the wrapped panel so the
+    # user can drop a clip on the window chrome / scrollbars too,
+    # not just on the panel viewport. The panel's own
+    # ``dragEnterEvent`` / ``dropEvent`` already handle the actual
+    # filtering and load.
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 — Qt signature
+        self._panel.dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 — Qt signature
+        self._panel.dropEvent(event)

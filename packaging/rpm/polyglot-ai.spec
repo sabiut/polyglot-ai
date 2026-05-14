@@ -28,6 +28,18 @@ Requires:       libXtst
 Recommends:     gnome-keyring
 Recommends:     git
 Recommends:     arduino-cli
+# Video editor: ffmpeg drives the actual edits, gstreamer plugins
+# back the inline preview's QtMultimedia pipeline. ``Recommends``
+# rather than ``Requires`` so users who never touch the video
+# panel don't drag in the codecs.
+Recommends:     ffmpeg
+Recommends:     gstreamer1-plugins-good
+Recommends:     gstreamer1-plugins-bad-free
+# libav plugins live in RPM Fusion (not the default Fedora repos)
+# and ship some patent-encumbered codecs. Marking as Recommends
+# means dnf will pull them in if RPM Fusion is enabled and ignore
+# them otherwise — safe default behaviour.
+Recommends:     gstreamer1-libav
 BuildArch:      x86_64
 
 %description

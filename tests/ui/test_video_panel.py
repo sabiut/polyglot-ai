@@ -552,3 +552,66 @@ def test_raise_chat_window_handles_no_parent(panel):
     # parent. The handler should detect that and return without
     # raising.
     panel._raise_chat_window()  # No assert — just must not raise.
+
+
+# ── Trim confirmation flow ─────────────────────────────────────────
+
+
+def test_trim_confirmed_fills_prompt(panel):
+    """When the preview widget emits ``trim_confirmed`` with ms
+    bounds, the panel's prompt textarea ends up with a "Trim from
+    X to Y" instruction matching the chip-template style."""
+    # 0:30 → 1:15 in milliseconds
+    panel._on_trim_confirmed(30_000, 75_000)
+    assert panel._prompt_input.toPlainText() == "Trim from 0:30 to 1:15"
+
+
+def test_trim_confirmed_renders_hours_for_long_clips(panel):
+    """A trim spanning into the hour range must format with the
+    ``H:MM:SS`` form (not show a stale ``M:SS`` from a shorter
+    span). Catches a regression in the formatter wiring."""
+    panel._on_trim_confirmed(0, 3_661_000)  # 1:01:01
+    assert panel._prompt_input.toPlainText() == "Trim from 0:00 to 1:01:01"
+
+
+def test_trim_confirmed_replaces_prior_prompt(panel):
+    """If the user had typed a prompt and then dragged trim
+    handles, clicking "Use trim" overwrites rather than appends —
+    same "replace not append" semantics as the chip clicks."""
+    panel._prompt_input.setPlainText("Convert to MP4 and add subtitles")
+    panel._on_trim_confirmed(10_000, 40_000)
+    assert panel._prompt_input.toPlainText() == "Trim from 0:10 to 0:40"
+
+
+def test_trim_confirmed_writes_status_feedback(panel):
+    """The status feed should confirm the trim was set so the user
+    can see something landed even if the prompt textarea is
+    scrolled out of view."""
+    panel._on_trim_confirmed(15_000, 45_000)
+    status = panel._status.toPlainText()
+    assert "0:15" in status
+    assert "0:45" in status
+
+
+def test_preview_load_skipped_when_widget_construction_fails(panel, tmp_path):
+    """If QtMultimedia / gstreamer can't be initialised the panel
+    must keep working with the preview container hidden — not
+    crash the whole panel."""
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"\x00" * 100)
+    panel._input_path = f
+    panel._preview_init_failed = True  # Force the fail path
+    panel._load_preview()
+    assert panel._preview_container.isVisible() is False
+
+
+def test_clear_input_hides_preview(panel, tmp_path):
+    """Resetting the input clears the preview widget AND hides
+    the container so the wizard returns to a clean empty state."""
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"\x00" * 100)
+    panel._input_path = f
+    panel._preview_container.setVisible(True)
+    panel._on_clear_input()
+    assert panel._preview_container.isVisible() is False
+    assert panel._input_path is None
