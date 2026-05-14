@@ -17,9 +17,19 @@ jobs:
           python-version: "3.11"
 
       - name: Install Qt system dependencies
+        # libpulse0 + libxslt1.1 are pulled in for QtMultimedia /
+        # QtWebEngine respectively — without them the module-level
+        # imports in video_preview.py would short-circuit to the
+        # "no preview available" stub on CI and the multimedia
+        # tests would be skipped silently. Installing the libs
+        # lets CI exercise the full feature surface that ships in
+        # the .deb / .rpm / AppImage releases.
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 >/dev/null 2>&1
+          sudo apt-get install -y -qq \
+            libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 \
+            libpulse0 libxslt1.1 \
+            >/dev/null 2>&1
 
       - name: Install dependencies
         run: |

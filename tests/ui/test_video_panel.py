@@ -663,6 +663,40 @@ def test_load_preview_shows_pop_out_window(panel, tmp_path):
     assert pw.isVisible() is True
 
 
+def test_player_window_short_circuits_when_qt_multimedia_missing(panel, tmp_path):
+    """On systems without QtMultimedia (typical: a stripped Linux
+    install missing ``libpulse.so.0``, or a CI runner without the
+    audio stack), the wizard must keep working for AI-planned
+    ffmpeg edits — the preview pop-out simply becomes unavailable.
+
+    Regression: an earlier shape had ``video_preview.py`` doing
+    unconditional ``from PyQt6.QtMultimedia import …`` at module
+    top, which took the whole APP down (not just the video
+    editor) on a missing-libpulse system. The fix moved the
+    import behind a try/except and a ``QT_MULTIMEDIA_AVAILABLE``
+    flag; this test pins the flag-respecting short-circuit so a
+    future commit can't re-introduce the same fragility.
+    """
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"\x00" * 100)
+    panel._input_path = f
+
+    # Simulate the missing-multimedia state without actually
+    # uninstalling the lib — flip the module's flag for the
+    # duration of the test.
+    with patch(
+        "polyglot_ai.ui.panels.video_panel.QT_MULTIMEDIA_AVAILABLE",
+        False,
+    ):
+        # Must NOT raise even though we're trying to load a clip.
+        panel._load_preview()
+        # No player window constructed.
+        assert panel._player_window is None
+        # And the latch is set so subsequent loads short-circuit
+        # cheaply without retrying the import.
+        assert panel._preview_init_failed is True
+
+
 # ── VideoWindow lifecycle ──────────────────────────────────────────
 
 

@@ -49,7 +49,10 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.async_utils import run_blocking, safe_task
 from polyglot_ai.core.dependency_check import find_executable
 from polyglot_ai.ui import theme_colors as tc
-from polyglot_ai.ui.widgets.video_preview import VideoPlayerWindow
+from polyglot_ai.ui.widgets.video_preview import (
+    QT_MULTIMEDIA_AVAILABLE,
+    VideoPlayerWindow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +458,20 @@ class VideoPanel(QWidget):
         if self._player_window is not None:
             return self._player_window
         if self._preview_init_failed:
+            return None
+        # Short-circuit on systems where QtMultimedia itself failed
+        # to import (e.g. missing ``libpulse`` on a stripped Linux,
+        # CI runner without the audio stack installed). Without this
+        # guard we'd fall through to constructing ``VideoPlayerWindow``
+        # which raises a defence-in-depth RuntimeError — the
+        # ``_preview_init_failed`` latch would catch it but the log
+        # noise is loud. Cleaner to set the latch and bail early.
+        if not QT_MULTIMEDIA_AVAILABLE:
+            logger.info(
+                "video_panel: QtMultimedia unavailable — wizard works "
+                "for ffmpeg edits but the player pop-out is disabled."
+            )
+            self._preview_init_failed = True
             return None
         try:
             # ``self.window()`` gives the wizard's top-level

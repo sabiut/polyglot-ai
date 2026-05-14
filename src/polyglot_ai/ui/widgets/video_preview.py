@@ -37,8 +37,6 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -52,6 +50,52 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
+
+
+# QtMultimedia is loaded lazily — the underlying Qt6 multimedia
+# module depends on system libraries (libpulse on Linux,
+# AVFoundation on macOS) that may not be installed on stripped /
+# headless boxes (CI runners, minimal Docker images, server
+# distros). A bare ``from PyQt6.QtMultimedia import …`` at module
+# top would take down the WHOLE app — not just the video editor —
+# on those systems. The flag lets every video-only code path
+# check availability without paying the import cost up front.
+try:
+    from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+    from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+    QT_MULTIMEDIA_AVAILABLE = True
+except ImportError as _multimedia_import_error:
+    logger.warning(
+        "PyQt6 multimedia stack not available — video preview disabled. "
+        "Reason: %s. The video editor wizard still works for AI-planned "
+        "ffmpeg edits; only the inline player pop-out is unavailable.",
+        _multimedia_import_error,
+    )
+    QT_MULTIMEDIA_AVAILABLE = False
+
+    # Stub classes so the rest of this module's ``class X(QVideoWidget)``
+    # definitions and type annotations keep working. Any actual call
+    # site routes through ``QT_MULTIMEDIA_AVAILABLE`` first and never
+    # reaches a stub at runtime — the stub raising on instantiation
+    # is a defence-in-depth safeguard, not a normal path.
+    class _MultimediaUnavailable:
+        """Stub that raises when an absent multimedia class is used."""
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise RuntimeError(
+                "PyQt6 multimedia is not installed on this system. "
+                "Install libpulse (Linux) or the appropriate platform "
+                "media stack and reinstall PyQt6-Multimedia."
+            )
+
+    QAudioOutput = _MultimediaUnavailable  # type: ignore[misc,assignment]
+    QMediaPlayer = _MultimediaUnavailable  # type: ignore[misc,assignment]
+    # QVideoWidget needs to be subclass-able for ``_ClickableVideoWidget``
+    # to import, so substitute a QWidget. Subclassing produces a normal
+    # QWidget that raises if anyone instantiates ``_ClickableVideoWidget``
+    # via the explicit availability guard below.
+    QVideoWidget = QWidget  # type: ignore[misc,assignment]
 
 
 # ── RangeSlider ────────────────────────────────────────────────────
@@ -381,6 +425,20 @@ class VideoPreviewWidget(QWidget):
     playback_error = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        # Hard-fail with a clear message when QtMultimedia isn't
+        # available — callers should check ``QT_MULTIMEDIA_AVAILABLE``
+        # before constructing this widget (see VideoPanel's
+        # ``_ensure_player_window``). The check here is defence in
+        # depth so a misuse produces an actionable error instead of
+        # a confusing AttributeError later.
+        if not QT_MULTIMEDIA_AVAILABLE:
+            raise RuntimeError(
+                "VideoPreviewWidget requires PyQt6 multimedia, which "
+                "isn't available on this system (typical cause: "
+                "``libpulse`` missing). The video editor wizard works "
+                "for AI-planned ffmpeg edits without it; only the live "
+                "preview is unavailable."
+            )
         super().__init__(parent)
         self._build_ui()
         self._wire_player()
