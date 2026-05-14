@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence
+import logging
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -38,6 +39,41 @@ from polyglot_ai.ui.panels.test_panel import TestPanel
 from polyglot_ai.ui.panels.today_panel import TodayPanel
 from polyglot_ai.ui.widgets.activity_bar import ActivityBar
 from polyglot_ai.ui.widgets.command_palette import CommandPalette
+
+logger = logging.getLogger(__name__)
+
+
+def _window_is_alive(widget) -> bool:
+    """True iff ``widget`` is a still-valid (not-deleted) QWidget.
+
+    The lazy-window pattern used for Arduino, the video editor, and
+    the Claude (subscription) browser caches a constructed window
+    on ``self`` and reuses it on subsequent clicks. The pattern
+    breaks silently if Qt deletes the underlying C++ object out
+    from under the cached Python reference: ``is None`` still
+    returns False (the Python ref exists) but ``show_and_raise()``
+    raises ``RuntimeError: wrapped C/C++ object … has been deleted``
+    and the user sees no window at all.
+
+    ``sip.isdeleted`` is the canonical probe for this. We wrap it
+    in this helper so call-sites read as ``if not
+    _window_is_alive(self._x): self._x = X(...)`` — a single guard
+    that handles both "never constructed" and "constructed but
+    Qt-deleted".
+
+    Falls back to a plain ``is not None`` check when ``sip`` isn't
+    importable for any reason (cross-binding edge case) — same
+    behaviour as the original code, so the helper never makes
+    things worse than the bare ``is None`` check it replaces.
+    """
+    if widget is None:
+        return False
+    try:
+        from PyQt6 import sip
+
+        return not sip.isdeleted(widget)
+    except (ImportError, TypeError):
+        return True
 
 
 class MainWindow(QMainWindow):
@@ -311,9 +347,13 @@ class MainWindow(QMainWindow):
         and stores it on ``self`` so re-clicks raise the same window
         instead of spawning a fresh blank one — the kid keeps their
         starter selection, language toggle, and status feed across
-        opens.
+        opens. ``_window_is_alive`` defends against the case where
+        the cached widget has been C++-deleted (Qt parent torn down,
+        WA_DeleteOnClose somewhere upstream, etc.) — without that
+        check, ``show_and_raise`` would raise ``RuntimeError`` and
+        the user would see no window at all.
         """
-        if self._arduino_window is None:
+        if not _window_is_alive(self._arduino_window):
             self._arduino_window = ArduinoWindow(self._arduino_panel, self)
         self._arduino_window.show_and_raise()
 
@@ -325,11 +365,60 @@ class MainWindow(QMainWindow):
         heavy step cards. Re-clicks raise the same window so the
         user's loaded clip and prompt survive a close → reopen
         cycle.
+
+        Four independent guards stack up so the user never ends up
+        with a second window in the foreground:
+
+        1. ``_window_is_alive`` rebuilds cleanly if Qt has deleted
+           the cached widget out from under us.
+        2. **Tree sweep**: before constructing fresh, walk
+           ``MainWindow``'s widget tree for any orphaned
+           ``VideoWindow`` and reuse it. This catches the case the
+           cached-reference check can't see — e.g. a reload path,
+           a second handler accidentally constructing one, or any
+           future code that creates a VideoWindow outside of
+           ``_show_video_window``. Belt-and-suspenders against the
+           "two Video Editor windows on screen" bug.
+        3. ``VideoWindow``'s own ``closeEvent`` calls ``hide()``
+           (not delete) so the cached reference stays valid across
+           a close → reopen cycle.
+        4. A reactive sweep at the end forcibly hides any *extra*
+           VideoWindows that somehow exist (the user clicked too
+           fast, a reload-path duplicated, etc.) so the user only
+           ever sees one — the canonical cached instance.
         """
-        if self._video_panel is None:
+        # Tree sweep: any pre-existing VideoWindow (whether parented
+        # to MainWindow or not) is reusable as our cached instance.
+        # ``findChildren`` returns every QObject descendant matching
+        # the type — even ones that lost their cache reference.
+        if not _window_is_alive(self._video_window):
+            existing = self.findChildren(VideoWindow)
+            if existing:
+                self._video_window = existing[0]
+                # Adopt the panel from the existing window so a fresh
+                # construction below doesn't replace it with an empty
+                # one — preserves whatever clip / prompt the user had.
+                self._video_panel = existing[0].panel
+
+        if not _window_is_alive(self._video_panel):
             self._video_panel = VideoPanel()
-        if self._video_window is None:
+        if not _window_is_alive(self._video_window):
             self._video_window = VideoWindow(self._video_panel, self)
+
+        # Reactive sweep: if more than one VideoWindow ended up
+        # existing (any path we didn't anticipate), keep our
+        # canonical one and forcibly close the rest. ``deleteLater``
+        # rather than ``close`` so we tear them down on the next
+        # event-loop tick instead of mid-iteration.
+        for w in self.findChildren(VideoWindow):
+            if w is not self._video_window:
+                logger.warning(
+                    "video_panel: found orphan VideoWindow at %r — closing it",
+                    w,
+                )
+                w.hide()
+                w.deleteLater()
+
         self._video_window.show_and_raise()
 
     def _on_show_onboarding(self) -> None:

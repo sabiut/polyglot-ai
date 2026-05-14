@@ -49,7 +49,7 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.async_utils import run_blocking, safe_task
 from polyglot_ai.core.dependency_check import find_executable
 from polyglot_ai.ui import theme_colors as tc
-from polyglot_ai.ui.widgets.video_preview import VideoPreviewWidget
+from polyglot_ai.ui.widgets.video_preview import VideoPlayerWindow
 
 logger = logging.getLogger(__name__)
 
@@ -432,42 +432,40 @@ class VideoPanel(QWidget):
         button_row.addStretch(1)
         card.add_layout(button_row)
 
-        # Inline preview + trim slider — hidden until a clip is
-        # loaded so the empty state doesn't show a black rectangle.
-        # The widget is created lazily (and only constructed once)
-        # because QMediaPlayer pulls in QtMultimedia / gstreamer at
-        # import time; users who never load a clip pay zero cost.
-        self._preview: VideoPreviewWidget | None = None
-        self._preview_container = QWidget()
-        preview_layout = QVBoxLayout(self._preview_container)
-        preview_layout.setContentsMargins(0, 8, 0, 0)
-        preview_layout.setSpacing(0)
-        self._preview_container.setVisible(False)
-        card.add_widget(self._preview_container)
+        # Pop-out player window — held as a single instance on the
+        # panel so picking a new clip re-uses the same window
+        # rather than spawning a sibling. The window is NOT
+        # constructed here; ``_ensure_player_window`` builds it on
+        # first use to avoid paying the QtMultimedia /
+        # gstreamer-probe cost for users who never load a clip.
+        self._player_window: VideoPlayerWindow | None = None
         return card
 
-    def _ensure_preview(self) -> VideoPreviewWidget | None:
-        """Lazy-construct the preview widget on first use.
+    def _ensure_player_window(self) -> VideoPlayerWindow | None:
+        """Lazy-construct the pop-out preview window on first use.
 
-        Returns ``None`` when QtMultimedia or gstreamer plugins
-        aren't available so the rest of the panel keeps working —
-        the user just doesn't get an inline preview. Failures are
-        logged once; subsequent calls return ``None`` cheaply.
+        Returns ``None`` when QtMultimedia / gstreamer plugins
+        aren't available so the rest of the wizard keeps working —
+        the user just doesn't get a preview pop-out (the AI can
+        still plan an ffmpeg command without a live preview). The
+        ``_preview_init_failed`` latch prevents re-trying construction
+        every time the user picks a clip, which would otherwise
+        spam the log with the same import error.
         """
-        if self._preview is not None:
-            return self._preview
+        if self._player_window is not None:
+            return self._player_window
         if self._preview_init_failed:
             return None
         try:
-            self._preview = VideoPreviewWidget(self._preview_container)
-            self._preview.trim_confirmed.connect(self._on_trim_confirmed)
-            self._preview.playback_error.connect(self._on_preview_error)
-            layout = self._preview_container.layout()
-            assert layout is not None
-            layout.addWidget(self._preview)
-            return self._preview
+            # ``self.window()`` gives the wizard's top-level
+            # VideoWindow so the WM stacks the player as a peer
+            # rather than a child of the panel widget.
+            self._player_window = VideoPlayerWindow(self.window())
+            self._player_window.trim_confirmed.connect(self._on_trim_confirmed)
+            self._player_window.playback_error.connect(self._on_preview_error)
+            return self._player_window
         except Exception:
-            logger.exception("video_panel: failed to construct preview widget")
+            logger.exception("video_panel: failed to construct player window")
             self._preview_init_failed = True
             return None
 
@@ -686,31 +684,37 @@ class VideoPanel(QWidget):
         """Slot invoked when the background ffprobe call returns."""
         self._input_metadata = metadata
         self._render_input_label(metadata=metadata, probing=False)
-        # Hand the file off to the inline preview now that we've
+        # Hand the file off to the pop-out player now that we've
         # at least confirmed it's a real path (whether or not
-        # ffprobe parsed it cleanly). If preview construction
-        # fails the container stays hidden — the rest of the
-        # panel keeps working.
+        # ffprobe parsed it cleanly). If construction fails the
+        # window stays hidden — the rest of the wizard keeps
+        # working (the AI plans ffmpeg without needing a preview).
         self._load_preview()
 
     def _load_preview(self) -> None:
-        """Show the preview widget for the current clip.
+        """Show the pop-out player window for the current clip.
 
-        Lazy-constructs the widget on first call so users who
+        Previous versions embedded the preview inline inside the
+        wizard's step 1 card — that rendered as a visually
+        "window-within-the-window" on some compositors and was
+        confusing. The pop-out lives in its own top-level window
+        so the user can move / resize it independently of the
+        wizard, and the wizard stays uncluttered for the prompt +
+        process workflow.
+
+        Lazy-constructs the window on first call so users who
         never load a video pay nothing for the QtMultimedia /
         gstreamer import cost. Stays hidden when construction
-        fails (e.g. missing codec plugins) — the panel still
-        works, the user just doesn't get inline playback.
+        fails (e.g. missing codec plugins) — the wizard still
+        works, the user just doesn't get a preview pop-out.
         """
         if self._input_path is None:
-            self._preview_container.setVisible(False)
             return
-        preview = self._ensure_preview()
-        if preview is None:
-            self._preview_container.setVisible(False)
+        window = self._ensure_player_window()
+        if window is None:
             return
-        preview.load(self._input_path)
-        self._preview_container.setVisible(True)
+        window.load(self._input_path)
+        window.show_and_raise()
 
     def _on_trim_confirmed(self, start_ms: int, end_ms: int) -> None:
         """The preview widget's "Use trim" button was clicked.
@@ -806,13 +810,13 @@ class VideoPanel(QWidget):
             f"color: {tc.get('text_secondary')}; "
             f"font-size: {tc.FONT_MD}px; background: transparent;"
         )
-        # Tear down preview state and hide the widget — no clip,
-        # no preview. The widget itself is kept around for the
+        # Tear down playback state and hide the pop-out — no clip,
+        # no preview. The window itself is kept around for the
         # next load so we don't repeatedly pay the QMediaPlayer
         # construction cost.
-        if self._preview is not None:
-            self._preview.clear()
-        self._preview_container.setVisible(False)
+        if self._player_window is not None:
+            self._player_window.clear()
+            self._player_window.hide()
         self._refresh_process_button()
 
     # ── Drag-and-drop ──────────────────────────────────────────────
@@ -1128,6 +1132,26 @@ class VideoWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt signature
+        """Hide rather than destroy on close.
+
+        The outer ``MainWindow`` caches this window so re-clicking
+        the activity-bar video icon raises the same instance and
+        preserves the user's loaded clip + prompt. If we let Qt's
+        default close behaviour run (which can result in deletion
+        when WA_DeleteOnClose is set anywhere upstream, or on some
+        platform window-manager paths), the cached reference would
+        point to a dead C++ object and the next "show" would have
+        to construct fresh — discarding the user's work.
+
+        Explicitly accepting the event with the window only hidden
+        keeps the contract simple and matches the user expectation
+        of "X closes the window but the editor is still there
+        waiting if I reopen it".
+        """
+        self.hide()
+        event.accept()
 
     # Drag-drop forwarding — delegate to the wrapped panel so the
     # user can drop a clip on the window chrome / scrollbars too,

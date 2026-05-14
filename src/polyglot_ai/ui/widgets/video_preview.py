@@ -398,7 +398,7 @@ class VideoPreviewWidget(QWidget):
         # fall through to the video widget below. Net effect: the
         # user clicks anywhere on the video to play / pause, and
         # the overlay is just visual feedback.
-        self._video_container = QWidget()
+        self._video_container = QWidget(self)
         self._video_container.setMinimumHeight(220)
         self._video_container.setStyleSheet("background: #000000;")
         self._video_container.setSizePolicy(
@@ -408,7 +408,18 @@ class VideoPreviewWidget(QWidget):
         stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         stack.setContentsMargins(0, 0, 0, 0)
 
-        self._video = _ClickableVideoWidget()
+        # Construct the video widget with a parent FROM THE START.
+        # The previous code passed no parent and relied on
+        # ``stack.addWidget`` to reparent — which works on X11 and
+        # native Wayland, but on **XWayland under GNOME** Qt's
+        # platform code can momentarily allocate a top-level
+        # surface for any unparented widget. That surface
+        # occasionally persists as a phantom window with the
+        # parent's eventual title ("Video Editor — Polyglot AI"),
+        # producing the duplicate-window bug a user reported in
+        # a screenshot. Passing the container as parent at
+        # construction time skips the parentless moment entirely.
+        self._video = _ClickableVideoWidget(self._video_container)
         self._video.clicked.connect(self._toggle_play)
         stack.addWidget(self._video)
 
@@ -417,7 +428,12 @@ class VideoPreviewWidget(QWidget):
         # only the icon bubble is visible, not a full-frame
         # translucent layer. ``WA_TransparentForMouseEvents`` lets
         # the click pass through to the video widget below.
-        self._play_overlay = QLabel("▶")
+        # Same "parent at construction time" rule as the video
+        # widget above to avoid the XWayland phantom-window
+        # surface bug.
+        overlay_wrap = QWidget(self._video_container)
+        overlay_wrap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._play_overlay = QLabel("▶", overlay_wrap)
         self._play_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._play_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._play_overlay.setFixedSize(96, 96)
@@ -434,8 +450,6 @@ class VideoPreviewWidget(QWidget):
         # Wrapper holds the fixed-size overlay centred inside the
         # stacking layer — without the wrapper the overlay would
         # stretch to fill the whole container.
-        overlay_wrap = QWidget()
-        overlay_wrap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         wrap_layout = QVBoxLayout(overlay_wrap)
         wrap_layout.setContentsMargins(0, 0, 0, 0)
         wrap_layout.addWidget(self._play_overlay, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -444,8 +458,9 @@ class VideoPreviewWidget(QWidget):
         outer.addWidget(self._video_container, stretch=1)
 
         # Range slider — visible only when a clip is loaded with a
-        # non-zero duration, so the controls aren't crowded.
-        self._slider = RangeSlider()
+        # non-zero duration, so the controls aren't crowded. Same
+        # parent-at-construction rule.
+        self._slider = RangeSlider(self)
         outer.addWidget(self._slider)
 
         # Controls row: play/pause, time, "use trim" button.
@@ -612,3 +627,98 @@ class VideoPreviewWidget(QWidget):
         self._use_trim_btn.setText(
             f"Use trim {_format_timecode_ms(start)} → {_format_timecode_ms(end)}"
         )
+
+
+# ── VideoPlayerWindow ──────────────────────────────────────────────
+
+
+class VideoPlayerWindow(QWidget):
+    """Standalone top-level window hosting a :class:`VideoPreviewWidget`.
+
+    Pops the video preview out of the wizard so the two never share
+    a single window. The user reported the inline preview rendering
+    as a "window-within-the-window" — moving it to a genuine
+    separate top-level window removes the visual ambiguity and
+    matches the document-window pattern professional video editors
+    use (Premiere, DaVinci, Audacity).
+
+    The wizard owns the player window: it constructs once and
+    keeps the reference across the lifetime of the panel. Opening
+    a different clip re-uses the same window via ``load(path)``
+    rather than spawning a new one — so the user only ever has
+    one preview window for the wizard, no matter how many clips
+    they load in sequence.
+
+    Signals are forwarded from the embedded preview widget so the
+    wizard can listen to ``trim_confirmed`` and ``playback_error``
+    without reaching into the player window's internals.
+    """
+
+    trim_confirmed = pyqtSignal(int, int)
+    playback_error = pyqtSignal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        # ``Qt.WindowType.Window`` makes this a real top-level
+        # window that the WM decorates and stacks independently of
+        # the wizard. Passing ``parent`` for ownership only — the
+        # wizard keeps a strong reference so the window survives
+        # close → reopen cycles.
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Video Preview")
+        # Modest default size matching what the inline preview was;
+        # users can resize freely. Aspect-ratio-aware on first load.
+        self.resize(640, 520)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(0)
+
+        self._preview = VideoPreviewWidget(self)
+        layout.addWidget(self._preview)
+
+        # Forward the preview's signals up so callers can connect
+        # to the window itself — simpler API than ``window.preview.trim_confirmed``.
+        self._preview.trim_confirmed.connect(self.trim_confirmed)
+        self._preview.playback_error.connect(self.playback_error)
+
+    # ── Public API ────────────────────────────────────────────────
+
+    def load(self, path) -> None:
+        """Point the embedded player at ``path`` and update the title.
+
+        The title reflects the loaded file's basename so a user
+        with multiple polyglot-ai sessions can tell at a glance
+        which clip each preview window is showing.
+        """
+        from pathlib import Path as _Path
+
+        p = _Path(path)
+        self.setWindowTitle(f"Video Preview — {p.name}")
+        self._preview.load(p)
+
+    def clear(self) -> None:
+        self.setWindowTitle("Video Preview")
+        self._preview.clear()
+
+    def show_and_raise(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @property
+    def preview(self) -> VideoPreviewWidget:
+        """Exposed for tests + advanced callers."""
+        return self._preview
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt signature
+        """Hide rather than destroy on close.
+
+        Same rationale as ``VideoWindow.closeEvent``: the wizard
+        caches this window so re-loading a clip raises the same
+        instance. If close were to destroy, the cache would point
+        at a dead C++ object on the next load and either crash or
+        force a fresh construction (losing playback state, scroll
+        position, trim selection).
+        """
+        self.hide()
+        event.accept()
