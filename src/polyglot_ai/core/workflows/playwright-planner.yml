@@ -1,0 +1,330 @@
+name: 🎭 Playwright Planner
+description: Explore a web app with Playwright MCP and produce a human-readable Markdown test plan in specs/. Stage 1 of the Playwright Test Agents loop (planner → generator → healer).
+
+inputs:
+  - name: url
+    description: The starting URL the seed test/app boots at (e.g. https://staging.example.com or http://localhost:3000)
+    required: true
+  - name: scenario
+    description: Plain-English description of the user flow(s) to plan tests for (e.g. "guest checkout end-to-end", "todo app basic operations")
+    required: true
+  - name: feature
+    description: Short slug for the plan filename — kebab-case, no extension (e.g. "guest-checkout", "basic-operations")
+    required: true
+  - name: language
+    description: Target language for generated tests — python-pytest or typescript. Influences how the plan is structured.
+    required: false
+    default: typescript
+  - name: seed_path
+    description: Path to the existing seed test (relative to project root). If empty, the planner will offer to scaffold one.
+    required: false
+    default: ""
+  - name: prd_path
+    description: Optional path to a Product Requirements Document (PRD) the planner should ingest for context.
+    required: false
+    default: ""
+  - name: env_file
+    description: Optional path to a shell file (e.g. env.sh) exporting TEST_USER/TEST_PASS and any other test credentials. Used ONLY for non-production test accounts. Should be gitignored. Leave empty for public/unauthenticated planning.
+    required: false
+    default: ""
+
+steps:
+  - name: Load seed test and PRD context
+    prompt: |
+      You are the **🎭 Planner** agent — the first stage of the Playwright
+      Test Agents loop. Your job is to explore the app at {{url}} and produce
+      a precise Markdown test plan that the Generator agent can convert into
+      Playwright tests, and that a human can review before any code is written.
+
+      Before doing anything else, gather context:
+
+      1. **Seed test**:
+         - If ``{{seed_path}}`` is non-empty, use file_read to read it.
+           Note the import path, the fixtures it pulls in (custom ``test``,
+           ``expect``, ``page``), any auth/setup it performs, and the base
+           URL it boots against. The Generator will use this same fixture
+           file, so the plan must respect what the seed already sets up.
+         - If ``{{seed_path}}`` is empty, use list_directory on ``tests/``
+           and look for ``seed.spec.ts``, ``seed.spec.py``, or
+           ``tests/seed.spec.ts``. If found, read it.
+         - If no seed exists anywhere, STOP and tell the user:
+             > No seed test found. The Playwright Test Agents loop requires
+             > a `seed.spec.{ts,py}` that boots the app, performs any global
+             > setup (login, db reset), and exposes a `page` fixture.
+             > Suggested next step: run the `playwright-generator` workflow
+             > with `--scenario "scaffold seed test"` first, or create
+             > `tests/seed.spec.{ts,py}` by hand. I'll proceed with a
+             > placeholder seed, but flag this in the plan.
+
+      2. **PRD** (optional):
+         - If ``{{prd_path}}`` is non-empty, use file_read to read it.
+           Extract user-facing requirements relevant to the scenario.
+         - If empty, skip this. Do NOT invent requirements.
+
+      3. **Project conventions**:
+         - Use list_directory on ``specs/`` (create later if absent) and
+           ``tests/`` to see what plans and tests already exist. Match
+           their style if there's an established pattern.
+
+      Output a short context summary (5–10 lines) covering: seed path,
+      seed fixtures available, PRD presence, existing specs, target
+      language. Then proceed to the next step.
+
+  - name: Establish auth state (if credentials provided)
+    prompt: |
+      The Playwright MCP browser starts fresh — no cookies, no
+      logged-in user. If the scenario "{{scenario}}" needs an
+      authenticated session, this step logs in BEFORE exploration so
+      the planner sees the real (post-login) app, not the login wall.
+
+      ### Decision: skip or run?
+
+      If ``{{env_file}}`` is empty, SKIP this entire step and proceed
+      to "Explore the app live". The user explicitly opted out of
+      credential-based auth — they're either planning a public flow
+      or they'll handle auth a different way.
+
+      If ``{{env_file}}`` is non-empty, continue with login.
+
+      ### Security ground rules (apply every one)
+
+      1. **Test accounts only.** Never run this against production
+         credentials. The env file should point at a staging/test
+         environment with disposable test users.
+      2. **Never echo the password.** Use ``shell_exec`` to retrieve
+         the username (safe to log) but pipe the password through
+         ``browser_type`` directly without printing it. If you must
+         retrieve it via ``shell_exec``, treat the output as
+         redacted — do NOT include it in your visible reasoning or
+         the test plan. Treat anything captured by ``shell_exec`` as
+         **logged** — even values you don't print yourself may be
+         retained in the chat transcript / audit log.
+      3. **Never write credentials into the plan or any generated
+         file.** ``specs/{{feature}}.md`` must reference auth as
+         "logged in as TEST_USER" or similar — never the literal
+         username/password.
+      4. **The env file is sourced as a shell script.** Any code in
+         that file will execute. Only source files you wrote yourself
+         (or have audited line-by-line). Never source a file the user
+         received from someone else without reading it first.
+      5. **If env_file resolution fails, STOP — do NOT silently
+         degrade to anonymous.** The user passed ``--env_file``
+         because they wanted the planner to see the authenticated
+         app. Falling back to unauthenticated exploration produces a
+         plan that's silently wrong (it'll plan against the login
+         wall, not the real flow). Surface the failure and let the
+         user fix it.
+
+      ### Step-by-step
+
+      1. Confirm the env file exists:
+         ``shell_exec: "test -f {{env_file}} && echo OK"``
+         If this fails, STOP and tell the user:
+         "Cannot read {{env_file}}: file not found or unreadable.
+         Fix the path or omit ``--env_file`` to plan as anonymous."
+         Do NOT proceed to exploration — they explicitly asked for
+         an authenticated session.
+
+      2. Retrieve the username (safe to surface):
+         ``shell_exec: "bash -c 'source {{env_file}} && echo \"${TEST_USER:-${PMS_USERNAME:-}}\"'"``
+         Record the username string. If it's empty, STOP and tell
+         the user: "{{env_file}} sourced cleanly but neither
+         TEST_USER nor PMS_USERNAME is set. Add ``export TEST_USER=
+         <test-account>`` (and TEST_PASS) to the file, or omit
+         ``--env_file`` to plan as anonymous."
+
+      3. Navigate to {{url}} and snapshot the page:
+         - ``browser_navigate`` to {{url}}
+         - ``browser_snapshot``
+         - Look for a login form (role=textbox with name like
+           "email", "username", "user", or a labelled password field).
+         - If no login form is visible, the page may be public —
+           SKIP login and continue to exploration.
+
+      4. Fill the login form:
+         - ``browser_type`` the username into the username/email field.
+         - For the password, retrieve and immediately consume it:
+
+             Use ``shell_exec`` with:
+             ``bash -c 'source {{env_file}} && printf %s "${TEST_PASS:-${PMS_PASSWORD:-}}"'``
+
+             Then immediately ``browser_type`` that exact value into
+             the password field. Do NOT repeat the value in your
+             reasoning, the plan, or any output that gets persisted.
+         - Click the submit button (``browser_click`` on the button
+           with role="button" and name matching "Sign in" / "Log in" /
+           "Submit").
+
+      5. Verify login succeeded:
+         - ``browser_snapshot`` again.
+         - Expect EITHER a URL change off the login page, OR a
+           dashboard/welcome element appearing. If you see an error
+           toast ("Invalid credentials"), stop and tell the user:
+           "Login failed — check {{env_file}} has valid TEST_USER /
+           TEST_PASS for {{url}}."
+
+      6. Record what you did, redacted:
+         - "Logged in as `${TEST_USER}` via the login form at /login"
+         - DO NOT include the actual username string or password.
+
+      The exploration step inherits this authenticated browser state
+      automatically — Playwright MCP keeps the cookies for the rest
+      of the session.
+
+  - name: Explore the app live
+    prompt: |
+      Now explore the live application at {{url}} using the Playwright MCP
+      browser tools. The goal is to ground the plan in what the app
+      ACTUALLY does, not what the scenario description assumes.
+
+      Required actions:
+
+      1. ``browser_navigate`` to {{url}}.
+      2. ``browser_snapshot`` to capture the accessibility tree of the
+         landing page. Prefer the ARIA snapshot over a raw screenshot —
+         it gives you role+name pairs you'll cite in the plan.
+      3. Identify the entry points relevant to "{{scenario}}":
+         - Navigation links / menu items
+         - Forms (login, signup, checkout, etc.)
+         - Primary CTAs
+         - Filters, search, dropdowns
+      4. Walk through ONE happy-path traversal of {{scenario}}, taking a
+         ``browser_snapshot`` at each meaningful state change. Note:
+         - URL transitions (SPA route vs full navigation)
+         - Modal/dialog/toast appearances
+         - Async loading states
+         - Form validation behavior (try submitting empty, observe errors)
+      5. Look for edge cases the scenario implies but doesn't spell out:
+         - Empty states (no items, no results)
+         - Error states (bad input, network error if observable)
+         - Boundary conditions (quantity = 0, max length, etc.)
+         - Auth-protected paths (what happens logged out?)
+
+      Keep a running log: for every state you snapshot, record
+      (a) the URL, (b) the role+name locator of the key interactive
+      element, (c) what changed from the previous state.
+
+      Do NOT click anything destructive (delete account, place real
+      payment, send notification to real recipients). If the scenario
+      requires destructive actions, note them as "REQUIRES TEST DATA"
+      in the plan and proceed with read-only exploration.
+
+  - name: Draft the Markdown test plan
+    prompt: |
+      Compile everything you observed into a Markdown test plan at
+      ``specs/{{feature}}.md``. The format below mirrors the upstream
+      Playwright Test Agents spec exactly — the Generator depends on it.
+
+      Structure:
+
+      ```markdown
+      # {{feature | titlecase}} Test Plan
+
+      ## Application Overview
+
+      [2–4 sentence summary of what this part of the app does, grounded in
+      what you SAW during exploration. Mention the framework if obvious
+      from the DOM (React, Vue, etc.), the key entities, and the primary
+      user actions available.]
+
+      Key features observed:
+      - **[Feature 1]**: [one-line description]
+      - **[Feature 2]**: [one-line description]
+      - ...
+
+      ## Test Scenarios
+
+      ### 1. [Scenario name — derived from {{scenario}}]
+
+      **Seed:** `[{{seed_path}} or tests/seed.spec.ts]`
+
+      #### 1.1 [Sub-scenario — happy path]
+
+      **Preconditions:**
+      - [Auth state required, e.g. "logged in as admin"]
+      - [Data state required, e.g. "cart is empty"]
+
+      **Steps:**
+      1. [Concrete action — "Click the 'Sign in' button"]
+      2. [Next action — "Fill the 'Email' field with `test@example.com`"]
+      3. [Next action]
+
+      **Expected Results:**
+      - [Observable outcome 1 — "URL changes to /dashboard"]
+      - [Observable outcome 2 — "Welcome banner becomes visible"]
+      - [Observable outcome 3 — "Sign-in button is no longer in the DOM"]
+
+      #### 1.2 [Sub-scenario — edge case]
+      ...
+
+      ### 2. [Next scenario group]
+      ...
+      ```
+
+      Rules:
+
+      1. Every scenario must reference the seed at the top with
+         ``**Seed:** `<path>` ``.
+      2. Steps must be ONE concrete action each, in plain English. No
+         code, no selectors — those belong in the Generator's output.
+      3. When you mention an element, use its accessible name in quotes
+         (e.g. ``"Sign in" button``, ``"Email" field``) — this is what
+         maps cleanly to ``getByRole`` / ``getByLabel`` later.
+      4. Expected Results must be observable — "the API returns 200" is
+         NOT observable; "a 'Success' toast appears" IS.
+      5. Include at least 1 happy path + 1 edge case per scenario.
+         Common edge cases worth planning:
+            - empty input / required field missing
+            - already-logged-in / already-in-cart state
+            - going back via browser back button mid-flow
+      6. If the scenario as worded is too broad for a single plan, break
+         it into 2–4 scenario groups (### 1, ### 2, ...).
+      7. For ``language=python-pytest``, the Generator will produce
+         ``test_*.py`` files. For ``language=typescript``, ``.spec.ts``.
+         Note the target language in the plan's frontmatter:
+
+         ```markdown
+         <!-- language: {{language}} -->
+         <!-- seed: {{seed_path}} -->
+         <!-- generated-by: playwright-planner -->
+         ```
+
+      Use file_write to save the plan to ``specs/{{feature}}.md``.
+      If ``specs/`` does not exist, ``shell_exec: mkdir -p specs``
+      first. If a plan already exists at that path, back it up:
+      ``shell_exec: mv specs/{{feature}}.md specs/{{feature}}.md.bak``
+      before writing.
+
+  - name: Review and hand off
+    prompt: |
+      Print a concise summary for the user:
+
+      ## 🎭 Plan Complete
+
+      **Feature:** {{feature}}
+      **File:** `specs/{{feature}}.md`
+      **Target language:** {{language}}
+      **Seed:** [the seed path used, or "PLACEHOLDER — needs scaffolding"]
+      **Scenarios planned:** [count]
+      **Sub-scenarios:** [count]
+
+      ### Coverage at a glance
+      - [Scenario 1]: [count] sub-scenarios
+      - [Scenario 2]: [count] sub-scenarios
+
+      ### Notes for human review
+      - [Anything you couldn't verify during exploration — auth-gated
+        pages, destructive actions, third-party widgets]
+      - [Assumptions you had to make]
+      - [Edge cases worth discussing before generation]
+
+      ### Next step
+      Run the Generator to turn this plan into Playwright tests:
+
+      ```
+      /workflow playwright-generator --plan specs/{{feature}}.md --language {{language}}
+      ```
+
+      Stop here. Do NOT generate test code in this workflow — that is the
+      Generator's job. The plan should be reviewed (and optionally edited)
+      by a human before generation runs.

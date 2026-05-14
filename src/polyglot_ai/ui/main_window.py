@@ -185,6 +185,14 @@ class MainWindow(QMainWindow):
         self._main_splitter.setSizes(splits["main"])
         self._center_splitter.setSizes(splits["center"])
 
+        # Remembered sidebar widths so the expand button can toggle
+        # between "normal" (whatever the user last had it at) and
+        # "expanded" (much wider, for panels like Tests where output
+        # benefits from more horizontal room). ``_sidebar_normal_sizes``
+        # is captured the first time the user clicks expand.
+        self._sidebar_normal_sizes: list[int] | None = None
+        self._test_panel.expand_requested.connect(self._on_test_panel_expand_requested)
+
         central_layout.addWidget(self._main_splitter)
         self.setCentralWidget(central)
 
@@ -244,6 +252,57 @@ class MainWindow(QMainWindow):
             self._sidebar_stack.show()
             self._sidebar_visible = True
             self._last_sidebar_view = view_name
+
+    def _on_test_panel_expand_requested(self) -> None:
+        """Toggle the sidebar between its normal width and an expanded one.
+
+        Triggered by the ⟷ button in the Tests panel header. Drags on
+        the splitter handle still work for fine-grained sizing — this
+        toggles between a remembered "normal" layout and a ~50%-sidebar
+        "expanded" layout, stealing space from the right tabs first
+        and then the editor (kept ≥ 240 px so the editing surface
+        never disappears entirely).
+        """
+        import logging as _logging
+
+        sizes = self._main_splitter.sizes()
+        if not sizes or len(sizes) < 3:
+            # The main splitter is built with exactly three children
+            # (sidebar, center, right tabs). Anything else means the
+            # layout has changed in a way this handler doesn't know
+            # about — log so the no-op is debuggable instead of silent.
+            _logging.getLogger(__name__).warning(
+                "test_panel expand: unexpected splitter shape (%d panes, expected 3) — "
+                "skipping resize",
+                len(sizes),
+            )
+            return
+        sidebar_w, _center_w, _right_w = sizes[0], sizes[1], sizes[2]
+        total = sum(sizes)
+
+        # Heuristic for "currently expanded": sidebar > 40% of the
+        # window. Switch back to the remembered normal sizes.
+        if self._sidebar_normal_sizes is not None and sidebar_w > total * 0.4:
+            self._main_splitter.setSizes(self._sidebar_normal_sizes)
+            self._sidebar_normal_sizes = None
+            return
+
+        # Expand: remember current sizes, then take ~50% of the window
+        # for the sidebar by stealing from the right tabs first, then
+        # the center if needed. Keep the editor visible (≥ 240 px) so
+        # the user doesn't lose the editing surface entirely.
+        self._sidebar_normal_sizes = list(sizes)
+        target_sidebar = max(sidebar_w, int(total * 0.5))
+        min_center = 240
+        right_w = sizes[2]
+        steal_from_right = min(right_w - 240, target_sidebar - sidebar_w)
+        if steal_from_right < 0:
+            steal_from_right = 0
+        new_right = right_w - steal_from_right
+        remaining_need = (target_sidebar - sidebar_w) - steal_from_right
+        new_center = max(min_center, sizes[1] - max(0, remaining_need))
+        new_sidebar = total - new_center - new_right
+        self._main_splitter.setSizes([new_sidebar, new_center, new_right])
 
     def _show_arduino_window(self) -> None:
         """Open the Arduino panel as a standalone top-level window.

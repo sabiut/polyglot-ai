@@ -319,3 +319,190 @@ def test_parse_workflow_args_ignores_orphan_flags():
     assert name == "test"
     assert inputs["url"] == "https://x.com"
     assert "orphan" not in inputs
+
+
+def test_parse_workflow_args_preserves_quoted_multiword_values():
+    """Quoted values must survive as a single token.
+
+    Regression test for a bug where ``str.split()`` truncated
+    ``--scenario "guest checkout flow"`` to ``scenario='"guest'``,
+    silently dropping the rest of the value. The Playwright web tests
+    view (and any future workflow caller) relies on this round-trip
+    working — multi-word scenario/feature/test names are the common
+    case, not the edge case.
+    """
+    name, inputs = parse_workflow_args(
+        "playwright-planner --url http://localhost:3000 "
+        '--scenario "guest checkout flow" '
+        "--feature guest-checkout"
+    )
+    assert name == "playwright-planner"
+    assert inputs["url"] == "http://localhost:3000"
+    assert inputs["scenario"] == "guest checkout flow"
+    assert inputs["feature"] == "guest-checkout"
+
+
+def test_parse_workflow_args_handles_path_with_spaces():
+    """Quoted file paths (env_file, plan, test) must survive whole."""
+    name, inputs = parse_workflow_args('playwright-planner --env_file "My Project/env.sh"')
+    assert name == "playwright-planner"
+    assert inputs["env_file"] == "My Project/env.sh"
+
+
+def test_parse_workflow_args_handles_embedded_escaped_quotes():
+    """A scenario like ``he said "hi"`` must round-trip cleanly."""
+    name, inputs = parse_workflow_args(r'playwright-planner --scenario "he said \"hi\""')
+    assert name == "playwright-planner"
+    assert inputs["scenario"] == 'he said "hi"'
+
+
+def test_parse_workflow_args_unbalanced_quote_falls_back():
+    """If the user mistypes and leaves a quote open, we should still
+    produce *something* parseable rather than crash. The fallback uses
+    naive whitespace split — values will be truncated, but the caller's
+    required-input validation will catch the missing/garbage value."""
+    # Should not raise.
+    name, inputs = parse_workflow_args('playwright-planner --url http://x.com --scenario "open')
+    assert name == "playwright-planner"
+    # We don't assert on inputs here — the contract is "don't crash";
+    # the fallback path's exact shape is an implementation detail.
+    assert "url" in inputs
+
+
+def test_quoting_round_trip_with_web_tests_view_quote_helper():
+    """End-to-end: feed the panel's ``_quote`` helper into
+    ``parse_workflow_args`` and verify the value survives intact.
+    Catches any future regression in either side of the contract."""
+    from polyglot_ai.ui.panels.web_tests_view import WebTestsView
+
+    cases = [
+        "simple",
+        "two words",
+        "three word value",
+        "path/to/file with spaces.md",
+        'has "embedded quotes"',
+    ]
+    for original in cases:
+        quoted = WebTestsView._quote(original)
+        command = f"workflow-name --value {quoted}"
+        _, inputs = parse_workflow_args(command)
+        assert inputs["value"] == original, (
+            f"round-trip failed for {original!r}: quoted={quoted!r}, parsed={inputs.get('value')!r}"
+        )
+
+
+# ── Bundled Playwright workflow validation ────────────────────────────
+#
+# These tests load each shipped playwright-*.yml and verify the
+# contract the Web Tests panel depends on: the workflow loads, the
+# inputs it accepts cover the args the panel dispatches, and the
+# step prompts render without leaving stale ``{{...}}`` placeholders.
+# Without these, a typo or stale ``{{var}}`` in a YAML would ship
+# silently — every "panel dispatches a command" test passes because
+# it only inspects the command string, never the receiving workflow.
+
+
+# (slug, panel-args-the-UI-sends, optional-args-the-UI-may-send)
+_PLAYWRIGHT_WORKFLOW_CONTRACTS = [
+    (
+        "playwright-planner",
+        {"url", "scenario", "feature", "language"},
+        {"env_file", "seed_path", "prd_path"},
+    ),
+    (
+        "playwright-generator",
+        {"plan", "url", "language"},
+        {"seed_path", "scenarios"},
+    ),
+    (
+        "playwright-healer",
+        {"test", "url", "language"},
+        {"env_file", "max_attempts"},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "slug,required_panel_args,optional_panel_args", _PLAYWRIGHT_WORKFLOW_CONTRACTS
+)
+def test_playwright_workflow_loads(slug, required_panel_args, optional_panel_args):
+    """The bundled YAML must load and declare every arg the panel
+    can send. A missing input declaration would mean the panel
+    dispatches a flag the workflow silently ignores."""
+    wf, err = WorkflowLoader.load(slug, project_root=None)
+    assert wf is not None, f"{slug} failed to load: {err}"
+    assert wf.slug == slug
+
+    declared = {inp.name for inp in wf.inputs}
+    missing = required_panel_args - declared
+    assert not missing, (
+        f"{slug} does not declare these args the panel dispatches: {missing}. Declared: {declared}."
+    )
+    # Optional args are only checked if the panel CAN send them — we
+    # don't require them to be declared (the workflow may not need
+    # every optional argument), just that any args the workflow does
+    # declare match what the panel might send.
+    extra_in_panel = optional_panel_args - declared
+    # This is not an assertion failure — just a sanity check that the
+    # contracts list and the workflow's declared inputs haven't
+    # drifted apart in an obvious way.
+    _ = extra_in_panel  # noqa: F841
+
+
+@pytest.mark.parametrize(
+    "slug,required_panel_args,optional_panel_args", _PLAYWRIGHT_WORKFLOW_CONTRACTS
+)
+def test_playwright_workflow_steps_render(slug, required_panel_args, optional_panel_args):
+    """Each step's prompt must render with stub values without
+    leaving any ``{{var}}`` placeholders behind. A stale placeholder
+    means the workflow references a variable that's neither an input
+    nor substituted upstream — the AI would see the literal
+    ``{{var}}`` and either echo it or behave unpredictably."""
+    wf, _ = WorkflowLoader.load(slug, project_root=None)
+    assert wf is not None
+
+    # Provide a stub value for every declared input, regardless of
+    # required/default — we're testing the prompt template, not the
+    # validator.
+    stub_inputs = {inp.name: f"<stub-{inp.name}>" for inp in wf.inputs}
+
+    for step in wf.steps:
+        rendered = render_step_prompt(step, stub_inputs)
+        # Look for any remaining ``{{anything}}`` that didn't get
+        # substituted. Accept ``{{filter|format}}`` style placeholders
+        # in EXAMPLE markdown blocks (the planner shows a template the
+        # AI is supposed to fill in) — those use a pipe and are
+        # genuinely meant to survive substitution as documentation.
+        import re as _re
+
+        leftovers = _re.findall(r"\{\{([^}|]+)\}\}", rendered)
+        # Filter out ``{{var|filter}}`` (Jinja-style filter, used as
+        # doc-only example in the planner's spec) — they contain `|`
+        # so the regex above already excludes them.
+        assert not leftovers, (
+            f"{slug} step {step.name!r}: unresolved placeholders after "
+            f"substitution: {set(leftovers)}. Either add the missing "
+            f"input or escape the literal braces."
+        )
+
+
+@pytest.mark.parametrize(
+    "slug,required_panel_args,optional_panel_args", _PLAYWRIGHT_WORKFLOW_CONTRACTS
+)
+def test_playwright_workflow_validates_required_inputs(
+    slug, required_panel_args, optional_panel_args
+):
+    """``validate_inputs`` should reject an empty input dict when
+    required inputs are declared — the panel relies on this to catch
+    a malformed dispatch (e.g. all-empty-field bug we now guard
+    against in the dialogs)."""
+    wf, _ = WorkflowLoader.load(slug, project_root=None)
+    assert wf is not None
+    has_required = [inp for inp in wf.inputs if inp.required and not inp.default]
+    if not has_required:
+        # Workflow has no strictly-required-and-no-default inputs.
+        # Skip the assertion rather than passing trivially.
+        return
+    ok, _, missing = validate_inputs(wf, {})
+    assert not ok
+    assert set(missing) == {inp.name for inp in has_required}

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -38,6 +39,7 @@ from polyglot_ai.core.test_collector import (
     collect_tests,
     run_tests,
 )
+from polyglot_ai.ui.panels.web_tests_view import WebTestsView
 
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.core.coverage import CoverageReport
@@ -91,7 +93,30 @@ class TestPanel(QWidget):
     # ── UI ──────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        # Outer layout holds a tab widget — the pytest UI lives in one
+        # tab (``pytest_view`` below), the Playwright Test Agents view
+        # in the other (``self._web_tests``).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; background: #1e1e1e; }"
+            "QTabBar::tab { background: #252526; color: #888; "
+            "padding: 6px 14px; border: none; "
+            "border-bottom: 2px solid transparent; "
+            "font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }"
+            "QTabBar::tab:selected { color: #ddd; "
+            "border-bottom-color: #0e639c; background: #1e1e1e; }"
+            "QTabBar::tab:hover:!selected { color: #c0c0c0; background: #2a2a2a; }"
+        )
+        outer.addWidget(self._tabs)
+
+        # ── Tab 1: pytest (existing UI, untouched) ──
+        pytest_view = QWidget()
+        layout = QVBoxLayout(pytest_view)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
@@ -154,6 +179,16 @@ class TestPanel(QWidget):
         refresh_btn = self._icon_btn(self._draw_refresh_icon(), "Refresh test list")
         refresh_btn.clicked.connect(self.refresh)
         h.addWidget(refresh_btn)
+
+        # Expand button — widens the sidebar so the test panel has more
+        # room. Cheap UX win: drag-the-handle works but isn't obvious,
+        # and the default sidebar width (~280 px) is cramped for the
+        # output pane. Click toggles between collapsed/expanded widths.
+        expand_btn = self._icon_btn(
+            self._draw_expand_icon(), "Expand the test panel for easier viewing"
+        )
+        expand_btn.clicked.connect(self._on_expand_clicked)
+        h.addWidget(expand_btn)
 
         layout.addWidget(header)
 
@@ -285,10 +320,52 @@ class TestPanel(QWidget):
         self._empty.hide()
         layout.addWidget(self._empty)
 
+        # Finalise tab 1 and add the Playwright Test Agents tab.
+        self._tabs.addTab(pytest_view, "🧪 Pytest")
+
+        self._web_tests = WebTestsView()
+        self._tabs.addTab(self._web_tests, "🎭 Web Tests")
+
+    # ── Expand affordance ──────────────────────────────────────────
+
+    # Emitted when the user clicks the expand button. Caught in
+    # main_window which owns the resize policy — the panel can't
+    # change its own width without reaching across panes, so the
+    # signal keeps that coupling pointed in the right direction.
+    expand_requested = pyqtSignal()
+
+    def _on_expand_clicked(self) -> None:
+        """Emit expand_requested; main_window owns the resize policy."""
+        self.expand_requested.emit()
+
+    @staticmethod
+    def _draw_expand_icon() -> QIcon:
+        """Two-headed arrow (⟷) glyph for the expand button."""
+        pm = QPixmap(16, 16)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#cccccc"))
+        pen.setWidthF(1.6)
+        p.setPen(pen)
+        # Horizontal shaft
+        p.drawLine(3, 8, 13, 8)
+        # Left arrowhead
+        p.drawLine(3, 8, 6, 5)
+        p.drawLine(3, 8, 6, 11)
+        # Right arrowhead
+        p.drawLine(13, 8, 10, 5)
+        p.drawLine(13, 8, 10, 11)
+        p.end()
+        return QIcon(pm)
+
     # ── Public API (called from ui_wiring) ──────────────────────────
 
     def set_project_root(self, path: Path) -> None:
         self._project_root = path
+        # Forward to the Web Tests tab so it can scan specs/ and tests/.
+        if hasattr(self, "_web_tests"):
+            self._web_tests.set_project_root(path)
         self.refresh()
 
     def set_event_bus(self, event_bus) -> None:

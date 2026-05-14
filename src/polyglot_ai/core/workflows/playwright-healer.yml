@@ -1,0 +1,369 @@
+name: 🎭 Playwright Healer
+description: Run a failing Playwright test, inspect the live DOM, and propose a unified diff for the user to approve before any code is rewritten. Stage 3 of the Playwright Test Agents loop.
+
+inputs:
+  - name: test
+    description: The failing test file or test name to heal (e.g. tests/adding-new-todos.spec.ts, or "Add Valid Todo")
+    required: true
+  - name: language
+    description: Test framework — python-pytest or typescript
+    required: false
+    default: typescript
+  - name: url
+    description: Base URL the test runs against (e.g. http://localhost:3000). Used by the healer to inspect the live DOM.
+    required: true
+  - name: max_attempts
+    description: Max number of healing attempts. Each attempt proposes ONE diff and waits for user approval before re-running.
+    required: false
+    default: "3"
+  - name: env_file
+    description: Optional path to a shell file (e.g. env.sh) exporting TEST_USER/TEST_PASS for the live-DOM inspection. Required when the failing step lives behind login — without it the healer's browser_navigate hits the login wall instead of the real failing page, and the diagnosis is wrong. Leave empty for public flows. Same file the planner used.
+    required: false
+    default: ""
+
+steps:
+  - name: Run the failing test and capture evidence
+    prompt: |
+      You are the **🎭 Healer** agent — the third stage of the Playwright
+      Test Agents loop. Your job is to take a failing test, diagnose
+      exactly why it failed, and **propose a unified diff** for the user
+      to approve. You DO NOT edit files yet — proposals only.
+
+      ### Step 1: Locate the failing test
+
+      Use file_read on ``{{test}}`` if it looks like a path
+      (contains ``/`` or ends in ``.spec.ts``/``.spec.js``/``.py``).
+
+      Otherwise the value is a test *name* — search for it. Before
+      running ``grep``, **validate the name**: it must match
+      ``^[A-Za-z0-9 _.\-]+$``. If it contains backticks, ``$``,
+      semicolons, pipes, quotes, or any other shell metacharacter,
+      STOP and tell the user: "Test name contains characters that
+      can't be safely searched — pass the test file path instead."
+      Do NOT try to escape or `shlex.quote` your way around an
+      arbitrary value: a clean refusal is safer than a clever shell
+      string.
+
+      Once validated, search (the value is now known to be shell-safe
+      because the character set above is a strict allowlist):
+      - TS: ``grep -rln "test('{{test}}" tests/``
+      - Py: ``grep -rln "def test_{{test}}\|'{{test}}'" tests/``
+
+      If multiple matches, list them and pick the most recent (mtime).
+      If none, stop and tell the user.
+
+      Read the full file. Note the imports, fixtures used, and the
+      ``test()`` / ``def test_*`` block that's failing.
+
+      ### Step 2: Run the test in isolation to capture the failure
+
+      ### For language = typescript
+
+      Use shell_exec:
+      - command: ``npx playwright test {{test}} --reporter=line --trace=on``
+      - timeout: 120
+
+      ### For language = python-pytest
+
+      First, **report which interpreter you'll use** so the user can
+      see at a glance whether you found the project venv:
+      ``shell_exec: "test -x .venv/bin/python && echo 'using .venv/bin/python' || (echo 'no .venv — falling back to system python:'; which python || which python3)"``
+
+      Then run:
+      - command: ``.venv/bin/python -m pytest {{test}} --tb=long -v``
+        (fall back to ``python -m pytest ...`` only if ``.venv``
+        doesn't exist — a version skew between the venv and system
+        Playwright is the most common source of "green local / red
+        CI" debugging nightmares, so flagging which one ran matters)
+      - timeout: 120
+
+      ### Handling timeout / non-zero exit
+
+      ``shell_exec`` may return a non-zero exit even when the test
+      framework ran cleanly (a failing test is exit 1, which is the
+      *expected* outcome we're here to heal). Distinguish:
+
+      - Exit code 0 → test passed (false alarm, see below)
+      - Exit code 1 from pytest/playwright with parseable output →
+        test FAILED, proceed with diagnosis using captured stderr/
+        stdout
+      - Exit code from a timeout (``shell_exec`` returns a timeout
+        marker) → **STOP and report verbatim**. Don't guess at the
+        failure from truncated output. Tell the user: "Test run
+        exceeded 120s timeout; cannot diagnose from incomplete
+        output. Try running it manually first or pass ``--test
+        <smaller-scope>`` to narrow the run."
+      - Exit code for any other non-test-framework reason (missing
+        binary, syntax error in test file, environment failure) →
+        STOP and report stderr verbatim. The healer's diagnosis
+        assumes a test framework actually ran; if it didn't, the
+        proposed diff would be wrong.
+
+      Capture:
+      - The exact failure type (TimeoutError, strict mode violation,
+        assertion mismatch, navigation timeout, etc.)
+      - The failing line number in the test file
+      - The locator/value/expectation that didn't match
+      - Any Playwright trace path printed in the output
+
+      If the test PASSED (false alarm — flaky, transient), tell the
+      user and stop. No diff needed.
+
+  - name: Establish auth state (if credentials provided)
+    prompt: |
+      Like the Planner, the healer's browser session starts fresh —
+      no cookies, no logged-in user. If the failing test exercises an
+      auth-gated flow and you skip login here, ``browser_navigate``
+      will land you on the login wall and you'll diagnose the wrong
+      page (the locator "doesn't exist" because the page you're on
+      isn't the page the test runs against).
+
+      ### Decision: skip or run?
+
+      If ``{{env_file}}`` is empty, SKIP this entire step and proceed
+      to "Inspect the live DOM". Public/unauthenticated flows don't
+      need login.
+
+      If ``{{env_file}}`` is non-empty, log in using the same
+      procedure the Planner uses. The security rules are identical:
+
+      1. **Test accounts only.** Never production credentials.
+      2. **Never echo the password.** Pipe it through ``browser_type``
+         directly. Treat ``shell_exec`` output as logged.
+      3. **Never write credentials into the diagnosis or the diff.**
+      4. **The env file is sourced as a shell script** — only source
+         files you wrote yourself.
+      5. **If env_file resolution fails, STOP.** Don't silently
+         degrade to anonymous — the diagnosis would point at the
+         login wall instead of the real failure.
+
+      ### Step-by-step
+
+      1. Confirm the env file exists:
+         ``shell_exec: "test -f {{env_file}} && echo OK"``
+         If this fails, STOP and tell the user:
+         "Cannot read {{env_file}} — fix the path or omit
+         ``--env_file`` if the test runs against a public flow."
+
+      2. Retrieve the username:
+         ``shell_exec: "bash -c 'source {{env_file}} && echo \"${TEST_USER:-${PMS_USERNAME:-}}\"'"``
+         If empty, STOP: "{{env_file}} sourced cleanly but neither
+         TEST_USER nor PMS_USERNAME is set."
+
+      3. ``browser_navigate`` to {{url}}, ``browser_snapshot``, find
+         the login form (role=textbox with name email/username/user,
+         labelled password field).
+
+      4. ``browser_type`` the username. For the password, retrieve
+         and immediately consume it:
+
+             ``shell_exec``: ``bash -c 'source {{env_file}} && printf %s "${TEST_PASS:-${PMS_PASSWORD:-}}"'``
+             Then ``browser_type`` directly. Do NOT repeat the value
+             anywhere in your reasoning or output.
+
+      5. Click the submit button. ``browser_snapshot`` to confirm a
+         URL change off the login page or a dashboard element. If
+         you see an error toast, stop and report it.
+
+      Once logged in, Playwright MCP keeps the cookies for the rest
+      of the inspection — the next step's ``browser_navigate`` sees
+      the authenticated app.
+
+  - name: Inspect the live DOM to find the real selector
+    prompt: |
+      Now go look at the app as it actually is, not as the test thinks
+      it is. Use the Playwright MCP browser tools.
+
+      1. ``browser_navigate`` to the URL the failing step was on.
+         Reconstruct that URL by replaying the test steps up to (but
+         not including) the failing step. For most tests this means
+         ``browser_navigate`` to {{url}} and then walking through any
+         setup steps (login, navigation) until you're at the point
+         where the failure happens.
+
+      2. ``browser_snapshot`` to capture the accessibility tree at the
+         failure point.
+
+      3. Diagnose the failure category:
+
+         **A. Locator-not-found / Timeout waiting for selector**
+            - Search the snapshot for elements semantically related to
+              what the test wanted. If the test used
+              ``getByRole('button', { name: 'Submit' })`` and the
+              snapshot shows ``getByRole('button', { name: 'Save' })``,
+              that's your fix.
+            - If the element has moved into a portal/modal/iframe,
+              note the new scope.
+
+         **B. Strict mode violation (resolved to N elements)**
+            - The locator matches more than one element. Find a
+              distinguishing parent (a row, a section, a dialog) or
+              add a ``.filter({ hasText: '...' })``.
+
+         **C. Assertion mismatch**
+            - The expected text/URL/count doesn't match reality.
+              Confirm what the page actually shows. If reality is
+              correct and the test's expectation is stale, the fix
+              is to update the expectation. If reality is wrong
+              (a real bug), tell the user — the test isn't broken,
+              the app is.
+
+         **D. Navigation timeout**
+            - The page is slow or the URL pattern is wrong. Capture
+              what URL the page is actually on now via
+              ``browser_snapshot`` metadata.
+
+         **E. Race condition (element exists but not yet interactable)**
+            - Identify what comes BEFORE the failing action that the
+              test should wait for (a heading, a button, a network
+              response).
+
+      4. Decide on a **minimal fix**. The smallest possible change that
+         resolves the failure. Bias hard towards changing the test, not
+         the app — unless you can prove the app regressed.
+
+      Write up the diagnosis in this exact format:
+
+      ## Diagnosis
+
+      **Failure category:** [A/B/C/D/E]
+      **Root cause:** [one paragraph]
+      **Evidence:**
+      - Test expects: `[locator/assertion]`
+      - Live DOM has: `[what you actually saw in browser_snapshot]`
+      - Failing line: `{{test}}:[line number]`
+
+      ## Proposed fix
+
+      [One paragraph describing the change.]
+
+  - name: Propose a unified diff (do not write)
+    prompt: |
+      Produce a unified-diff patch the user can review. **DO NOT call
+      file_write yet.** Print the diff inline in your response so the
+      user can read it, then ask for approval.
+
+      Use the ``--- a/path`` / ``+++ b/path`` / ``@@`` format with at
+      least 3 lines of context above and below the change:
+
+      ```diff
+      --- a/{{test}}
+      +++ b/{{test}}
+      @@ -<line>,<count> +<line>,<count> @@
+       <context line 1>
+       <context line 2>
+       <context line 3>
+      -<line removed>
+      +<line added>
+       <context line 4>
+       <context line 5>
+       <context line 6>
+      ```
+
+      Rules:
+
+      1. **One fix per attempt.** If the test has 3 unrelated bugs,
+         fix the first one only. The user will re-run the healer.
+      2. **Minimal blast radius.** Don't reformat. Don't reorder imports.
+         Don't "improve" unrelated locators. Just the fix.
+      3. **Preserve test intent.** If the test was checking that a
+         "Submit" button works and the button is now "Save", that
+         intent is still valid — update the locator. If the intent
+         no longer makes sense (the feature was removed), say so and
+         propose ``test.skip(...)`` or ``pytest.mark.skip`` with a
+         clear reason, NOT deletion.
+      4. **Include a one-line commit message** below the diff:
+
+         ```
+         Suggested commit message: fix(test): heal '<test name>' — <one-line rationale>
+         ```
+
+      After the diff, ask the user:
+
+      > **Approve this fix?** Reply:
+      > - `apply` — I'll write the change and re-run the test
+      > - `edit <new-instructions>` — refine the fix
+      > - `skip` — mark the test as skipped instead with a reason
+      > - `abort` — stop healing; this is a real app bug, not a test bug
+
+      STOP and wait for the user's response. Do not proceed.
+
+  - name: Apply approved change and re-verify
+    prompt: |
+      Based on the user's reply in the previous step:
+
+      ### If they said ``apply``
+
+      1. Use file_write (or the Edit tool with a focused replacement)
+         to apply the diff to the test file. Verify the result by
+         file_read'ing the file back and confirming the change landed.
+
+      2. Re-run the test using the same shell command as the first
+         step (TS: ``npx playwright test``, Py: ``pytest``). Capture
+         the result.
+
+      3. If it now PASSES — write the summary in step 5.
+
+         If it still FAILS — note: this is attempt {{max_attempts}}'s
+         count. Tell the user the test is still failing, summarize the
+         new error, and offer to loop:
+
+         > Heal again? The previous fix landed but a new failure
+         > surfaced: `[error]`. I can propose another patch (attempts
+         > remaining: N-1) or stop here.
+
+         Do NOT auto-loop. Wait for the user.
+
+      ### If they said ``edit <instructions>``
+
+      Go back to step 3 (Propose a unified diff) with the refined
+      instructions in mind. Print a new diff. Wait for approval again.
+      This does NOT count against ``{{max_attempts}}``.
+
+      ### If they said ``skip``
+
+      Edit the failing test to replace the ``test(...)``/``def test_*``
+      with the framework's skip directive, INCLUDING the reason:
+
+      - TS: ``test.skip('<name>', async ({ page }) => { /* TODO: ... */ })``
+        or at the top of the test: ``test.skip(true, '<reason>');``
+      - Py: ``@pytest.mark.skip(reason="<reason>")`` above the function
+
+      Show the diff before applying. Re-run the suite to confirm the
+      skip is recognized.
+
+      ### If they said ``abort``
+
+      Stop. Do not modify any files. Write a brief note in the summary
+      explaining this was diagnosed as an app bug, not a test bug, with
+      enough evidence (snapshot excerpts, expected vs actual) for the
+      user to file an issue.
+
+  - name: Summary
+    prompt: |
+      Print a final report:
+
+      ## 🎭 Healing Complete
+
+      **Test:** `{{test}}`
+      **Language:** {{language}}
+      **Resolution:** [PASSED after N attempts / SKIPPED / ABORTED — app bug]
+      **Attempts used:** [N] / {{max_attempts}}
+
+      ### What was fixed
+      [One paragraph per applied diff — what changed and why.]
+
+      ### What the user should do next
+      - If PASSED: review the diff(s) above, commit with the suggested
+        message(s), and consider whether the underlying pattern
+        suggests a wider locator audit.
+      - If SKIPPED: open a follow-up ticket to investigate the skipped
+        test before next release.
+      - If ABORTED: file an app bug with the diagnosis above as the
+        repro evidence.
+
+      ### Files touched
+      - `{{test}}` — [applied / skip-marker / untouched]
+
+      Do NOT touch any other files. Healing is scoped to the single
+      failing test the user passed in.

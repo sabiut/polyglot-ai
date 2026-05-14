@@ -1,0 +1,291 @@
+name: 🎭 Playwright Generator
+description: Read a Markdown test plan from specs/ and produce executable Playwright tests in tests/, verifying selectors live against the running app. Stage 2 of the Playwright Test Agents loop.
+
+inputs:
+  - name: plan
+    description: Path to the Markdown test plan produced by the Planner (e.g. specs/guest-checkout.md)
+    required: true
+  - name: url
+    description: Base URL the tests will run against (e.g. http://localhost:3000). Used for live selector verification.
+    required: true
+  - name: language
+    description: Output language — python-pytest or typescript. Should match the plan's frontmatter if present.
+    required: false
+    default: typescript
+  - name: seed_path
+    description: Path to seed.spec — overrides the plan's frontmatter. Leave empty to read from the plan.
+    required: false
+    default: ""
+  - name: scenarios
+    description: Comma-separated scenario numbers to generate (e.g. "1,2.1,2.3"). Empty = generate all.
+    required: false
+    default: ""
+
+steps:
+  - name: Parse the plan and seed
+    prompt: |
+      You are the **🎭 Generator** agent — the second stage of the
+      Playwright Test Agents loop. Your job is to convert the Markdown
+      plan at ``{{plan}}`` into runnable Playwright tests in ``tests/``,
+      one ``.spec`` file per top-level scenario.
+
+      Setup:
+
+      1. Use file_read on ``{{plan}}``. If it doesn't exist, stop and
+         tell the user to run the Planner first.
+      2. Extract the frontmatter HTML comments:
+         - ``<!-- language: ... -->`` → fallback for {{language}}
+         - ``<!-- seed: ... -->`` → fallback for {{seed_path}}
+         The input parameters override the frontmatter when non-empty.
+      3. Resolve the effective seed path. If ``{{seed_path}}`` is set,
+         use it; otherwise use the plan's frontmatter. If still empty,
+         look for ``tests/seed.spec.ts`` (or ``.py``).
+      4. Use file_read on the seed file. Note:
+         - The import path for ``test`` and ``expect``
+           (e.g. ``from './fixtures'`` or ``from playwright.sync_api``)
+         - Custom fixtures the seed exposes
+         - The base URL it boots against
+         The generated tests must import the SAME fixtures the same way.
+      5. Parse the plan into a list of scenario groups (``### N. Name``)
+         and sub-scenarios (``#### N.M Name``). For each sub-scenario,
+         collect: preconditions, ordered steps, expected results.
+      6. If ``{{scenarios}}`` is non-empty, filter the parse result to
+         only those scenario numbers. Otherwise generate every one.
+
+      Output a one-line summary: "Parsed N scenario groups, M sub-scenarios.
+      Generating L tests targeting {{language}}." Do not write any files yet.
+
+  - name: Verify selectors live against the app
+    prompt: |
+      Before writing any test code, verify that the elements you intend
+      to locate ACTUALLY exist on the live app at {{url}}.
+
+      For each sub-scenario you will generate:
+
+      1. ``browser_navigate`` to {{url}} (or the URL the step starts at).
+      2. For every step that touches a UI element, derive the best
+         locator using this priority order:
+
+         a. ``getByRole(role, { name })`` — buttons, links, headings,
+            checkboxes, radios, comboboxes
+         b. ``getByLabel(text)`` — form inputs with associated labels
+         c. ``getByPlaceholder(text)`` — inputs with placeholder only
+         d. ``getByText(text)`` — static text, status messages, toasts
+         e. ``getByTestId(id)`` — when the app exposes ``data-testid``
+         f. CSS selector via ``locator()`` — LAST RESORT, comment why
+
+      3. Use ``browser_snapshot`` to confirm the role+name pair is
+         present. If the snapshot does not contain the element you
+         expect, adapt: pick a different locator or surface this as a
+         plan issue in the next step.
+
+      4. For each interactive step, also pre-compute the right
+         **wait/assert** for the expected result:
+
+         - URL change → ``page.waitForURL(...)`` + ``expect(page).toHaveURL(...)``
+         - Element appears → ``expect(locator).toBeVisible()``
+         - Text content → ``expect(locator).toContainText(...)``
+         - Element count → ``expect(locator).toHaveCount(n)``
+         - Form field cleared → ``expect(input).toHaveValue('')``
+
+         Never use ``waitForTimeout`` or ``time.sleep`` — these are flaky.
+         Never use ``waitForLoadState('networkidle')`` on SPAs.
+
+      Keep a per-scenario manifest: scenario number, step number, action,
+      verified locator, assertion. You will reference this in the next step.
+
+      If you discover that the plan is wrong (an element described in the
+      plan does not exist on the live app), do NOT silently skip it. Note
+      the discrepancy and continue — the human reviewer needs to see this.
+
+  - name: Generate test files
+    prompt: |
+      Now produce the test files. One ``.spec`` file per top-level
+      scenario group (### N), with each sub-scenario as a ``test(...)``
+      inside a ``test.describe`` block.
+
+      ### For language = typescript
+
+      File name: ``tests/<kebab-case-scenario>.spec.ts``
+
+      Template:
+
+      ```ts
+      // spec: {{plan}}
+      // seed: <resolved seed path>
+      // generated-by: playwright-generator
+
+      import { test, expect } from '<same import path as seed>';
+
+      test.describe('<Scenario group name>', () => {
+        test('<Sub-scenario name>', async ({ page }) => {
+          // Preconditions:
+          // - <precondition 1>
+
+          // 1. <step 1 description>
+          const <elementName> = page.getByRole('<role>', { name: '<name>' });
+          await <elementName>.click();
+
+          // 2. <step 2 description>
+          await page.getByLabel('<label>').fill('<value>');
+
+          // Expected Results:
+          // - <expected 1>
+          await expect(page.getByText('<text>')).toBeVisible();
+        });
+
+        test('<Next sub-scenario>', async ({ page }) => {
+          // ...
+        });
+      });
+      ```
+
+      ### For language = python-pytest
+
+      File name: ``tests/test_<snake_case_scenario>.py``
+
+      Template:
+
+      ```python
+      # spec: {{plan}}
+      # seed: <resolved seed path>
+      # generated-by: playwright-generator
+
+      import re
+      import pytest
+      from playwright.sync_api import Page, expect
+
+      # Import fixtures from the seed (adjust if seed exposes more)
+      pytestmark = pytest.mark.usefixtures("<fixture from seed if any>")
+
+
+      class TestScenarioGroupName:
+          def test_sub_scenario_name(self, page: Page) -> None:
+              """<Sub-scenario name from plan>."""
+              # Preconditions:
+              # - <precondition 1>
+
+              # 1. <step 1>
+              element = page.get_by_role("<role>", name="<name>")
+              element.click()
+
+              # 2. <step 2>
+              page.get_by_label("<label>").fill("<value>")
+
+              # Expected Results:
+              # - <expected 1>
+              expect(page.get_by_text("<text>")).to_be_visible()
+      ```
+
+      ### Generation rules (apply every one)
+
+      1. **One file per scenario group.** ``### 1. Adding New Todos`` →
+         ``tests/adding-new-todos.spec.ts`` (or ``test_adding_new_todos.py``).
+      2. **Locators from the verified manifest, not from guesses.** If a
+         step uses an element you couldn't verify in the previous step,
+         add a ``// TODO: locator not verified live`` comment and use
+         your best guess.
+      3. **Steps map 1:1 to comments + code.** The numbered step from
+         the plan goes in as a comment above the code that performs it.
+      4. **Every "Expected Result" gets an ``expect()`` assertion.** No
+         expected result can be implicit.
+      5. **No hardcoded credentials.** Use env vars:
+         - TS: ``process.env.TEST_USER ?? 'demo'``
+         - Py: ``os.getenv("TEST_USER", "demo")``
+      6. **Use ``re.compile()`` / ``new RegExp()`` for dynamic URLs**
+         (e.g. URLs containing IDs or timestamps).
+      7. **No ``page.waitForTimeout`` / ``time.sleep`` anywhere.**
+      8. **Preserve seed import path verbatim.** If the seed says
+         ``from './fixtures'``, the new test says the same. Do NOT
+         rewrite it to ``@playwright/test``.
+
+      Use file_write for each test file. If ``tests/`` doesn't exist,
+      ``shell_exec: mkdir -p tests`` first. If a target file already
+      exists, back it up first:
+      ``shell_exec: mv tests/<file> tests/<file>.bak``.
+
+  - name: Run tests once to catch immediate breakage
+    prompt: |
+      Run the freshly generated tests once. The Generator does NOT auto-fix
+      failures — that is the Healer's job. But running once catches:
+
+      - Syntax errors (parse failures, missing imports)
+      - Wrong fixture imports
+      - Locators that crumbled between exploration and now
+
+      ### For language = typescript
+
+      Use shell_exec:
+      - command: ``npx playwright test tests/<file>.spec.ts --reporter=line``
+      - timeout: 120
+
+      ### For language = python-pytest
+
+      First, **report which interpreter you'll use** so the user can
+      see at a glance whether you found the project venv:
+      ``shell_exec: "test -x .venv/bin/python && echo 'using .venv/bin/python' || (echo 'no .venv — falling back to system python:'; which python || which python3)"``
+
+      Then run:
+      - command: ``.venv/bin/python -m pytest tests/test_<file>.py --tb=short -q``
+        (fall back to ``python -m pytest ...`` only if ``.venv``
+        does not exist — version skew between system pytest and
+        project pytest is a common silent debugging trap)
+      - timeout: 120
+
+      ### Handling timeout / non-zero exit
+
+      A failing test is exit 1, which is the normal "report the
+      failures" path — keep going and surface them. Distinguish:
+
+      - Timeout → STOP and report. Don't synthesise pass/fail from
+        truncated output: "Test run exceeded 120s; results
+        incomplete. Try running the file manually."
+      - Non-zero exit with no parseable test output (missing binary,
+        syntax error, env failure) → STOP and report stderr
+        verbatim. The "did this generation produce working tests"
+        contract assumes the framework actually ran.
+
+      Capture the output. Do NOT modify tests based on the run. Just report:
+
+      - Total tests run
+      - Passed / failed / errored
+      - For each failure: file, test name, one-line summary of the error
+
+      If anything failed, recommend the Healer. ``--url`` is
+      required so the healer can inspect the live DOM; quote any
+      multi-word test name. If the failure was on an auth-gated
+      page, pass the same ``--env_file`` the user supplied to the
+      planner:
+
+      ```
+      /workflow playwright-healer --test "<failing test name>" --url {{url}} --language {{language}}
+      ```
+
+      If all tests passed first try, celebrate concisely.
+
+  - name: Summary
+    prompt: |
+      Print a final summary:
+
+      ## 🎭 Generation Complete
+
+      **Plan:** `{{plan}}`
+      **Seed:** [resolved seed path]
+      **Language:** {{language}}
+      **Files written:**
+      - `tests/<file-1>` — [N tests]
+      - `tests/<file-2>` — [N tests]
+
+      **First run results:**
+      - Passed: [N]
+      - Failed: [N]
+      - Errors: [N]
+
+      **Plan discrepancies surfaced during selector verification:**
+      - [Any element from the plan that didn't exist live]
+      - [Any step that needed adaptation]
+      - (none, if clean)
+
+      **Next steps:**
+      - If failures: run `playwright-healer` on each failing test name.
+      - If clean: review the diff, commit, and wire into CI.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,9 +80,28 @@ def render_step_prompt(step: WorkflowStep, inputs: dict[str, str]) -> str:
 def parse_workflow_args(arg_string: str) -> tuple[str, dict[str, str]]:
     """Parse a ``/workflow name --key value --key2 value2`` argument string.
 
+    Uses ``shlex.split`` so quoted values survive as a single token
+    (``--scenario "guest checkout flow"`` -> ``scenario="guest checkout flow"``).
+    The previous ``str.split()`` implementation silently truncated
+    multi-word values to the first whitespace-delimited token, which
+    broke any workflow argument the user typed naturally with spaces.
+
+    On unbalanced-quote input ``shlex.split`` raises ``ValueError`` —
+    we fall back to ``str.split()`` so the caller still gets *something*
+    to work with rather than a crash; the resulting inputs will be
+    truncated, but ``validate_inputs`` will then complain about the
+    missing required keys, which is the surface the user actually sees.
+
     Returns (workflow_name, {key: value, ...}).
     """
-    parts = arg_string.strip().split()
+    try:
+        parts = shlex.split(arg_string)
+    except ValueError:
+        # Unbalanced quote — fall back to whitespace split rather than
+        # losing the entire command. The user will see a "missing
+        # required input" error on the truncated args, which is
+        # actionable.
+        parts = arg_string.strip().split()
     if not parts:
         return "", {}
 
