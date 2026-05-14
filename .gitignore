@@ -55,6 +55,18 @@ recorded-test-raw.txt
 *.swo
 *~
 
+# Claude Code worktrees — isolated checkouts the agent creates under
+# the project root. They're not part of the codebase, and a stray
+# ``git add`` at the parent level otherwise records them as gitlinks
+# (mode 160000).
+.claude/worktrees/
+
+# Node dependencies — this is a Python Qt project, but some Claude
+# Code skills (docx writer, etc.) install a node toolchain into the
+# repo root as a side effect. node_modules/ holds the vendored deps
+# and bloats clones by tens of thousands of files when committed.
+node_modules/
+
 # Office-doc exports from AI skills (code reviews, design docs,
 # meeting notes, etc.) — these get created as throwaway outputs
 # at the repo root and should never be checked in. Source of
