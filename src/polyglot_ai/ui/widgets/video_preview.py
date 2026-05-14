@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -326,6 +327,27 @@ class RangeSlider(QWidget):
 # ── VideoPreviewWidget ─────────────────────────────────────────────
 
 
+class _ClickableVideoWidget(QVideoWidget):
+    """A ``QVideoWidget`` that emits ``clicked`` on left mouse press.
+
+    Vanilla ``QVideoWidget`` doesn't expose a click signal — the
+    user can stare at the video forever and the only way to play
+    is to find the tiny play button in the controls row. This
+    subclass makes the video itself a click target, matching how
+    every web video player works (YouTube, Vimeo, native media
+    apps). The control-row play button stays as a redundant
+    affordance so keyboard / accessibility users still have a
+    discoverable control.
+    """
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 def _format_timecode_ms(ms: int) -> str:
     """Render milliseconds as ``M:SS`` or ``H:MM:SS`` for display."""
     total_s = max(0, int(ms / 1000))
@@ -368,12 +390,58 @@ class VideoPreviewWidget(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
 
-        # Video output — black background until media is loaded.
-        self._video = QVideoWidget()
-        self._video.setMinimumHeight(220)
-        self._video.setStyleSheet("background: #000000;")
-        self._video.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        outer.addWidget(self._video, stretch=1)
+        # Video display area — a stacked container with the
+        # clickable video widget at the bottom and a translucent
+        # "▶" overlay on top. Both layers sit at the same position
+        # via ``QStackedLayout.StackingMode.StackAll``, and the
+        # overlay sets ``WA_TransparentForMouseEvents`` so clicks
+        # fall through to the video widget below. Net effect: the
+        # user clicks anywhere on the video to play / pause, and
+        # the overlay is just visual feedback.
+        self._video_container = QWidget()
+        self._video_container.setMinimumHeight(220)
+        self._video_container.setStyleSheet("background: #000000;")
+        self._video_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        stack = QStackedLayout(self._video_container)
+        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        stack.setContentsMargins(0, 0, 0, 0)
+
+        self._video = _ClickableVideoWidget()
+        self._video.clicked.connect(self._toggle_play)
+        stack.addWidget(self._video)
+
+        # Overlay play indicator. Centred in the stack via the
+        # alignment QSS — keeping the QLabel itself small means
+        # only the icon bubble is visible, not a full-frame
+        # translucent layer. ``WA_TransparentForMouseEvents`` lets
+        # the click pass through to the video widget below.
+        self._play_overlay = QLabel("▶")
+        self._play_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._play_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._play_overlay.setFixedSize(96, 96)
+        self._play_overlay.setStyleSheet(
+            "QLabel {"
+            "  color: rgba(255, 255, 255, 230);"
+            "  background: rgba(0, 0, 0, 140);"
+            "  border: 2px solid rgba(255, 255, 255, 200);"
+            "  border-radius: 48px;"
+            "  font-size: 42px;"
+            "  padding-left: 8px;"  # nudge the ▶ glyph optically
+            "}"
+        )
+        # Wrapper holds the fixed-size overlay centred inside the
+        # stacking layer — without the wrapper the overlay would
+        # stretch to fill the whole container.
+        overlay_wrap = QWidget()
+        overlay_wrap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        wrap_layout = QVBoxLayout(overlay_wrap)
+        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.addWidget(self._play_overlay, alignment=Qt.AlignmentFlag.AlignCenter)
+        stack.addWidget(overlay_wrap)
+
+        outer.addWidget(self._video_container, stretch=1)
 
         # Range slider — visible only when a clip is loaded with a
         # non-zero duration, so the controls aren't crowded.
@@ -468,6 +536,9 @@ class VideoPreviewWidget(QWidget):
         self._use_trim_btn.setText("Use trim 0:00 → 0:00")
         self._time_label.setText("0:00 / 0:00")
         self._play_btn.setText("▶")
+        # Overlay returns to its "paused / click to play" state
+        # so the next loaded clip shows the affordance again.
+        self._play_overlay.setVisible(True)
 
     @property
     def range_slider(self) -> RangeSlider:
@@ -483,7 +554,12 @@ class VideoPreviewWidget(QWidget):
             self._player.play()
 
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
-        self._play_btn.setText("⏸" if state == QMediaPlayer.PlaybackState.PlayingState else "▶")
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self._play_btn.setText("⏸" if playing else "▶")
+        # Overlay is a visual "click to play" cue — hide it while
+        # the video is actually playing so it doesn't sit on top
+        # of the content the user wants to watch.
+        self._play_overlay.setVisible(not playing)
 
     def _on_position_changed(self, position_ms: int) -> None:
         self._slider.set_playhead(position_ms)

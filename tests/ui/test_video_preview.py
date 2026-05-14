@@ -404,3 +404,115 @@ def test_toggle_play_switches_state(preview):
     preview._player.playbackState.return_value = QMediaPlayer.PlaybackState.PlayingState
     preview._toggle_play()
     preview._player.pause.assert_called_once()
+
+
+# ── Click-to-play overlay ──────────────────────────────────────────
+
+
+def test_video_widget_is_clickable(preview):
+    """The video widget must be a ``_ClickableVideoWidget`` subclass
+    so left-clicks on the video frame emit ``clicked``. Bare
+    ``QVideoWidget`` doesn't expose a click signal — without the
+    subclass the only way to play is the tiny control-row button."""
+    from polyglot_ai.ui.widgets.video_preview import _ClickableVideoWidget
+
+    assert isinstance(preview._video, _ClickableVideoWidget)
+
+
+def test_clicking_video_toggles_playback(preview):
+    """Left-clicking the video frame calls play/pause on the player.
+
+    This is the "every web video player works this way" path —
+    the test stubs the player so we observe the call without
+    needing real media decode.
+    """
+    from PyQt6.QtMultimedia import QMediaPlayer
+
+    preview._player = MagicMock()
+    preview._player.playbackState.return_value = QMediaPlayer.PlaybackState.PausedState
+
+    # Drive the click via the signal directly — qtbot.mouseClick on
+    # QVideoWidget is unreliable in offscreen mode because the
+    # underlying video surface isn't a normal Qt widget.
+    preview._video.clicked.emit()
+    preview._player.play.assert_called_once()
+
+    preview._player.reset_mock()
+    preview._player.playbackState.return_value = QMediaPlayer.PlaybackState.PlayingState
+    preview._video.clicked.emit()
+    preview._player.pause.assert_called_once()
+
+
+def test_clickable_video_only_emits_for_left_button(qtbot):
+    """Right-click on the video should not toggle playback —
+    leave room for a future context menu without surprising the
+    user with a play/pause on every right-click."""
+    from polyglot_ai.ui.widgets.video_preview import _ClickableVideoWidget
+
+    widget = _ClickableVideoWidget()
+    qtbot.addWidget(widget)
+    widget.show()
+
+    received: list = []
+    widget.clicked.connect(lambda: received.append(True))
+
+    widget.mousePressEvent(_press(50, button=Qt.MouseButton.RightButton))
+    assert received == []
+
+    widget.mousePressEvent(_press(50, button=Qt.MouseButton.LeftButton))
+    assert received == [True]
+
+
+def test_overlay_hides_when_playing(preview):
+    """The translucent play icon must hide once the video is
+    playing so it doesn't sit on top of the content the user
+    wants to watch."""
+    from PyQt6.QtMultimedia import QMediaPlayer
+
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.PlayingState)
+    assert preview._play_overlay.isHidden() is True
+
+
+def test_overlay_shows_when_paused(preview):
+    """Returning to paused state must surface the overlay again —
+    it's the user's cue that the video is clickable to resume."""
+    from PyQt6.QtMultimedia import QMediaPlayer
+
+    # First drive it into playing → overlay hidden.
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.PlayingState)
+    assert preview._play_overlay.isHidden() is True
+    # Then back to paused → overlay shown again.
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.PausedState)
+    assert preview._play_overlay.isHidden() is False
+
+
+def test_overlay_shows_when_stopped(preview):
+    """``StoppedState`` (end-of-clip or explicit stop) must also
+    show the overlay, not stay hidden."""
+    from PyQt6.QtMultimedia import QMediaPlayer
+
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.PlayingState)
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.StoppedState)
+    assert preview._play_overlay.isHidden() is False
+
+
+def test_clear_restores_overlay_visibility(preview):
+    """``clear()`` resets state for the next clip — the overlay
+    must return to its paused / click-to-play form even if the
+    previous clip ended with the overlay hidden mid-playback."""
+    from PyQt6.QtMultimedia import QMediaPlayer
+
+    preview._on_playback_state_changed(QMediaPlayer.PlaybackState.PlayingState)
+    assert preview._play_overlay.isHidden() is True
+    preview.clear()
+    assert preview._play_overlay.isHidden() is False
+
+
+def test_overlay_does_not_intercept_mouse_events(preview):
+    """The overlay is set ``WA_TransparentForMouseEvents`` so
+    clicks pass through to the video widget below. Without this,
+    the most prominent click target — the big ▶ icon — would
+    swallow the click and play would do nothing."""
+    assert (
+        preview._play_overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) is True
+    )
