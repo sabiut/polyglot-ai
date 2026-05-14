@@ -27,7 +27,11 @@ Recommends: gnome-keyring | libsecret-1-0,
  ffmpeg,
  gstreamer1.0-plugins-good,
  gstreamer1.0-plugins-bad,
- gstreamer1.0-libav
+ gstreamer1.0-libav,
+ nodejs,
+ npm,
+ gh,
+ python3-pyqt6.qtwebengine
 Maintainer: Polyglot AI Contributors
 Description: AI-powered coding assistant desktop app
  Polyglot AI is a desktop coding assistant for Linux that supports

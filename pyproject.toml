@@ -19,6 +19,16 @@ dependencies = [
     "PyQt6>=6.6",
     "PyQt6-Charts>=6.6",
     "PyQt6-QScintilla>=2.14",
+    # WebEngine drives the Claude (subscription) panel's embedded
+    # ``claude.ai`` view. Bundled here so the deb/rpm/AppImage
+    # postinst pulls the wheel into the polyglot-ai venv — the
+    # ``python3-pyqt6.qtwebengine`` system package wouldn't help
+    # because our venv is isolated from system site-packages.
+    # When missing the Claude panel falls back to "open in browser"
+    # cleanly, so this is a "nice to have"; users who really want
+    # to shed the ~150 MB Chromium runtime can ``pip uninstall
+    # PyQt6-WebEngine`` from the venv and lose nothing else.
+    "PyQt6-WebEngine>=6.6",
     "openai>=1.30",
     "anthropic>=0.40",
     # ``openai`` and ``anthropic`` both pull ``httpx`` in

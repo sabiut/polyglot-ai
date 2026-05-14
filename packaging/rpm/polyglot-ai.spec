@@ -40,6 +40,24 @@ Recommends:     gstreamer1-plugins-bad-free
 # means dnf will pull them in if RPM Fusion is enabled and ignore
 # them otherwise — safe default behaviour.
 Recommends:     gstreamer1-libav
+# Node + npm unlock every MCP server (playwright, sequential-thinking,
+# memory, github, …). Without them the first-launch dependency
+# dialog has to pop up nagging every user; pulling them in via
+# Recommends means the common case "just works".
+Recommends:     nodejs
+Recommends:     npm
+# GitHub CLI — drives the CI/CD panel's workflow-run inspection.
+# Package name was renamed mid-Fedora-38 from ``gh`` to ``gh-cli``;
+# list both so dnf picks whichever name is current.
+Recommends:     gh-cli
+Recommends:     gh
+# Claude (subscription) panel embeds claude.ai via QtWebEngine.
+# Optional — when absent the panel falls back to opening the page
+# in the user's default browser, so this is genuinely "nice to
+# have" rather than required. The package name varies by distro;
+# list both spellings so dnf picks whichever resolves.
+Recommends:     python3-pyqt6-webengine
+Recommends:     python3-qt6-webengine
 BuildArch:      x86_64
 
 %description
