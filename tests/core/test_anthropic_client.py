@@ -268,7 +268,7 @@ class TestThinkingSupport:
 @pytest.mark.asyncio
 async def test_thinking_enabled_in_kwargs_for_reasoning_model():
     client, _ = _make_client([_text_start(0), _text_delta(0, "hi")])
-    out = [c async for c in client.stream_chat(
+    _ = [c async for c in client.stream_chat(
         messages=[{"role": "user", "content": "x"}],
         model="claude-opus-4-8",
     )]
