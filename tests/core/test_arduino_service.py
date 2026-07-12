@@ -69,7 +69,14 @@ class TestInstallHints:
 
 class TestKidFriendlyMessaging:
     def test_compile_when_cli_missing_says_what_to_do(self, monkeypatch):
-        monkeypatch.setattr("shutil.which", lambda name: None)
+        # Patch the resolver the service actually uses. Mocking bare
+        # ``shutil.which`` isn't enough: ``find_executable`` also scans
+        # well-known bin dirs (~/.local/bin, /usr/local/bin), so on a
+        # machine with arduino-cli genuinely installed the mock would
+        # be bypassed and the test would exercise the wrong branch.
+        monkeypatch.setattr(
+            "polyglot_ai.core.arduino.service.find_executable", lambda name: None
+        )
         svc = ArduinoService()
         from polyglot_ai.core.arduino import boards as _b
 

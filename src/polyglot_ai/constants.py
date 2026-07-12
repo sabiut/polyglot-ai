@@ -60,9 +60,14 @@ EVT_INDEX_UPDATED = "index:updated"
 # pricing is set per-provider on their dashboard and may change; the
 # values here drive the in-app usage estimate, not billing truth.
 MODEL_COSTS = {
+    "gpt-5.6-sol": {"input": 0.005, "output": 0.03},
+    "gpt-5.6-terra": {"input": 0.0025, "output": 0.015},
+    "gpt-5.6-luna": {"input": 0.001, "output": 0.006},
     "gpt-5.5": {"input": 0.012, "output": 0.04},
     "gpt-5.4": {"input": 0.01, "output": 0.03},
     "o4-mini": {"input": 0.001, "output": 0.004},
+    "claude-opus-4-8": {"input": 0.005, "output": 0.025},
+    "claude-sonnet-5": {"input": 0.003, "output": 0.015},
     "claude-opus-4-7": {"input": 0.018, "output": 0.09},
     "claude-opus-4-6": {"input": 0.015, "output": 0.075},
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},

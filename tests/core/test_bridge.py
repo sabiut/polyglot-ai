@@ -58,3 +58,43 @@ def test_clear():
     bus.clear()
     bus.emit("test")
     assert received == []
+
+
+def test_marshaller_routes_delivery():
+    """When a marshaller is installed, emit delegates delivery to it."""
+    bus = EventBus()
+    seen = []
+    bus.subscribe("e", lambda **kw: seen.append(kw))
+
+    calls = []
+
+    def marshaller(deliver):
+        calls.append(deliver)  # capture instead of running immediately
+
+    bus.set_marshaller(marshaller)
+    bus.emit("e", x=1)
+    # Delivery was deferred to the marshaller, not run inline.
+    assert seen == []
+    assert len(calls) == 1
+    calls[0]()  # simulate the GUI thread running it
+    assert seen == [{"x": 1}]
+
+
+def test_marshaller_not_invoked_when_no_subscribers():
+    bus = EventBus()
+    calls = []
+    bus.set_marshaller(lambda deliver: calls.append(deliver))
+    bus.emit("nobody_listening", x=1)
+    assert calls == []  # no subscribers → no delivery closure at all
+
+
+def test_clear_marshaller_restores_sync_delivery():
+    bus = EventBus()
+    seen = []
+    bus.subscribe("e", lambda **kw: seen.append(kw))
+    bus.set_marshaller(lambda deliver: None)  # swallow
+    bus.emit("e", x=1)
+    assert seen == []
+    bus.set_marshaller(None)
+    bus.emit("e", x=2)
+    assert seen == [{"x": 2}]  # synchronous again

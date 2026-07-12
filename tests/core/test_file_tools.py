@@ -204,3 +204,26 @@ def test_new_tools_have_definitions():
 
     names = {entry["function"]["name"] for entry in TOOL_DEFINITIONS}
     assert {"file_delete", "dir_create", "dir_delete"} <= names
+
+
+# ── secret redaction on read ────────────────────────────────────────
+
+
+async def test_file_read_redacts_embedded_secret(file_ops):
+    from polyglot_ai.core.ai.tools.file_tools import file_read
+
+    (file_ops.project_root / "config.py").write_text(
+        'API_KEY = "sk-abc123DEF456ghi789JKL012mno345PQR"\nDEBUG = True\n'
+    )
+    result = await file_read(file_ops, {"path": "config.py"})
+    assert "sk-abc123DEF456ghi789JKL012mno345PQR" not in result
+    assert "[SECRET_REDACTED]" in result
+    assert "DEBUG = True" in result  # non-secret content preserved
+
+
+async def test_file_read_plain_file_unchanged(file_ops):
+    from polyglot_ai.core.ai.tools.file_tools import file_read
+
+    (file_ops.project_root / "hello.py").write_text("print('hello world')\n")
+    result = await file_read(file_ops, {"path": "hello.py"})
+    assert result == "print('hello world')\n"

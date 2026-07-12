@@ -64,3 +64,23 @@ class TestIsReadOnlyQuery:
     def test_empty_query_is_not_readonly(self):
         assert is_readonly_query("") is False
         assert is_readonly_query("   ") is False
+
+
+class TestPragma:
+    def test_pragma_query_form_is_readonly(self):
+        assert is_readonly_query("PRAGMA foreign_keys") is True
+        assert is_readonly_query("PRAGMA database_list") is True
+
+    def test_pragma_function_form_conservatively_needs_approval(self):
+        # ``PRAGMA table_info(users)`` is genuinely read-only, but the
+        # conservative '(' rule marks it non-readonly. That only costs an
+        # extra approval click — the safe direction to err in.
+        assert is_readonly_query("PRAGMA table_info(users)") is False
+
+    def test_pragma_assignment_is_write(self):
+        assert is_readonly_query("PRAGMA journal_mode=WAL") is False
+        assert is_readonly_query("PRAGMA foreign_keys=OFF") is False
+        assert is_readonly_query("PRAGMA writable_schema=ON") is False
+
+    def test_pragma_assignment_with_spaces_is_write(self):
+        assert is_readonly_query("PRAGMA journal_mode = DELETE") is False

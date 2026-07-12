@@ -91,6 +91,20 @@ async def shell_exec(sandbox, args: dict) -> str:
     if timeout is not None:
         kwargs["timeout"] = timeout
     output, returncode = await sandbox.exec_command(command, workdir, **kwargs)
+    # Allowlisted commands like ``cat``, ``grep -r``, ``git log -p`` and
+    # ``printenv`` routinely surface secrets from file contents, env
+    # vars, or history. Redact before the output reaches the LLM
+    # provider (and its logs), mirroring the MCP tool-result path. A
+    # generous cap keeps legitimate build/test output intact while
+    # still stripping credential-shaped strings.
+    from polyglot_ai.core.security import (
+        redact_secrets_in_content,
+        redact_sensitive_output,
+    )
+
+    if output:
+        output = redact_sensitive_output(output, max_length=200_000)
+        output = redact_secrets_in_content(output)
     result = output if output else "(no output)"
     if returncode != 0:
         result += f"\n[exit code: {returncode}]"

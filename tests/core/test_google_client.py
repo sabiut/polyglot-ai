@@ -201,3 +201,70 @@ async def test_two_sequential_function_calls_get_distinct_running_indices():
     # Intervening text came through in order
     deltas = [c.delta_content for c in out if c.delta_content]
     assert deltas == ["..."]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_emits_finish_reason():
+    """A function_call must produce finish_reason='tool_calls' so the
+    agent/plan loops actually execute the tool (regression)."""
+    chunks = [_tool_chunk(_fcall("get_weather", {"city": "Paris"}))]
+    client, _ = _make_client(chunks)
+
+    out = []
+    async for chunk in client.stream_chat(
+        messages=[{"role": "user", "content": "weather?"}],
+        model="gemini-3.1-pro-preview",
+        tools=[{"function": {"name": "get_weather", "parameters": {}}}],
+    ):
+        out.append(chunk)
+
+    finish = [c.finish_reason for c in out if c.finish_reason]
+    assert finish == ["tool_calls"]
+
+
+@pytest.mark.asyncio
+async def test_plain_text_has_no_tool_finish_reason():
+    chunks = [_text_chunk("just talking")]
+    client, _ = _make_client(chunks)
+    out = [c async for c in client.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="gemini-3.1-pro-preview",
+    )]
+    assert all(c.finish_reason != "tool_calls" for c in out)
+
+
+@pytest.mark.asyncio
+async def test_tool_history_converted_to_function_parts():
+    """Assistant tool_calls and tool results convert to Gemini
+    function_call / function_response parts, not dropped/mislabeled."""
+    chunks = [_text_chunk("done")]
+    client, _ = _make_client(chunks)
+    history = [
+        {"role": "user", "content": "weather in Paris?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "18C sunny"},
+    ]
+    out = [c async for c in client.stream_chat(
+        messages=history, model="gemini-3.1-pro-preview",
+    )]
+    assert out  # completed without error
+
+    sent = client._client.aio.models.last_kwargs["contents"]
+    # user turn, assistant function_call turn, tool function_response turn
+    roles = [c.role for c in sent]
+    assert roles == ["user", "model", "user"]
+    # assistant turn carries a function_call part with parsed args
+    fc_part = sent[1].parts[0]
+    assert fc_part.function_call.name == "get_weather"
+    assert fc_part.function_call.args == {"city": "Paris"}
+    # tool turn carries a function_response keyed by the function name
+    fr_part = sent[2].parts[0]
+    assert fr_part.function_response.name == "get_weather"
+    assert fr_part.function_response.response == {"result": "18C sunny"}

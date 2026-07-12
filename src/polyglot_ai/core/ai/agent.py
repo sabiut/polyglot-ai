@@ -14,8 +14,9 @@ from polyglot_ai.constants import (
     EVT_APPROVAL_RESPONSE,
     MAX_AGENT_ITERATIONS,
 )
-from polyglot_ai.core.ai.models import Conversation, Message, ToolCall
+from polyglot_ai.core.ai.models import Conversation, Message
 from polyglot_ai.core.ai.provider import AIProvider
+from polyglot_ai.core.ai.tool_streaming import ToolCallAccumulator
 from polyglot_ai.core.ai.tools import ToolRegistry
 from polyglot_ai.core.bridge import EventBus
 
@@ -134,7 +135,7 @@ class AgentLoop:
                 # but the reasoning can be echoed back next turn —
                 # DeepSeek's API rejects the request if it isn't.
                 full_reasoning = ""
-                tool_calls_data: dict[int, dict] = {}
+                tool_acc = ToolCallAccumulator()
                 finish_reason = None
 
                 async for chunk in self._client.stream_chat(
@@ -147,36 +148,13 @@ class AgentLoop:
                     if chunk.delta_reasoning:
                         full_reasoning += chunk.delta_reasoning
 
-                    if chunk.tool_calls:
-                        for tc in chunk.tool_calls:
-                            idx = tc["index"]
-                            if idx not in tool_calls_data:
-                                tool_calls_data[idx] = {
-                                    "id": tc.get("id", ""),
-                                    "function": {"name": "", "arguments": ""},
-                                }
-                            if tc.get("id"):
-                                tool_calls_data[idx]["id"] = tc["id"]
-                            func = tc.get("function", {})
-                            if func.get("name"):
-                                tool_calls_data[idx]["function"]["name"] = func["name"]
-                            if func.get("arguments"):
-                                tool_calls_data[idx]["function"]["arguments"] += func["arguments"]
+                    tool_acc.add_chunk(chunk.tool_calls)
 
                     if chunk.finish_reason:
                         finish_reason = chunk.finish_reason
 
                 # Store assistant message
-                tool_calls_list = None
-                if tool_calls_data:
-                    tool_calls_list = [
-                        ToolCall(
-                            id=tc["id"],
-                            function_name=tc["function"]["name"],
-                            arguments=tc["function"]["arguments"],
-                        )
-                        for tc in tool_calls_data.values()
-                    ]
+                tool_calls_list = tool_acc.build() or None
 
                 assistant_msg = Message(
                     role="assistant",

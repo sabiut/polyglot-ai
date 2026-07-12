@@ -212,6 +212,16 @@ class Dependency:
     # single pkexec'd shell and runs userland deps as the calling
     # user, so a missing pip package won't drag a sudo prompt.
     requires_root: bool = True
+    # Optional: an executable this dep's *install command* needs to
+    # run at all (e.g. the Codex CLI installs via ``npm``). When the
+    # tool is missing, the installer either defers this dep until
+    # after the batch that provides it, or skips it with a clear
+    # message — instead of letting the whole run die on exit 127.
+    requires_command: str = ""
+    # Optional: executables that installing THIS dep puts on PATH
+    # (e.g. Node.js provides ``npm``/``npx``). Lets the installer
+    # resolve ``requires_command`` chains within a single run.
+    provides_commands: tuple[str, ...] = field(default_factory=tuple)
 
     def is_installed(self) -> bool:
         # 1) Executable on PATH or in a known userland bin dir.
@@ -309,6 +319,7 @@ DEPENDENCIES: list[Dependency] = [
         key="node",
         name="Node.js (npx)",
         command="npx",
+        provides_commands=("node", "npm", "npx"),
         purpose="MCP servers: sequential-thinking, memory, filesystem, github, playwright, …",
         install_urls={
             "debian": "sudo apt install nodejs npm",
@@ -511,6 +522,10 @@ DEPENDENCIES: list[Dependency] = [
         # Userland — global npm installs land under the user's
         # nvm / npm prefix on most setups.
         requires_root=False,
+        # The install command itself shells out to npm; without
+        # Node.js present (or being installed in the same run) it
+        # can only fail with "npm: not found".
+        requires_command="npm",
     ),
     Dependency(
         key="claude-cli",
@@ -792,6 +807,40 @@ def _run_userland_install(chained: str, log_path: Path) -> InstallResult:
     )
 
 
+def _bucket_deps(
+    runnable: list[Dependency],
+) -> tuple[list[Dependency], list[Dependency], list[str]]:
+    """Split runnable deps into ``(userland, root, unsatisfied)`` batches.
+
+    Stable order: userland first (no auth prompt), then root via a
+    single pkexec. On top of the plain ``requires_root`` split, a
+    userland dep whose *install command* needs a missing tool is
+    re-bucketed — e.g. the Codex CLI installs via ``npm``, which
+    doesn't exist until Node.js (a root dep) is installed. Left in
+    the userland batch it fails with exit 127 and aborts the run
+    before the root batch ever installs Node. So:
+
+    * a root dep in this run provides the tool → defer to the END
+      of the root batch, where the tool exists by then;
+    * nothing in this run provides it → return it in
+      ``unsatisfied`` (human-readable reasons) so the caller can
+      skip it with a clear message instead of killing the run.
+    """
+    user_deps = [d for d in runnable if not d.requires_root]
+    root_deps = [d for d in runnable if d.requires_root]
+    unsatisfied: list[str] = []
+    for dep in list(user_deps):
+        need = dep.requires_command
+        if not need or find_executable(need):
+            continue
+        user_deps.remove(dep)
+        if any(need in provider.provides_commands for provider in root_deps):
+            root_deps.append(dep)
+        else:
+            unsatisfied.append(f"{dep.name} (needs `{need}` — install it first, then retry)")
+    return user_deps, root_deps, unsatisfied
+
+
 def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None) -> InstallResult:
     """Install a set of dependencies, splitting userland from root.
 
@@ -849,10 +898,27 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
         )
         return InstallResult(ok=False, message="Nothing to install.")
 
-    # Stable order: userland first (no auth), then root via pkexec.
-    user_deps = [d for d in runnable if not d.requires_root]
-    root_deps = [d for d in runnable if d.requires_root]
-    total = len(runnable)
+    user_deps, root_deps, unsatisfied = _bucket_deps(runnable)
+
+    if unsatisfied:
+        logger.warning("install_system_deps: prerequisites missing, skipping: %s", unsatisfied)
+    skip_note = (
+        " Skipped because a prerequisite is missing: " + "; ".join(unsatisfied)
+        if unsatisfied
+        else ""
+    )
+
+    if not user_deps and not root_deps:
+        return InstallResult(
+            ok=False,
+            message=(
+                "Nothing could be installed automatically."
+                + skip_note
+                + " Use 'Copy all commands' and run them in order in a terminal."
+            ),
+        )
+
+    total = len(user_deps) + len(root_deps)
 
     if log_path is None:
         log_path = _new_installer_log_path()
@@ -879,7 +945,7 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
                 ok=True,
                 message=(
                     "Installer finished successfully. Restart Polyglot AI so the new "
-                    f"packages are picked up. Full log: {log_path}"
+                    f"packages are picked up.{skip_note} Full log: {log_path}"
                 ),
                 log_path=log_path,
             )
@@ -1027,7 +1093,7 @@ def install_system_deps(deps: list[Dependency], *, log_path: Path | None = None)
             ok=True,
             message=(
                 "Installer finished successfully. Restart Polyglot AI so the new "
-                f"binaries show up on PATH. Full log: {log_path}"
+                f"binaries show up on PATH.{skip_note} Full log: {log_path}"
             ),
             log_path=log_path,
         )

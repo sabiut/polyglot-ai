@@ -11,12 +11,74 @@ Currently exposes:
   severity and/or file substring. The model should call this after
   seeing the ``PANEL STATE`` block in the system prompt when the
   user asks about specific findings.
+- :func:`terminal_read` — tail of the integrated terminal's buffer
+  (scrollback + visible), so the model can see what the user is
+  doing in the Terminal panel without them copy-pasting output.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
+
+#: Hard cap on characters returned by ``terminal_read`` — keeps one
+#: tool result from flooding the context window when the scrollback
+#: holds e.g. a full build log. Tail-biased: the newest output wins.
+_TERMINAL_MAX_CHARS = 24_000
+
+
+async def terminal_read(args: dict) -> str:
+    """Return the tail of the integrated terminal's buffer.
+
+    Arguments (all optional):
+
+    - ``lines``: how many lines from the end of the buffer to return.
+      Default 100, capped at 1000.
+
+    Returns a JSON string. ``{"available": false, ...}`` when the
+    Terminal panel isn't running (e.g. headless tests, or the shell
+    hasn't been started) so the model can say so instead of guessing.
+    The text is additionally capped at ``_TERMINAL_MAX_CHARS``
+    characters, newest output first to survive the cut.
+    """
+    from polyglot_ai.core import panel_state
+
+    text = panel_state.read_terminal()
+    if text is None:
+        return json.dumps(
+            {
+                "available": False,
+                "message": (
+                    "No terminal is running. Ask the user to open the "
+                    "Terminal panel — its output becomes readable here."
+                ),
+            }
+        )
+
+    try:
+        lines = int(args.get("lines") or 100)
+    except (TypeError, ValueError):
+        lines = 100
+    lines = max(1, min(lines, 1000))
+
+    all_lines = text.splitlines()
+    tail = all_lines[-lines:]
+    clipped = "\n".join(tail)
+    truncated_chars = False
+    if len(clipped) > _TERMINAL_MAX_CHARS:
+        clipped = clipped[-_TERMINAL_MAX_CHARS:]
+        truncated_chars = True
+
+    return json.dumps(
+        {
+            "available": True,
+            "total_lines": len(all_lines),
+            "returned_lines": min(len(tail), len(all_lines)),
+            "truncated": len(all_lines) > lines or truncated_chars,
+            "text": clipped,
+        },
+        indent=2,
+    )
 
 
 async def get_review_findings(args: dict) -> str:

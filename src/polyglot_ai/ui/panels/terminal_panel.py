@@ -703,6 +703,26 @@ class TerminalWidget(QWidget):
             f"```\n{text}\n```"
         )
         chat.prefill_input(framed)
+        # Chat lives in the right-side tab widget — prefilling alone is
+        # invisible unless that tab is active and the strip is shown, so
+        # raise it (same pattern as test_panel's "Fix with AI").
+        right_tabs = getattr(window, "_right_tabs", None)
+        if right_tabs is None:
+            return
+        try:
+            idx = right_tabs.indexOf(chat)
+            if idx >= 0:
+                right_tabs.setCurrentIndex(idx)
+            if not right_tabs.isVisible():
+                # Go through the View-menu toggle when we can so the
+                # menu's checked state stays in sync with reality.
+                toggle = getattr(window, "_action_toggle_chat", None)
+                if toggle is not None:
+                    toggle.setChecked(True)
+                else:
+                    right_tabs.setVisible(True)
+        except Exception:
+            logger.debug("Send to AI: couldn't raise chat tab", exc_info=True)
 
     def _copy_all_with_scrollback(self) -> None:
         """Copy the full buffer (scrollback + visible) to the clipboard.
@@ -967,6 +987,20 @@ class TerminalPanel(QWidget):
         # GUI-thread slots for the cross-thread PTY signals.
         self._pty_output.connect(self._on_output)
         self._pty_exited.connect(self._on_exited)
+
+        # Let the AI's ``terminal_read`` tool see the buffer. A lazy
+        # reader (not a pushed snapshot) because terminal output churns
+        # on every PTY write; the bound method survives shell restarts
+        # since it always reads whatever emulator is current.
+        from polyglot_ai.core import panel_state
+
+        panel_state.set_terminal_reader(self._read_buffer_for_ai)
+
+    def _read_buffer_for_ai(self) -> str | None:
+        """Return the full terminal buffer, or None when no shell is running."""
+        if self._emulator is None:
+            return None
+        return self._emulator.get_all_text()
 
     def start_terminal(
         self,

@@ -704,6 +704,34 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "terminal_read",
+            "description": (
+                "Read the tail of the user's integrated Terminal panel — "
+                "scrollback plus the visible screen, as plain text. Call "
+                "this whenever the user refers to their terminal, a command "
+                "they just ran, an error they're looking at, or asks 'can "
+                "you see my terminal?'. Read-only: it never types into or "
+                "otherwise affects the terminal. Returns available=false "
+                "when no terminal is running."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lines": {
+                        "type": "integer",
+                        "description": (
+                            "How many lines from the end of the buffer to "
+                            "return. Default 100, max 1000."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_review_findings",
             "description": (
                 "Return findings from the most recent code review run in the "
@@ -978,6 +1006,9 @@ AUTO_APPROVE = {
     "db_get_schema",
     # Panel state (read-only snapshot of UI state)
     "get_review_findings",
+    # Terminal buffer read — same trust level as the user's existing
+    # "Send selection to AI" action, just without the manual selection.
+    "terminal_read",
     # Arduino — read-only state inspection. No filesystem writes,
     # no subprocess that mutates anything.
     "arduino_get_state",

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
     QTextBrowser,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -50,6 +51,12 @@ class ChatMessage(QWidget):
         super().__init__(parent)
         self._role = role
         self._content = content
+        # Collapsible "thinking" panel — built lazily the first time a
+        # reasoning delta arrives (only assistant messages ever get one).
+        self._content_col: QVBoxLayout | None = None
+        self._reasoning_toggle: QToolButton | None = None
+        self._reasoning_view: QTextBrowser | None = None
+        self._reasoning_buffer = ""
         # Throttle markdown re-renders during streaming so the GUI stays
         # responsive.  Instead of re-rendering on every token, we buffer
         # incoming text and flush at most every 80 ms.
@@ -127,6 +134,9 @@ class ChatMessage(QWidget):
             content_col = QVBoxLayout()
             content_col.setSpacing(2)
             content_col.setContentsMargins(2, 0, 0, 0)
+            # Kept so a reasoning panel can be inserted above the content
+            # if the model streams extended-thinking output.
+            self._content_col = content_col
 
             # Content
             self._content_label = QTextBrowser()
@@ -500,6 +510,54 @@ class ChatMessage(QWidget):
         if self._render_dirty:
             self._render_dirty = False
             self._set_content(self._content)
+
+    def append_reasoning(self, text: str) -> None:
+        """Stream extended-thinking / reasoning text into a collapsible panel.
+
+        No-op for user/system rows. The panel is built on first use and
+        sits above the answer, collapsed by default so it doesn't crowd
+        out the response. Used for Claude's extended thinking and any
+        other provider that exposes chain-of-thought summaries.
+        """
+        if self._is_user or not text or self._content_col is None:
+            return
+        if self._reasoning_view is None:
+            self._build_reasoning_ui()
+        self._reasoning_buffer += text
+        self._reasoning_view.setPlainText(self._reasoning_buffer)
+        # Grow the panel to fit, capped so a long chain-of-thought scrolls
+        # rather than pushing the answer off-screen.
+        doc_h = int(self._reasoning_view.document().size().height()) + 8
+        self._reasoning_view.setFixedHeight(min(max(doc_h, 24), 220))
+
+    def _build_reasoning_ui(self) -> None:
+        toggle = QToolButton()
+        toggle.setText("💭 Thinking")
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle.setStyleSheet(
+            "QToolButton { background: transparent; color: #9aa0a6; border: none; "
+            "font-size: 12px; font-style: italic; padding: 2px 0; text-align: left; }"
+            "QToolButton:hover { color: #c8c8c8; }"
+        )
+
+        view = QTextBrowser()
+        view.setReadOnly(True)
+        view.setFrameShape(QTextBrowser.Shape.NoFrame)
+        view.setVisible(False)
+        view.setStyleSheet(
+            "QTextBrowser { color: #8a8f98; font-size: 12px; background: #1b1b1d; "
+            "border-left: 2px solid #3a3a3d; border-radius: 4px; padding: 6px 8px; "
+            "font-family: -apple-system, 'Segoe UI', sans-serif; line-height: 140%; }"
+        )
+        toggle.toggled.connect(view.setVisible)
+
+        # Insert above the answer (content label is at index 0 in the column).
+        self._content_col.insertWidget(0, view)
+        self._content_col.insertWidget(0, toggle)
+        self._reasoning_toggle = toggle
+        self._reasoning_view = view
 
     def set_final_content(self, content: str) -> None:
         self._render_timer.stop()

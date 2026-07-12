@@ -11,19 +11,40 @@ at every call site.
 from __future__ import annotations
 
 MODEL_CAPS: dict[str, dict] = {
-    "gpt-5.5": {
+    "gpt-5.6-sol": {
         "vision": True,
         "tools": True,
         "reasoning": False,
         "fast": False,
         "desc": "Latest flagship — most capable",
     },
-    "gpt-5.4": {
+    "gpt-5.6-terra": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Balanced — half the cost of Sol",
+    },
+    "gpt-5.6-luna": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": True,
+        "desc": "Cost-efficient and fast",
+    },
+    "gpt-5.5": {
         "vision": True,
         "tools": True,
         "reasoning": False,
         "fast": False,
         "desc": "Previous flagship — still strong",
+    },
+    "gpt-5.4": {
+        "vision": True,
+        "tools": True,
+        "reasoning": False,
+        "fast": False,
+        "desc": "Older flagship",
     },
     "o4-mini": {
         "vision": False,
@@ -32,19 +53,33 @@ MODEL_CAPS: dict[str, dict] = {
         "fast": True,
         "desc": "Efficient reasoning model",
     },
-    "claude-opus-4-7": {
+    "claude-opus-4-8": {
         "vision": True,
         "tools": True,
         "reasoning": True,
         "fast": False,
         "desc": "Latest Claude flagship",
     },
-    "claude-opus-4-6": {
+    "claude-sonnet-5": {
+        "vision": True,
+        "tools": True,
+        "reasoning": True,
+        "fast": False,
+        "desc": "Near-Opus quality at Sonnet cost",
+    },
+    "claude-opus-4-7": {
         "vision": True,
         "tools": True,
         "reasoning": True,
         "fast": False,
         "desc": "Previous flagship — still strong",
+    },
+    "claude-opus-4-6": {
+        "vision": True,
+        "tools": True,
+        "reasoning": True,
+        "fast": False,
+        "desc": "Older flagship",
     },
     "claude-sonnet-4-6": {
         "vision": True,

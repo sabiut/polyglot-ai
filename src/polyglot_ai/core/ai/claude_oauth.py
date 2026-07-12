@@ -31,8 +31,10 @@ CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 _MODEL_CACHE_TTL = 300  # seconds — cache model list for 5 minutes
 
 DEFAULT_MODELS = [
+    "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
 ]
 

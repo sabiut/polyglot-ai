@@ -589,7 +589,11 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._action_toggle_today)
 
         self._action_toggle_arduino = QAction("&Arduino", self)
-        self._action_toggle_arduino.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        # Ctrl+Shift+A belongs to the AI Chat toggle (see below and the
+        # wiki's shortcut table). Arduino uses Ctrl+Shift+B ("board") to
+        # avoid the collision where whichever QAction registered last
+        # silently stole the accelerator from the other.
+        self._action_toggle_arduino.setShortcut(QKeySequence("Ctrl+Shift+B"))
         self._action_toggle_arduino.triggered.connect(lambda: self._on_activity_changed("arduino"))
         view_menu.addAction(self._action_toggle_arduino)
 

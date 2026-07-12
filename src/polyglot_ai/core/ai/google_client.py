@@ -80,6 +80,16 @@ class GoogleClient(AIProvider):
     ) -> AsyncGenerator[StreamChunk, None]:
         try:
             # Convert messages to Gemini format
+            import json as _json
+
+            # Map each tool_call id → function name so a later role="tool"
+            # result can be attached to the right function_response (Gemini
+            # keys responses by function name, not by call id).
+            tool_name_by_id: dict[str, str] = {}
+            for msg in messages:
+                for tc in msg.get("tool_calls") or []:
+                    tool_name_by_id[tc.get("id", "")] = tc.get("function", {}).get("name", "")
+
             gemini_contents = []
             for msg in messages:
                 role = msg.get("role", "user")
@@ -88,11 +98,55 @@ class GoogleClient(AIProvider):
                     if not system_prompt:
                         system_prompt = content
                     continue
+
+                if role == "tool":
+                    # Tool result → Gemini function_response part on a
+                    # "user"-role turn. Without this the result was sent
+                    # as plain "model" text, so Gemini never saw a proper
+                    # response and would re-issue the same call.
+                    name = tool_name_by_id.get(msg.get("tool_call_id", ""), "tool")
+                    gemini_contents.append(
+                        types.Content(
+                            role="user",
+                            parts=[
+                                types.Part.from_function_response(
+                                    name=name or "tool",
+                                    response={"result": content if content is not None else ""},
+                                )
+                            ],
+                        )
+                    )
+                    continue
+
+                if role == "assistant" and msg.get("tool_calls"):
+                    # Assistant turn that called tools → function_call
+                    # parts (plus any leading text). Previously the tool
+                    # calls were dropped entirely and an empty-text part
+                    # was sent, corrupting multi-turn tool conversations.
+                    parts = []
+                    if content:
+                        parts.append(types.Part.from_text(text=content))
+                    for tc in msg["tool_calls"]:
+                        fn = tc.get("function", {})
+                        raw_args = fn.get("arguments", "") or "{}"
+                        try:
+                            call_args = _json.loads(raw_args) if raw_args else {}
+                        except (ValueError, TypeError):
+                            call_args = {}
+                        parts.append(
+                            types.Part.from_function_call(
+                                name=fn.get("name", ""),
+                                args=call_args,
+                            )
+                        )
+                    gemini_contents.append(types.Content(role="model", parts=parts))
+                    continue
+
                 gemini_role = "user" if role == "user" else "model"
                 gemini_contents.append(
                     types.Content(
                         role=gemini_role,
-                        parts=[types.Part.from_text(text=content)],
+                        parts=[types.Part.from_text(text=content or "")],
                     )
                 )
 
@@ -139,6 +193,11 @@ class GoogleClient(AIProvider):
             # Running counter so each function call gets a unique index
             # across all streaming chunks (not just within a single chunk).
             next_tool_idx = 0
+            # Track whether the model asked to call any tool so we can
+            # signal ``finish_reason="tool_calls"`` at the end. Without
+            # it, the agent loop (agent.py) and plan executor break out
+            # immediately and Gemini tool calls never execute.
+            emitted_tool_call = False
 
             async for chunk in self._client.aio.models.generate_content_stream(
                 model=model,
@@ -178,6 +237,7 @@ class GoogleClient(AIProvider):
                             # in place rather than emit a start+args pair.
                             sc.tool_calls[0]["function"]["arguments"] = args_str
                             yield sc
+                            emitted_tool_call = True
 
                 # Check for usage metadata
                 if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
@@ -189,6 +249,12 @@ class GoogleClient(AIProvider):
                             "total_tokens": getattr(um, "total_token_count", 0) or 0,
                         }
                     )
+
+            # Mirror the other providers: a terminal chunk carrying the
+            # stop reason. The agent/plan loops key tool execution off
+            # ``finish_reason in ("tool_calls", "tool_use")``.
+            if emitted_tool_call:
+                yield StreamChunk(finish_reason="tool_calls")
 
             self._emit_stream_done()
 

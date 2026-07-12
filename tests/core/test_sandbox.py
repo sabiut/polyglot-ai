@@ -206,3 +206,46 @@ async def test_exec_command_user_approved_bypasses_allowlist(sandbox):
     """exec_command with user_approved=True should allow non-allowlisted commands."""
     output, code = await sandbox.exec_command("date", user_approved=True)
     assert code == 0
+
+
+# ── Git global-option hardening (config-injection / sandbox escape) ──
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "git -c core.fsmonitor=/tmp/evil.sh status",
+        "git -c core.pager=/tmp/evil log",
+        "git -c core.sshCommand=/tmp/evil fetch",
+        "git --exec-path=/tmp/evil status",
+        "git --config-env=core.pager=X status",
+        "git -C /etc log",
+        "git -C /home/other/repo log",
+        "git -C ../.. log",
+    ],
+)
+def test_git_dangerous_global_options_blocked(sandbox, cmd):
+    ok, reason = sandbox.validate_command(cmd)
+    assert not ok, f"expected {cmd!r} to be blocked"
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "git status",
+        "git -C . status",
+        "git -C subdir log",
+        "git log --oneline -n 5",
+        "git diff HEAD~1",
+        "git show HEAD",
+    ],
+)
+def test_git_legitimate_readonly_allowed(sandbox, cmd):
+    ok, reason = sandbox.validate_command(cmd)
+    assert ok, f"expected {cmd!r} to be allowed, got: {reason}"
+
+
+def test_git_mutating_subcommand_still_blocked(sandbox):
+    ok, _ = sandbox.validate_command("git commit -m x")
+    assert not ok
+    ok, _ = sandbox.validate_command("git push")
+    assert not ok

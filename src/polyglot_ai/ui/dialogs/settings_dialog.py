@@ -545,11 +545,16 @@ class SettingsDialog(QDialog):
         self._default_model.setEditable(True)
         self._default_model.addItems(
             [
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
                 "gpt-5.5",
                 "gpt-5.4",
                 "o4-mini",
+                "claude-opus-4-8",
                 "claude-opus-4-7",
                 "claude-opus-4-6",
+                "claude-sonnet-5",
                 "claude-sonnet-4-6",
                 "gemini-3.1-pro-preview",
                 "gemini-3-flash-preview",

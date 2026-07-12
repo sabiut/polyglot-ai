@@ -138,6 +138,17 @@ def is_readonly_query(sql: str) -> bool:
     upper = cleaned.upper().lstrip()
     if upper.startswith("WITH"):
         return True
+    # PRAGMA is read-only only in its *query* form (``PRAGMA foreign_keys``).
+    # The assignment forms mutate connection/database state —
+    # ``PRAGMA journal_mode=WAL``, ``PRAGMA foreign_keys=OFF``,
+    # ``PRAGMA writable_schema=ON`` (the last enables sqlite_master
+    # tampering) — and most don't contain a _WRITE_KEYWORD to catch
+    # them. Treat any PRAGMA that assigns a value ('=' or '(...)') as
+    # a write.
+    if upper.startswith("PRAGMA"):
+        rest = cleaned[len("PRAGMA"):]
+        if "=" in rest or "(" in rest:
+            return False
     return upper.startswith(_READONLY_PREFIXES)
 
 

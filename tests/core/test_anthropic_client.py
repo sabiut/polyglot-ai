@@ -207,3 +207,156 @@ async def test_two_sequential_tool_calls_get_distinct_indices():
 
     deltas = [c.delta_content for c in out if c.delta_content]
     assert deltas == ["thinking..."]
+
+
+# ── extended thinking ───────────────────────────────────────────────
+
+from polyglot_ai.core.ai.anthropic_client import (  # noqa: E402
+    _is_thinking_error,
+    _supports_thinking,
+)
+
+
+def _thinking_start(index):
+    return SimpleNamespace(
+        type="content_block_start",
+        index=index,
+        content_block=SimpleNamespace(type="thinking"),
+    )
+
+
+def _thinking_delta(index, text):
+    # thinking_delta: has ``thinking`` but not ``text``/``partial_json``.
+    return SimpleNamespace(
+        type="content_block_delta",
+        index=index,
+        delta=SimpleNamespace(thinking=text),
+    )
+
+
+def _sig_delta(index, sig):
+    return SimpleNamespace(
+        type="content_block_delta",
+        index=index,
+        delta=SimpleNamespace(signature=sig),
+    )
+
+
+class TestThinkingSupport:
+    @pytest.mark.parametrize(
+        "model",
+        ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+         "claude-sonnet-5", "claude-sonnet-4-6"],
+    )
+    def test_supported_models(self, model):
+        assert _supports_thinking(model) is True
+
+    @pytest.mark.parametrize(
+        "model",
+        ["claude-opus-4-5", "claude-opus-4-1", "claude-opus-4-0",
+         "claude-sonnet-4-5", "claude-sonnet-4-0", "o4-mini", "gpt-5.6-sol"],
+    )
+    def test_unsupported_models(self, model):
+        assert _supports_thinking(model) is False
+
+    def test_is_thinking_error(self):
+        assert _is_thinking_error("messages.1: expected `thinking` block") is True
+        assert _is_thinking_error("redacted_thinking required") is True
+        assert _is_thinking_error("temperature is not supported") is False
+
+
+@pytest.mark.asyncio
+async def test_thinking_enabled_in_kwargs_for_reasoning_model():
+    client, _ = _make_client([_text_start(0), _text_delta(0, "hi")])
+    out = [c async for c in client.stream_chat(
+        messages=[{"role": "user", "content": "x"}],
+        model="claude-opus-4-8",
+    )]
+    kwargs = client._client.messages.last_kwargs
+    assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
+    # Thinking models reject temperature — it must be omitted.
+    assert "temperature" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_thinking_not_enabled_for_old_model():
+    client, _ = _make_client([_text_start(0), _text_delta(0, "hi")])
+    _ = [c async for c in client.stream_chat(
+        messages=[{"role": "user", "content": "x"}],
+        model="claude-opus-4-5",
+        temperature=0.5,
+    )]
+    kwargs = client._client.messages.last_kwargs
+    assert "thinking" not in kwargs
+    assert kwargs.get("temperature") == 0.5
+
+
+@pytest.mark.asyncio
+async def test_thinking_delta_becomes_reasoning():
+    events = [
+        _thinking_start(0),
+        _thinking_delta(0, "Let me think"),
+        _sig_delta(0, "abc123"),  # ignored, must not crash or become content
+        _text_start(1),
+        _text_delta(1, "Answer"),
+    ]
+    client, _ = _make_client(events)
+    out = [c async for c in client.stream_chat(
+        messages=[{"role": "user", "content": "x"}],
+        model="claude-opus-4-8",
+    )]
+    reasoning = [c.delta_reasoning for c in out if c.delta_reasoning]
+    content = [c.delta_content for c in out if c.delta_content]
+    assert reasoning == ["Let me think"]
+    assert content == ["Answer"]
+
+@pytest.mark.asyncio
+async def test_thinking_strip_and_retry_on_thinking_400():
+    """A thinking-related 400 (e.g. reloaded conv missing thinking blocks)
+    must strip thinking and retry, not surface an error."""
+    from anthropic import BadRequestError
+
+    err = BadRequestError.__new__(BadRequestError)
+    Exception.__init__(err, "messages.1: expected `thinking` block, got text")
+
+    calls = {"n": 0}
+    good_stream = _FakeMessagesStream([_text_start(0), _text_delta(0, "ok")])
+
+    class _RetryStream:
+        async def __aenter__(self):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise err
+            return await good_stream.__aenter__()
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def __aiter__(self):
+            async for e in good_stream.__aiter__():
+                yield e
+
+        async def get_final_message(self):
+            return None
+
+    class _RetryMessages:
+        def __init__(self):
+            self.last_kwargs = None
+            self._s = _RetryStream()
+
+        def stream(self, **kwargs):
+            self.last_kwargs = kwargs
+            return self._s
+
+    bus = EventBus()
+    client = AnthropicClient.__new__(AnthropicClient)
+    AIProvider.__init__(client, bus)
+    client._client = SimpleNamespace(messages=_RetryMessages())
+
+    out = [c async for c in client.stream_chat(
+        messages=[{"role": "user", "content": "x"}],
+        model="claude-opus-4-8",
+    )]
+    assert calls["n"] == 2, "should have retried once"
+    assert "thinking" not in client._client.messages.last_kwargs
+    assert [c.delta_content for c in out if c.delta_content] == ["ok"]

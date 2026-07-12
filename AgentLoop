@@ -1,1 +1,0 @@
-if self._tools.needs_approval(tc.function_name):

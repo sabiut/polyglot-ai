@@ -39,6 +39,9 @@ class OpenAIClient(AIProvider):
         self._provider_name = provider_name
         self._provider_display_name = provider_display_name
         self._default_models = default_models or [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
             "gpt-5.5",
             "gpt-5.4",
             "o4-mini",

@@ -7,6 +7,7 @@ import logging
 from typing import Any, Callable
 
 from polyglot_ai.core.ai.plan_models import Plan, PlanStatus, PlanStep, PlanStepStatus
+from polyglot_ai.core.ai.tool_streaming import ToolCallAccumulator
 from polyglot_ai.core.bridge import EventBus
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ class PlanExecutor:
 
             # Stream response
             full_content = ""
-            tool_calls_data: dict[int, dict] = {}
+            tool_acc = ToolCallAccumulator()
             finish_reason = None
 
             async for chunk in self._provider.stream_chat(
@@ -115,53 +116,40 @@ class PlanExecutor:
                     if on_stream:
                         on_stream(step.index, chunk.delta_content)
 
-                if chunk.tool_calls:
-                    for tc in chunk.tool_calls:
-                        idx = tc["index"]
-                        if idx not in tool_calls_data:
-                            tool_calls_data[idx] = {
-                                "id": tc.get("id", ""),
-                                "name": "",
-                                "arguments": "",
-                            }
-                        if tc.get("id"):
-                            tool_calls_data[idx]["id"] = tc["id"]
-                        func = tc.get("function", {})
-                        if func.get("name"):
-                            tool_calls_data[idx]["name"] = func["name"]
-                        if func.get("arguments"):
-                            tool_calls_data[idx]["arguments"] += func["arguments"]
+                tool_acc.add_chunk(chunk.tool_calls)
 
                 if chunk.finish_reason:
                     finish_reason = chunk.finish_reason
 
+            tool_calls = tool_acc.build()
+
             # Store assistant message
             assistant_msg = {"role": "assistant", "content": full_content}
-            if tool_calls_data:
+            if tool_calls:
                 assistant_msg["tool_calls"] = [
                     {
-                        "id": v["id"],
+                        "id": tc.id,
                         "type": "function",
                         "function": {
-                            "name": v["name"],
-                            "arguments": v["arguments"],
+                            "name": tc.function_name,
+                            "arguments": tc.arguments,
                         },
                     }
-                    for i, v in tool_calls_data.items()
+                    for tc in tool_calls
                 ]
             self._messages.append(assistant_msg)
 
             # If no tool calls, step is done
-            if not tool_calls_data or finish_reason not in ("tool_calls", "tool_use"):
+            if not tool_calls or finish_reason not in ("tool_calls", "tool_use"):
                 step.result = full_content
                 break
 
             # Execute tool calls
-            for tc_idx, tc_data in tool_calls_data.items():
-                tool_name = tc_data["name"]
-                tool_call_id = tc_data["id"] or f"call_{tc_idx}"
+            for tc_idx, tc in enumerate(tool_calls):
+                tool_name = tc.function_name
+                tool_call_id = tc.id or f"call_{tc_idx}"
                 try:
-                    args = json.loads(tc_data["arguments"])
+                    args = json.loads(tc.arguments)
                 except Exception:
                     args = {}
 

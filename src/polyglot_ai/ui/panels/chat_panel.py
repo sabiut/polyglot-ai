@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.ai.models import Conversation, Message, ToolCall
+from polyglot_ai.core.ai.tool_streaming import ToolCallAccumulator
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels import chat_icons
 from polyglot_ai.ui.panels.chat_attachments import ATTACH_DIR as _ATTACH_DIR  # noqa: F401
@@ -758,10 +759,19 @@ class ChatPanel(QWidget):
 
     def _populate_default_models(self) -> None:
         self._default_grouped = {
-            "OpenAI": ["gpt-5.5", "gpt-5.4", "o4-mini"],
+            "OpenAI": [
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+                "gpt-5.4",
+                "o4-mini",
+            ],
             "Anthropic": [
+                "claude-opus-4-8",
                 "claude-opus-4-7",
                 "claude-opus-4-6",
+                "claude-sonnet-5",
                 "claude-sonnet-4-6",
             ],
             "Google": [
@@ -1519,8 +1529,13 @@ class ChatPanel(QWidget):
         # provider's API requires it echoed back on the next turn,
         # so it has to ride along on the persisted assistant Message.
         full_reasoning = ""
-        tool_calls_data: dict[int, dict] = {}
+        tool_acc = ToolCallAccumulator()
         usage_info = None
+        # True once the assistant turn (with any tool_calls) has been
+        # appended to conversation.messages. Used by the cancel handler
+        # so it doesn't append a *second*, text-only assistant message
+        # on top of the one already committed before tool execution.
+        assistant_committed = False
 
         try:
             async for chunk in provider.stream_chat(
@@ -1543,22 +1558,12 @@ class ChatPanel(QWidget):
 
                 if chunk.delta_reasoning:
                     full_reasoning += chunk.delta_reasoning
+                    # Surface extended-thinking / reasoning in the message's
+                    # collapsible panel (no-op for providers/models without it).
+                    if self._current_assistant_msg:
+                        self._current_assistant_msg.append_reasoning(chunk.delta_reasoning)
 
-                if chunk.tool_calls:
-                    for tc in chunk.tool_calls:
-                        idx = tc["index"]
-                        if idx not in tool_calls_data:
-                            tool_calls_data[idx] = {
-                                "id": tc.get("id", ""),
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        if tc.get("id"):
-                            tool_calls_data[idx]["id"] = tc["id"]
-                        func = tc.get("function", {})
-                        if func.get("name"):
-                            tool_calls_data[idx]["function"]["name"] = func["name"]
-                        if func.get("arguments"):
-                            tool_calls_data[idx]["function"]["arguments"] += func["arguments"]
+                tool_acc.add_chunk(chunk.tool_calls)
 
                 if chunk.usage:
                     usage_info = chunk.usage
@@ -1568,30 +1573,11 @@ class ChatPanel(QWidget):
                 self._current_assistant_msg._flush_render()
 
             tool_calls_list = None
-            if tool_calls_data:
-                logger.info(
-                    "Tool calls accumulated: %s",
-                    {
-                        k: {
-                            "id": v["id"],
-                            "name": v["function"]["name"],
-                            "args_len": len(v["function"]["arguments"]),
-                        }
-                        for k, v in tool_calls_data.items()
-                    },
-                )
-                tool_calls_list = [
-                    ToolCall(
-                        id=tc["id"],
-                        function_name=tc["function"]["name"],
-                        arguments=tc["function"]["arguments"],
-                    )
-                    for tc in tool_calls_data.values()
-                    if tc["function"]["name"]  # skip tool calls with empty names
-                ]
-                if not tool_calls_list:
+            if not tool_acc.empty:
+                logger.info("Tool calls accumulated: %s", tool_acc.summary())
+                tool_calls_list = tool_acc.build() or None
+                if tool_calls_list is None:
                     logger.warning("All tool calls filtered out (empty names)")
-                    tool_calls_list = None
 
             assistant_msg = Message(
                 role="assistant",
@@ -1603,6 +1589,7 @@ class ChatPanel(QWidget):
                 reasoning_content=full_reasoning if full_reasoning else None,
             )
             self._current_conversation.messages.append(assistant_msg)
+            assistant_committed = True
 
             if tool_calls_list:
                 logger.info(
@@ -1631,12 +1618,21 @@ class ChatPanel(QWidget):
                 total = usage_info.get("total_tokens", "?")
                 self._token_label.setText(f"Tokens: {total}")
 
-            await self._persist_conversation()
+            # Persistence happens in ``finally`` so it runs on the normal,
+            # cancelled, and errored paths alike (it's idempotent — only
+            # messages past ``_persisted_message_count`` are written).
 
         except asyncio.CancelledError:
-            # User stopped generation
-            if full_content and self._current_assistant_msg:
+            # User stopped generation. If we were cancelled mid-first-stream
+            # (before the assistant turn was committed at ``assistant_committed``),
+            # capture whatever text streamed so it isn't silently lost. If the
+            # turn was already committed (e.g. cancelled during tool execution),
+            # the ``finally`` persist below saves it — do NOT append a second
+            # assistant message, which would duplicate the turn and orphan the
+            # tool results.
+            if self._current_assistant_msg:
                 self._current_assistant_msg.append_content("\n\n*[Generation stopped]*")
+            if full_content and not assistant_committed:
                 self._current_conversation.messages.append(
                     Message(
                         role="assistant",
@@ -1644,7 +1640,6 @@ class ChatPanel(QWidget):
                         model=model_id,
                     )
                 )
-                await self._persist_conversation()
             self._add_system_message("Generation stopped.")
 
         except Exception as e:
@@ -1659,6 +1654,16 @@ class ChatPanel(QWidget):
             )
 
         finally:
+            # Persist unconditionally: a Stop pressed during tool execution or
+            # a mid-followup cancel must not drop the turn's messages (and the
+            # record of already-executed, side-effecting tool calls) from the
+            # database. Idempotent, so double-persist with the followup path is
+            # harmless. Guard so a persistence failure can't mask the original.
+            if self._current_conversation is not None:
+                try:
+                    await self._persist_conversation()
+                except Exception:
+                    logger.exception("chat_panel: persist on stream end failed")
             # Clean up thinking indicator if stream ended with no content
             if not first_token_received:
                 try:
@@ -1875,6 +1880,18 @@ class ChatPanel(QWidget):
                 except (ValueError, TypeError):
                     args = {}
                 result = await self._mcp_client.call_tool(tool_call.function_name, args)
+                # MCP-server tools run without the approval gate that
+                # built-in mutating tools pass through — the trust decision
+                # is made once, when the server is installed. Record each
+                # execution so that otherwise-invisible boundary is at least
+                # auditable after the fact. The tool name only: arguments
+                # can carry user data or secrets, so they stay out of the log.
+                window = self.window()
+                if hasattr(window, "audit"):
+                    window.audit.log(
+                        "mcp_tool_executed",
+                        {"tool": tool_call.function_name, "auto_approved": True},
+                    )
             elif self._tool_registry:
                 result = await self._tool_registry.execute(
                     tool_call.function_name, tool_call.arguments
@@ -1974,7 +1991,10 @@ class ChatPanel(QWidget):
         # reasoning_content has to round-trip through the assistant Message
         # so DeepSeek-class providers accept the next turn.
         full_reasoning = ""
-        tool_calls_data: dict[int, dict] = {}
+        tool_acc = ToolCallAccumulator()
+        # True once this follow-up's assistant message has been appended and
+        # its tool calls (if any) dispatched — see the cancel handler below.
+        followup_committed = False
         try:
             async for chunk in provider.stream_chat(
                 messages=messages,
@@ -1988,46 +2008,20 @@ class ChatPanel(QWidget):
                     self._scroll_to_bottom()
                 if chunk.delta_reasoning:
                     full_reasoning += chunk.delta_reasoning
-                if chunk.tool_calls:
-                    for tc in chunk.tool_calls:
-                        idx = tc["index"]
-                        if idx not in tool_calls_data:
-                            tool_calls_data[idx] = {
-                                "id": tc.get("id", ""),
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        if tc.get("id"):
-                            tool_calls_data[idx]["id"] = tc["id"]
-                        func = tc.get("function", {})
-                        if func.get("name"):
-                            tool_calls_data[idx]["function"]["name"] = func["name"]
-                        if func.get("arguments"):
-                            tool_calls_data[idx]["function"]["arguments"] += func["arguments"]
+                    if self._current_assistant_msg:
+                        self._current_assistant_msg.append_reasoning(chunk.delta_reasoning)
+                tool_acc.add_chunk(chunk.tool_calls)
 
+            tool_calls_list = tool_acc.build() or None
             logger.info(
                 "Follow-up stream done, content length: %d, tool_calls: %d",
                 len(full_content),
-                len(tool_calls_data),
+                len(tool_calls_list or []),
             )
 
             # Flush any buffered rendering from the throttled append_content
             if self._current_assistant_msg:
                 self._current_assistant_msg._flush_render()
-
-            # Build tool calls list
-            tool_calls_list = None
-            if tool_calls_data:
-                tool_calls_list = [
-                    ToolCall(
-                        id=tc["id"],
-                        function_name=tc["function"]["name"],
-                        arguments=tc["function"]["arguments"],
-                    )
-                    for tc in tool_calls_data.values()
-                    if tc["function"]["name"]
-                ]
-                if not tool_calls_list:
-                    tool_calls_list = None
 
             # Save assistant message
             self._current_conversation.messages.append(
@@ -2039,6 +2033,9 @@ class ChatPanel(QWidget):
                     reasoning_content=full_reasoning if full_reasoning else None,
                 )
             )
+            # Turn is now in conversation.messages; a later cancel (e.g.
+            # during the nested tool execution below) must not re-append it.
+            followup_committed = True
 
             # Execute any tool calls and recurse
             if tool_calls_list:
@@ -2048,13 +2045,31 @@ class ChatPanel(QWidget):
                 )
             elif full_content:
                 await self._auto_apply(full_content)
-
-            await self._persist_conversation()
         except asyncio.CancelledError:
-            pass
+            # Stop pressed mid-followup. If we streamed some text but hadn't
+            # yet committed the assistant message, capture it so it isn't lost.
+            if self._current_assistant_msg:
+                self._current_assistant_msg.append_content("\n\n*[Generation stopped]*")
+            if full_content and not followup_committed:
+                self._current_conversation.messages.append(
+                    Message(
+                        role="assistant",
+                        content=full_content + "\n\n[Generation stopped]",
+                        model=model_id,
+                        reasoning_content=full_reasoning if full_reasoning else None,
+                    )
+                )
         except Exception:
             logger.exception("Error during follow-up streaming")
         finally:
+            # Persist unconditionally (idempotent) so a cancel between the
+            # message-append above and the outer persist can't drop this
+            # turn's messages.
+            if self._current_conversation is not None:
+                try:
+                    await self._persist_conversation()
+                except Exception:
+                    logger.exception("chat_panel: persist on follow-up end failed")
             self._set_streaming_ui(False)
             self._current_assistant_msg = None
 

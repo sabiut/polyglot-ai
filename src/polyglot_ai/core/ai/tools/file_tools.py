@@ -29,7 +29,15 @@ async def file_read(file_ops, args: dict) -> str:
     if is_secret_file(p):
         return f"Error: Cannot read {p.name} — file appears to contain secrets"
 
-    return await asyncio.to_thread(file_ops.read, path)
+    content = await asyncio.to_thread(file_ops.read, path)
+    # The filename checks above only catch *known-secret* files (.env,
+    # id_rsa, …). A hardcoded key sitting inside an ordinary source file
+    # would otherwise flow verbatim to the LLM provider. file_read is
+    # auto-approved and the highest-traffic tool in the app, so redact
+    # the body the same way MCP tool output is redacted.
+    from polyglot_ai.core.security import redact_secrets_in_content
+
+    return redact_secrets_in_content(content)
 
 
 async def file_write(sandbox, file_ops, args: dict) -> str:

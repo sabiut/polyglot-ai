@@ -33,12 +33,17 @@ guarded by a lock so Qt and asyncio workers can't race.
 from __future__ import annotations
 
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 _lock = Lock()
 _last_review: dict[str, Any] | None = None
 _last_workflow_run: dict[str, Any] | None = None
 _last_arduino_state: dict[str, Any] | None = None
+# Unlike the snapshot values above, the terminal publishes a *reader*
+# callback instead of pushing state: terminal output churns constantly
+# and copying the whole buffer on every PTY write would be wasteful.
+# The reader is called lazily when the AI actually asks.
+_terminal_reader: Callable[[], str | None] | None = None
 
 
 def set_last_review(snapshot: dict[str, Any] | None) -> None:
@@ -98,10 +103,40 @@ def get_last_arduino_state() -> dict[str, Any] | None:
         return dict(_last_arduino_state) if _last_arduino_state is not None else None
 
 
+def set_terminal_reader(reader: Callable[[], str | None] | None) -> None:
+    """Register a callable that returns the terminal buffer as plain text.
+
+    The terminal panel registers this once at startup; pass ``None``
+    to unregister. The reader should return the full buffer
+    (scrollback + visible rows) or ``None`` when no terminal is
+    running. It is invoked on the GUI thread (the app's qasync loop),
+    so touching the emulator from it is safe.
+    """
+    global _terminal_reader
+    with _lock:
+        _terminal_reader = reader
+
+
+def read_terminal() -> str | None:
+    """Return the current terminal buffer text, or ``None`` if unavailable.
+
+    ``None`` means either no reader is registered (terminal panel not
+    constructed) or the reader itself reported no running terminal.
+    The lock guards only the pointer read — the reader is called
+    outside it so a slow read can't block publishers.
+    """
+    with _lock:
+        reader = _terminal_reader
+    if reader is None:
+        return None
+    return reader()
+
+
 def clear() -> None:
     """Reset all panel state. Primarily used by tests."""
-    global _last_review, _last_workflow_run, _last_arduino_state
+    global _last_review, _last_workflow_run, _last_arduino_state, _terminal_reader
     with _lock:
         _last_review = None
         _last_workflow_run = None
         _last_arduino_state = None
+        _terminal_reader = None

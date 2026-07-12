@@ -57,6 +57,7 @@ _STANDALONE_TOOL_NAMES = frozenset(
         "db_execute",
         # Panel state (reads in-process dict, no sandbox needed)
         "get_review_findings",
+        "terminal_read",
         # Arduino — read panel state and run arduino-cli / mpremote.
         # Standalone-safe: the service uses subprocess directly, not
         # the sandbox / file-ops layer.
@@ -496,6 +497,10 @@ class ToolRegistry:
                 from .panel_tools import get_review_findings
 
                 return await get_review_findings(args)
+            elif tool_name == "terminal_read":
+                from .panel_tools import terminal_read
+
+                return await terminal_read(args)
 
             # Arduino panel tools
             elif tool_name == "arduino_get_state":

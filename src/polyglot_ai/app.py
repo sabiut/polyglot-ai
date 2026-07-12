@@ -18,6 +18,33 @@ from polyglot_ai.ui.theme import ThemeManager
 logger = logging.getLogger(__name__)
 
 
+def cancel_pending_tasks(loop: asyncio.AbstractEventLoop) -> int:
+    """Cancel and drain any still-pending tasks before the loop closes.
+
+    Long-lived background work (e.g. the Arduino panel's periodic board
+    detection) can be mid-``await`` when the user quits. If the loop is
+    torn down with those tasks still pending, asyncio logs
+    "Task was destroyed but it is pending!" and the coroutine's ``finally``
+    blocks never run. Cancelling them here lets each unwind cleanly.
+
+    Returns the number of tasks that were cancelled. Safe to call with no
+    pending tasks (returns 0). Must be called while ``loop`` is not already
+    running (i.e. between ``run_until_complete`` calls at shutdown).
+    """
+    try:
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    except RuntimeError:
+        # No event loop / already closed — nothing to do.
+        return 0
+    if not pending:
+        return 0
+    for task in pending:
+        task.cancel()
+    # Drain so each cancelled task runs its except/finally to completion.
+    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    return len(pending)
+
+
 def setup_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "polyglot-ai.log"
@@ -512,6 +539,13 @@ def main() -> None:
             try:
                 loop.run_until_complete(mcp_client.disconnect_all())
                 loop.run_until_complete(db.close())
+                # Cancel any still-pending background tasks (e.g. the Arduino
+                # panel's in-flight board detection) so the loop doesn't get
+                # torn down with tasks mid-await — which logs "Task was
+                # destroyed but it is pending!" and skips their finally blocks.
+                cancelled = cancel_pending_tasks(loop)
+                if cancelled:
+                    logger.debug("Cancelled %d pending task(s) at shutdown", cancelled)
                 # Yield once so anyio task-group cancel scopes can finish
                 # unwinding before loop close; otherwise stdio_client cleanup
                 # raises 'no running event loop' on the final tick. 0.15s

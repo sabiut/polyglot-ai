@@ -206,6 +206,33 @@ class MCPClient:
         #: so UI components can refresh their cached tool lists. Signature:
         #: ``callback() -> None``. Exceptions are logged, not re-raised.
         self._connection_change_listeners: list = []
+        #: Lazily-opened file that captures MCP subprocesses' stderr.
+        #: Stdio MCP servers (uvx/npx-launched) write diagnostics — and,
+        #: on shutdown, a BrokenPipeError traceback when their stdout pipe
+        #: closes — to their own stderr. Left at the default ``sys.stderr``
+        #: that noise spams the terminal that launched the app. Routing it
+        #: to a log file keeps the diagnostics without the terminal spam.
+        self._stderr_log = None
+
+    def _mcp_stderr_log(self):
+        """Return an append-mode file handle for MCP subprocess stderr.
+
+        Opened once, lazily. Falls back to ``sys.stderr`` if the log file
+        can't be created so diagnostics are never silently dropped.
+        """
+        if self._stderr_log is not None:
+            return self._stderr_log
+        try:
+            from polyglot_ai.constants import LOG_DIR
+
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            self._stderr_log = open(LOG_DIR / "mcp-servers.log", "a", encoding="utf-8")
+        except OSError:
+            import sys
+
+            logger.warning("Could not open MCP stderr log; using stderr", exc_info=True)
+            self._stderr_log = sys.stderr
+        return self._stderr_log
 
     def add_connection_change_listener(self, callback) -> None:
         """Register a listener called after each connect/disconnect.
@@ -319,7 +346,10 @@ class MCPClient:
             import asyncio as _asyncio
 
             try:
-                transport_ctx = stdio_client(params)
+                # Route the subprocess's stderr to a log file instead of the
+                # launching terminal — keeps server diagnostics (and the
+                # shutdown BrokenPipeError traceback) out of the user's shell.
+                transport_ctx = stdio_client(params, errlog=self._mcp_stderr_log())
                 transport = await _asyncio.wait_for(transport_ctx.__aenter__(), timeout=180)
             except _asyncio.TimeoutError:
                 logger.error(
@@ -535,6 +565,18 @@ class MCPClient:
                 raise
             except Exception as e:
                 logger.warning("MCP '%s': disconnect failed: %s", name, e)
+
+        # Close the subprocess-stderr log if we opened one (never close the
+        # sys.stderr fallback). Do it after all servers are down so a late
+        # BrokenPipeError from a child still has somewhere to write.
+        import sys as _sys
+
+        if self._stderr_log is not None and self._stderr_log is not _sys.stderr:
+            try:
+                self._stderr_log.close()
+            except OSError:
+                pass
+            self._stderr_log = None
 
     def get_tool_definitions(self) -> list[dict]:
         """Get OpenAI function-calling format definitions for all MCP tools."""

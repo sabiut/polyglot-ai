@@ -21,10 +21,45 @@ from polyglot_ai.core.bridge import EventBus
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODELS = [
+    "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
 ]
+
+
+def _supports_thinking(model: str) -> bool:
+    """True for Claude models that support adaptive extended thinking.
+
+    Opus 4.6+ and Sonnet 4.6+ (and their successors) take
+    ``thinking={"type": "adaptive"}``. Older 4.0/3.x models and the
+    o-series don't, so we leave thinking off for them and send the
+    request unchanged.
+    """
+    m = model.lower()
+    if m.startswith("claude-opus-4-"):
+        # 4-6 and up; 4-0/4-1/4-5 predate adaptive thinking.
+        return any(m.startswith(f"claude-opus-4-{n}") for n in (6, 7, 8, 9))
+    if m.startswith("claude-sonnet-"):
+        # sonnet-5 and sonnet-4-6+.
+        return m.startswith("claude-sonnet-5") or any(
+            m.startswith(f"claude-sonnet-4-{n}") for n in (6, 7, 8, 9)
+        )
+    return False
+
+
+def _is_thinking_error(error_text: str) -> bool:
+    """Detect a 400 caused by extended-thinking constraints.
+
+    Covers both "this model rejects the thinking parameter" and the
+    round-trip rule "when thinking is enabled and the previous assistant
+    turn used tools, its thinking block must be echoed back" — which we
+    can't satisfy after the blocks are gone (e.g. a reloaded
+    conversation). In either case we strip thinking and retry.
+    """
+    t = error_text.lower()
+    return "thinking" in t or "redacted_thinking" in t
 
 
 class AnthropicClient(AIProvider):
@@ -160,7 +195,15 @@ class AnthropicClient(AIProvider):
             if system_prompt:
                 kwargs["system"] = system_prompt
 
-            if temperature is not None:
+            # Extended thinking: on reasoning-capable models, ask for
+            # adaptive thinking with a readable summary so the UI can show
+            # the model's reasoning. These models also reject ``temperature``
+            # (400), so we omit it for them rather than lean on the
+            # strip-and-retry below. Older models keep the old behavior.
+            thinking_enabled = _supports_thinking(model)
+            if thinking_enabled:
+                kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            elif temperature is not None:
                 kwargs["temperature"] = temperature
 
             # Convert OpenAI-style tools to Anthropic format
@@ -204,12 +247,20 @@ class AnthropicClient(AIProvider):
             except BadRequestError as e:
                 from polyglot_ai.core.security import sanitize_error
 
-                if (
-                    _is_temperature_deprecated_error(sanitize_error(str(e)))
-                    and "temperature" in kwargs
-                ):
+                err_text = sanitize_error(str(e))
+                if _is_temperature_deprecated_error(err_text) and "temperature" in kwargs:
                     logger.info("Model rejected temperature parameter; retrying without it")
                     kwargs.pop("temperature", None)
+                    stream_cm = self._client.messages.stream(**kwargs)
+                    stream = await stream_cm.__aenter__()
+                elif _is_thinking_error(err_text) and "thinking" in kwargs:
+                    # Most common cause: a reloaded conversation whose prior
+                    # assistant turn used tools but no longer carries its
+                    # thinking block, so the round-trip requirement fails.
+                    # Drop thinking and retry so the chat keeps working.
+                    logger.info("Thinking rejected for this request; retrying without it")
+                    kwargs.pop("thinking", None)
+                    thinking_enabled = False
                     stream_cm = self._client.messages.stream(**kwargs)
                     stream = await stream_cm.__aenter__()
                 else:
@@ -249,6 +300,15 @@ class AnthropicClient(AIProvider):
                         delta = event.delta
                         if hasattr(delta, "text"):
                             yield self._emit_text_delta(delta.text)
+                        elif hasattr(delta, "thinking"):
+                            # Summarized extended-thinking delta — surfaced
+                            # to the UI as reasoning, not answer content.
+                            yield StreamChunk(delta_reasoning=delta.thinking)
+                        elif hasattr(delta, "signature"):
+                            # signature_delta accompanies thinking blocks;
+                            # nothing to display, and we don't round-trip
+                            # signatures, so ignore it.
+                            continue
                         elif hasattr(delta, "partial_json"):
                             # Skip orphan deltas (no matching start) rather
                             # than misroute their JSON onto tool 0 — the

@@ -184,13 +184,57 @@ class Sandbox:
                     "config",  # read-only by default
                 }
             )
-            subcmd = parts[1]
-            # Skip flags before the subcommand (e.g. git -C /path status)
-            if subcmd.startswith("-"):
-                for p in parts[2:]:
-                    if not p.startswith("-"):
-                        subcmd = p
-                        break
+            # Parse the git-level global options that precede the
+            # subcommand. Git treats options *before* the subcommand
+            # specially, and several of them turn a "read-only" command
+            # into arbitrary code execution or a sandbox escape:
+            #   -c core.fsmonitor=… / core.pager=… / core.sshCommand=…
+            #     → runs an arbitrary binary during `status`/`log`/…
+            #   --exec-path=DIR → git looks for its helpers in DIR
+            #   --config-env / -C <path outside root> → config injection
+            #     or reading a repo outside the project.
+            # The previous flag-skipping loop mis-parsed value-consuming
+            # options (it treated a `-c` value as the subcommand), which
+            # accidentally blocked the injection *and* legitimate
+            # `git -C <path> status`. Parse them explicitly instead.
+            _VALUE_OPTS = {"-c", "-C", "--exec-path", "--config-env", "--git-dir", "--work-tree"}
+            _BLOCKED_GLOBAL_OPTS = {"-c", "--config-env", "--exec-path"}
+            i = 1
+            subcmd = None
+            while i < len(parts):
+                tok = parts[i]
+                if not tok.startswith("-"):
+                    subcmd = tok
+                    break
+                # ``--opt=value`` form — check the bare option name.
+                opt_name = tok.split("=", 1)[0]
+                if opt_name in _BLOCKED_GLOBAL_OPTS:
+                    return False, (
+                        f"Git global option '{opt_name}' is not allowed — it can run "
+                        f"arbitrary code or escape the project. Use the git_commit "
+                        f"tool or run it manually with approval."
+                    )
+                if opt_name == "-C":
+                    # Confine -C to the project root. The path is either
+                    # glued (`-C=x`, unusual) or the next token.
+                    if "=" in tok:
+                        cpath = tok.split("=", 1)[1]
+                    else:
+                        cpath = parts[i + 1] if i + 1 < len(parts) else ""
+                    try:
+                        (self._root / cpath).resolve().relative_to(self._root)
+                    except (ValueError, OSError):
+                        return False, (
+                            "git -C may only target paths inside the project root."
+                        )
+                # Skip this option's value token when it takes one as a
+                # separate argument (not the ``--opt=value`` glued form).
+                if opt_name in _VALUE_OPTS and "=" not in tok:
+                    i += 2
+                else:
+                    i += 1
+            if subcmd is None:
+                subcmd = parts[1]
             if subcmd not in _SAFE_GIT_SUBCMDS:
                 return False, (
                     f"Git subcommand '{subcmd}' requires approval. "
