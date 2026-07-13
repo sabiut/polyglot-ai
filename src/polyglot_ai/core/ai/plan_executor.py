@@ -44,7 +44,7 @@ class PlanExecutor:
         self,
         plan: Plan,
         on_stream: Callable[[int, str], None] | None = None,
-        on_tool_approval: Callable[[str, dict], Any] | None = None,
+        on_tool_approval: Callable[[str, str], Any] | None = None,
     ) -> None:
         """Execute all approved steps in a plan."""
         plan.status = PlanStatus.EXECUTING
@@ -78,7 +78,7 @@ class PlanExecutor:
         plan: Plan,
         step: PlanStep,
         on_stream: Callable[[int, str], None] | None,
-        on_tool_approval: Callable[[str, dict], Any] | None,
+        on_tool_approval: Callable[[str, str], Any] | None,
     ) -> None:
         """Execute a single plan step with tool calling loop."""
         # Build step prompt
@@ -123,19 +123,24 @@ class PlanExecutor:
 
             tool_calls = tool_acc.build()
 
+            # Normalize missing ids once — the id stored in the assistant
+            # message must match the tool_call_id of the corresponding
+            # tool-result message, or the provider rejects the next request.
+            tool_call_ids = [tc.id or f"call_{i}" for i, tc in enumerate(tool_calls)]
+
             # Store assistant message
             assistant_msg = {"role": "assistant", "content": full_content}
             if tool_calls:
                 assistant_msg["tool_calls"] = [
                     {
-                        "id": tc.id,
+                        "id": tool_call_ids[i],
                         "type": "function",
                         "function": {
                             "name": tc.function_name,
                             "arguments": tc.arguments,
                         },
                     }
-                    for tc in tool_calls
+                    for i, tc in enumerate(tool_calls)
                 ]
             self._messages.append(assistant_msg)
 
@@ -147,21 +152,22 @@ class PlanExecutor:
             # Execute tool calls
             for tc_idx, tc in enumerate(tool_calls):
                 tool_name = tc.function_name
-                tool_call_id = tc.id or f"call_{tc_idx}"
+                tool_call_id = tool_call_ids[tc_idx]
                 try:
                     args = json.loads(tc.arguments)
                 except Exception:
                     args = {}
 
-                # Check approval
+                # Check approval — the callback expects the raw JSON string
+                # (InlineApprovalCard json.loads()es it), not the parsed dict.
                 needs_approval = self._tools and not self._tools.is_auto_approved(tool_name)
                 if needs_approval and on_tool_approval:
-                    approved = await on_tool_approval(tool_name, args)
+                    approved = await on_tool_approval(tool_name, tc.arguments)
                     if not approved:
-                        step.status = PlanStepStatus.FAILED
-                        step.result = f"User rejected {tool_name}"
-                        self._bus.emit(EVT_PLAN_STEP_FAILED, plan=plan, step=step)
-                        return
+                        # Raise so execute()'s failure path handles it —
+                        # returning here would let the caller mark the
+                        # step COMPLETED and keep executing the plan.
+                        raise RuntimeError(f"User rejected {tool_name}")
 
                 # Execute tool — ToolRegistry.execute() expects a JSON string
                 if self._tools:

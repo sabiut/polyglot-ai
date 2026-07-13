@@ -1062,14 +1062,16 @@ class ChatPanel(QWidget):
 
             system_prompt = await run_blocking(self._context_builder.build_system_prompt)
 
-        # Create executor
+        # Create executor — on the app-wide bus, where the Plan panel's
+        # plan:* subscriptions (startup/ui_wiring.py) live. A private bus
+        # here would mean those subscribers never fire.
         from polyglot_ai.core.bridge import EventBus
 
         executor = PlanExecutor(
             provider=provider,
             model_id=model_id,
             tool_registry=self._tool_registry,
-            event_bus=EventBus(),
+            event_bus=self._event_bus or EventBus(),
             system_prompt=system_prompt,
         )
 
