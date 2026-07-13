@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from polyglot_ai.constants import APP_NAME, APP_VERSION
+from polyglot_ai.ui import theme_colors as tc
 
 
 class AboutDialog(QDialog):
@@ -23,7 +24,7 @@ class AboutDialog(QDialog):
         layout.addWidget(title)
 
         version = QLabel(f"Version {APP_VERSION}")
-        version.setStyleSheet("font-size: 14px; color: #969696;")
+        version.setStyleSheet(f"font-size: {tc.FONT_LG}px; color: {tc.get('text_secondary')};")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version)
 
@@ -33,13 +34,15 @@ class AboutDialog(QDialog):
             "Supports OpenAI, Anthropic, Google, and DeepSeek.\n"
             "Built with PyQt6 and QScintilla."
         )
-        desc.setStyleSheet("font-size: 13px;")
+        desc.setStyleSheet(f"font-size: {tc.FONT_BASE}px;")
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
         license_label = QLabel("License: LGPL-3.0-or-later")
-        license_label.setStyleSheet("font-size: 11px; color: #6c6c6c;")
+        license_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_disabled')};"
+        )
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(license_label)
 

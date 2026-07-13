@@ -39,6 +39,8 @@ from polyglot_ai.core.task_manager import (
     TaskManager,
 )
 from polyglot_ai.core.tasks import Task, TaskKind, TaskState
+from polyglot_ai.ui import theme
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,7 @@ class TasksPanel(QWidget):
         self._refresh_requested.connect(self._do_refresh)
 
         self._setup_ui()
+        theme.connect_theme_changed(self._apply_theme_styles)
 
     # ── Wiring ──────────────────────────────────────────────────────
 
@@ -168,22 +171,16 @@ class TasksPanel(QWidget):
         # Header
         header = QWidget()
         header.setFixedHeight(34)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
+        self._header = header
         h = QHBoxLayout(header)
         h.setContentsMargins(12, 0, 6, 0)
         h.setSpacing(2)
 
         title = QLabel("TASKS")
-        title.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #888; "
-            "letter-spacing: 0.5px; background: transparent;"
-        )
+        self._title_label = title
         h.addWidget(title)
 
         self._summary_label = QLabel("")
-        self._summary_label.setStyleSheet(
-            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
-        )
         h.addWidget(self._summary_label)
         h.addStretch()
 
@@ -209,9 +206,6 @@ class TasksPanel(QWidget):
         # Replacing the modal-only flow here was the biggest UX friction
         # point — most tasks are created with just a title.
         self._quick_create_row = QWidget()
-        self._quick_create_row.setStyleSheet(
-            "background-color: #252526; border-bottom: 1px solid #333;"
-        )
         self._quick_create_row.setVisible(False)
         qc_layout = QHBoxLayout(self._quick_create_row)
         qc_layout.setContentsMargins(12, 8, 6, 8)
@@ -219,12 +213,6 @@ class TasksPanel(QWidget):
 
         self._quick_create_input = QLineEdit()
         self._quick_create_input.setPlaceholderText("Task title — Enter to create, Esc to cancel")
-        self._quick_create_input.setStyleSheet(
-            "QLineEdit { background: #1e1e1e; color: #e0e0e0; "
-            "border: 1px solid #3c3c3c; border-radius: 4px; "
-            "padding: 5px 8px; font-size: 12px; }"
-            "QLineEdit:focus { border-color: #0e639c; }"
-        )
         self._quick_create_input.returnPressed.connect(self._on_quick_create_commit)
         # Catch Esc at the key-press level so we can close the row
         # without triggering the QLineEdit's default clear-selection.
@@ -235,11 +223,7 @@ class TasksPanel(QWidget):
         more_btn.setFixedSize(22, 22)
         more_btn.setToolTip("More options (kind, description)")
         more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        more_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #888; "
-            "border: 1px solid #3c3c3c; border-radius: 3px; font-size: 14px; }"
-            "QPushButton:hover { color: #ddd; border-color: #555; }"
-        )
+        self._more_btn = more_btn
         more_btn.clicked.connect(self._on_quick_create_more)
         qc_layout.addWidget(more_btn)
 
@@ -248,13 +232,8 @@ class TasksPanel(QWidget):
         # Scrollable list of grouped task cards
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #1e1e1e; }"
-            "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
-        )
+        self._scroll = scroll
         self._content = QWidget()
-        self._content.setStyleSheet("background: #1e1e1e;")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(8, 6, 8, 8)
         self._content_layout.setSpacing(4)
@@ -270,11 +249,54 @@ class TasksPanel(QWidget):
         )
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
-        self._empty.setStyleSheet(
-            "color: #777; font-size: 12px; padding: 24px; background: #1e1e1e;"
-        )
         self._empty.hide()
         layout.addWidget(self._empty)
+
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
+        self._header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        self._title_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
+            f"letter-spacing: 0.5px; background: transparent;"
+        )
+        self._summary_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; "
+            f"background: transparent; margin-left: 6px;"
+        )
+        self._quick_create_row.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        self._quick_create_input.setStyleSheet(
+            f"QLineEdit {{ background: {tc.get('bg_base')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_primary')}; border-radius: 4px; "
+            f"padding: 5px 8px; font-size: {tc.FONT_MD}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
+        )
+        self._more_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
+            f"border: 1px solid {tc.get('border_primary')}; border-radius: 3px; "
+            f"font-size: {tc.FONT_LG}px; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_primary')}; "
+            f"border-color: {tc.get('border_input')}; }}"
+        )
+        self._scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QScrollBar:vertical {{ width: 8px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; "
+            f"border-radius: 4px; }}"
+        )
+        self._content.setStyleSheet(f"background: {tc.get('bg_base')};")
+        self._empty.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_MD}px; "
+            f"padding: 24px; background: {tc.get('bg_base')};"
+        )
+        if self._task_manager is not None:
+            self._refresh_requested.emit()
 
     # ── Header icon helpers ─────────────────────────────────────────
 
@@ -297,7 +319,7 @@ class TasksPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(2.0)
         p.setPen(pen)
         p.drawLine(8, 3, 8, 13)
@@ -311,7 +333,7 @@ class TasksPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
@@ -327,7 +349,7 @@ class TasksPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.5)
         p.setPen(pen)
         # Small window outline (bottom-left)
@@ -374,7 +396,7 @@ class TasksPanel(QWidget):
         win = QWidget(self.window(), Qt.WindowType.Window)
         win.setWindowTitle("Tasks")
         win.resize(900, 700)
-        win.setStyleSheet("QWidget { background: #1e1e1e; }")
+        win.setStyleSheet(f"QWidget {{ background: {tc.get('bg_base')}; }}")
         inner = TasksPanel(parent=win, standalone=True)
         if self._task_manager is not None:
             inner.set_task_manager(self._task_manager)
@@ -440,9 +462,9 @@ class TasksPanel(QWidget):
     def _make_group_header(self, label: str) -> QWidget:
         lbl = QLabel(label)
         lbl.setStyleSheet(
-            "color: #777; font-size: 10px; font-weight: 600; "
-            "letter-spacing: 0.6px; background: transparent; "
-            "padding: 8px 4px 4px 4px;"
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; font-weight: 600; "
+            f"letter-spacing: 0.6px; background: transparent; "
+            f"padding: 8px 4px 4px 4px;"
         )
         return lbl
 
@@ -500,9 +522,10 @@ class TasksPanel(QWidget):
             return
         menu = QMenu(self)
         menu.setStyleSheet(
-            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
-            "QMenu::item { padding: 5px 18px; }"
-            "QMenu::item:selected { background: #094771; }"
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_menu')}; }}"
+            f"QMenu::item {{ padding: 5px 18px; }}"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
         activate = menu.addAction("Make active")
         open_detail = menu.addAction("Open details…")
@@ -636,8 +659,8 @@ class _TaskCard(QWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
-        border = "#0e639c" if is_active else "#2a2a2a"
-        bg = "#0a2b40" if is_active else "#252526"
+        border = tc.get("accent_primary") if is_active else tc.get("bg_card")
+        bg = tc.get("bg_active") if is_active else tc.get("bg_surface")
         self.setStyleSheet(
             f"_TaskCard {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
         )
@@ -651,17 +674,18 @@ class _TaskCard(QWidget):
         title_row.setSpacing(6)
         kind_dot = QLabel("●")
         kind_dot.setStyleSheet(
-            f"color: {_KIND_COLOURS.get(task.kind, '#888')}; font-size: 11px; "
-            "background: transparent;"
+            f"color: {_KIND_COLOURS.get(task.kind, tc.get('text_tertiary'))}; "
+            f"font-size: {tc.FONT_SM}px; "
+            f"background: transparent;"
         )
         kind_dot.setToolTip(task.kind.value)
         title_row.addWidget(kind_dot)
 
         title_lbl = QLabel(task.title)
         title_lbl.setStyleSheet(
-            f"color: {'#ffffff' if is_active else '#e0e0e0'}; "
-            f"font-size: 12px; font-weight: {'600' if is_active else '500'}; "
-            "background: transparent;"
+            f"color: {tc.get('text_heading')}; "
+            f"font-size: {tc.FONT_MD}px; font-weight: {'600' if is_active else '500'}; "
+            f"background: transparent;"
         )
         title_lbl.setWordWrap(True)
         title_row.addWidget(title_lbl, stretch=1)
@@ -679,9 +703,9 @@ class _TaskCard(QWidget):
             f"{health.label}\n{health.reason}" if health.reason else health.label
         )
         health_badge.setStyleSheet(
-            f"color: {health.colour}; font-size: 10px; font-weight: 600; "
+            f"color: {health.colour}; font-size: {tc.FONT_XS}px; font-weight: 600; "
             f"background: rgba(0,0,0,0.35); border: 1px solid {health.colour}; "
-            "border-radius: 3px; padding: 1px 6px;"
+            f"border-radius: 3px; padding: 1px 6px;"
         )
         # Cap the chip width and disable word-wrap so even a future
         # long badge label is structurally incapable of overlapping
@@ -711,7 +735,10 @@ class _TaskCard(QWidget):
             meta_parts.append(f"blocked: {reason}")
         meta_parts.append(_relative_time(task.updated_at))
         meta_lbl = QLabel("  ·  ".join(meta_parts))
-        meta_lbl.setStyleSheet("color: #888; font-size: 10px; background: transparent;")
+        meta_lbl.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; "
+            f"background: transparent;"
+        )
         layout.addWidget(meta_lbl)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt override
@@ -739,7 +766,7 @@ class _NewTaskDialog(QDialog):
         self.setWindowTitle("New task")
         self.setModal(True)
         self.setMinimumWidth(440)
-        self.setStyleSheet("QDialog { background: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 16)
@@ -747,14 +774,16 @@ class _NewTaskDialog(QDialog):
 
         header = QLabel("Create a new task")
         header.setStyleSheet(
-            "color: #e0e0e0; font-size: 14px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_LG}px; "
+            f"font-weight: 600; background: transparent;"
         )
         layout.addWidget(header)
 
         # Kind picker
         kind_label = QLabel("Kind")
         kind_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"font-weight: 600; background: transparent;"
         )
         layout.addWidget(kind_label)
 
@@ -765,7 +794,7 @@ class _NewTaskDialog(QDialog):
         # is faster than picking from a long list.
         self._kind_combo = QComboBox()
         for kind in (TaskKind.FEATURE, TaskKind.BUGFIX, TaskKind.REFACTOR):
-            colour = _KIND_COLOURS.get(kind, "#888")
+            colour = _KIND_COLOURS.get(kind, tc.get("text_tertiary"))
             self._kind_combo.addItem(f"●  {kind.value.capitalize()}", kind)
             self._kind_combo.setItemData(
                 self._kind_combo.count() - 1,
@@ -773,35 +802,39 @@ class _NewTaskDialog(QDialog):
                 Qt.ItemDataRole.ForegroundRole,
             )
         self._kind_combo.setStyleSheet(
-            "QComboBox { background: #252526; color: #ddd; border: 1px solid #444; "
-            "border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
-            "QComboBox:hover { border-color: #0e639c; }"
-            "QComboBox QAbstractItemView { background: #252526; color: #ddd; "
-            "selection-background-color: #094771; border: 1px solid #444; }"
+            f"QComboBox {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_menu')}; "
+            f"border-radius: 4px; padding: 6px 10px; font-size: {tc.FONT_MD}px; }}"
+            f"QComboBox:hover {{ border-color: {tc.get('accent_primary')}; }}"
+            f"QComboBox QAbstractItemView {{ background: {tc.get('bg_surface')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"selection-background-color: {tc.get('bg_active')}; "
+            f"border: 1px solid {tc.get('border_menu')}; }}"
         )
         layout.addWidget(self._kind_combo)
 
         # Title
         title_label = QLabel("Title")
         title_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; "
-            "background: transparent; margin-top: 4px;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"background: transparent; margin-top: 4px;"
         )
         layout.addWidget(title_label)
         self._title_edit = QLineEdit()
         self._title_edit.setPlaceholderText("e.g. Add CSV export to user reports")
         self._title_edit.setStyleSheet(
-            "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-            "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #0e639c; }"
+            f"QLineEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; padding: 7px 10px; font-size: {tc.FONT_BASE}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         layout.addWidget(self._title_edit)
 
         # Description (optional)
         desc_label = QLabel("Description (optional)")
         desc_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; "
-            "background: transparent; margin-top: 4px;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"background: transparent; margin-top: 4px;"
         )
         layout.addWidget(desc_label)
         self._desc_edit = QPlainTextEdit()
@@ -809,9 +842,11 @@ class _NewTaskDialog(QDialog):
             "What are you trying to achieve? The AI will use this for context."
         )
         self._desc_edit.setStyleSheet(
-            "QPlainTextEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-            "border-radius: 4px; padding: 7px 10px; font-size: 12px; }"
-            "QPlainTextEdit:focus { border-color: #0e639c; }"
+            f"QPlainTextEdit {{ background: {tc.get('bg_surface')}; "
+            f"color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; padding: 7px 10px; font-size: {tc.FONT_MD}px; }}"
+            f"QPlainTextEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         self._desc_edit.setMaximumHeight(120)
         layout.addWidget(self._desc_edit)
@@ -823,9 +858,10 @@ class _NewTaskDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel.setStyleSheet(
-            "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-            "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
-            "QPushButton:hover { background: #4a4a4a; }"
+            f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_input')}; "
+            f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_MD}px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
         )
         cancel.clicked.connect(self.reject)
         btn_row.addWidget(cancel)
@@ -834,9 +870,11 @@ class _NewTaskDialog(QDialog):
         create.setCursor(Qt.CursorShape.PointingHandCursor)
         create.setDefault(True)
         create.setStyleSheet(
-            "QPushButton { background: #0e639c; color: white; border: none; "
-            "border-radius: 4px; padding: 6px 18px; font-size: 12px; font-weight: 600; }"
-            "QPushButton:hover { background: #1a8ae8; }"
+            f"QPushButton {{ background: {tc.get('accent_primary')}; "
+            f"color: {tc.get('text_on_accent')}; border: none; "
+            f"border-radius: 4px; padding: 6px 18px; font-size: {tc.FONT_MD}px; "
+            f"font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         create.clicked.connect(self.accept)
         btn_row.addWidget(create)

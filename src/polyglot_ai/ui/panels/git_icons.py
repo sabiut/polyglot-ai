@@ -10,6 +10,8 @@ from __future__ import annotations
 from PyQt6.QtCore import QRectF
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 def draw_refresh_icon() -> QIcon:
     """Circular arrow refresh glyph, 16×16."""
@@ -17,7 +19,7 @@ def draw_refresh_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#cccccc"))
+    pen = QPen(QColor(tc.get("text_primary")))
     pen.setWidthF(1.6)
     p.setPen(pen)
     p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
@@ -33,7 +35,7 @@ def draw_branch_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#cccccc"))
+    pen = QPen(QColor(tc.get("text_primary")))
     pen.setWidthF(1.6)
     p.setPen(pen)
     # Trunk
@@ -42,7 +44,7 @@ def draw_branch_icon() -> QIcon:
     p.drawLine(5, 7, 11, 10)
     p.drawLine(11, 10, 11, 13)
     # Node dots
-    p.setBrush(QColor("#cccccc"))
+    p.setBrush(QColor(tc.get("text_primary")))
     p.drawEllipse(3, 2, 4, 4)
     p.drawEllipse(3, 12, 4, 4)
     p.drawEllipse(9, 9, 4, 4)

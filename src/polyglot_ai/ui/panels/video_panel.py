@@ -888,9 +888,9 @@ class VideoPanel(QWidget):
         if enabled:
             return (
                 f"QPushButton {{ background: {tc.get('accent_success')}; "
-                f"color: #fff; border: none; border-radius: 8px; "
+                f"color: {tc.get('text_on_accent')}; border: none; border-radius: 8px; "
                 f"font-size: {tc.FONT_LG}px; font-weight: 700; }}"
-                f"QPushButton:hover {{ background: #3a9970; }}"
+                f"QPushButton:hover {{ background: {tc.get('accent_success_hover')}; }}"
             )
         return (
             f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "

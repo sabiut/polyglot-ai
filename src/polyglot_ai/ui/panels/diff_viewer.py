@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class DiffViewer(QWidget):
     """Side-by-side diff viewer showing old (left) and new (right) content."""
@@ -38,13 +40,16 @@ class DiffViewer(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_label = QLabel("Original")
         left_label.setStyleSheet(
-            "font-weight: bold; padding: 4px; background-color: #2d2d2d; color: #f44747;"
+            f"font-weight: bold; padding: 4px; "
+            f"background-color: {tc.get('bg_surface_raised')}; color: {tc.get('diff_del_fg')};"
         )
         left_layout.addWidget(left_label)
         self._left_editor = QPlainTextEdit()
         self._left_editor.setReadOnly(True)
         self._left_editor.setFont(QFont("Monospace", 11))
-        self._left_editor.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; border: none;")
+        self._left_editor.setStyleSheet(
+            f"background-color: {tc.get('bg_base')}; color: {tc.get('text_primary')}; border: none;"
+        )
         left_layout.addWidget(self._left_editor)
         splitter.addWidget(left_container)
 
@@ -54,13 +59,16 @@ class DiffViewer(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_label = QLabel("Proposed")
         right_label.setStyleSheet(
-            "font-weight: bold; padding: 4px; background-color: #2d2d2d; color: #4ec9b0;"
+            f"font-weight: bold; padding: 4px; "
+            f"background-color: {tc.get('bg_surface_raised')}; color: {tc.get('diff_add_fg')};"
         )
         right_layout.addWidget(right_label)
         self._right_editor = QPlainTextEdit()
         self._right_editor.setReadOnly(True)
         self._right_editor.setFont(QFont("Monospace", 11))
-        self._right_editor.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; border: none;")
+        self._right_editor.setStyleSheet(
+            f"background-color: {tc.get('bg_base')}; color: {tc.get('text_primary')}; border: none;"
+        )
         right_layout.addWidget(self._right_editor)
         splitter.addWidget(right_container)
 
@@ -97,7 +105,7 @@ class DiffViewer(QWidget):
         sm = difflib.SequenceMatcher(None, old_lines, new_lines)
         cursor = self._left_editor.textCursor()
         fmt_removed = QTextCharFormat()
-        fmt_removed.setBackground(QColor("#5a1d1d"))
+        fmt_removed.setBackground(QColor(tc.get("bg_diff_del")))
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag in ("delete", "replace"):
@@ -117,7 +125,7 @@ class DiffViewer(QWidget):
         sm = difflib.SequenceMatcher(None, old_lines, new_lines)
         cursor = self._right_editor.textCursor()
         fmt_added = QTextCharFormat()
-        fmt_added.setBackground(QColor("#1a3a2a"))
+        fmt_added.setBackground(QColor(tc.get("bg_diff_add")))
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag in ("insert", "replace"):

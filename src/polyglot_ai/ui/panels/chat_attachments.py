@@ -175,7 +175,7 @@ class AttachmentManager:
         size_kb = attach["size"] / 1024
         size_label = QLabel(f"({size_kb:.0f}KB)")
         size_label.setStyleSheet(
-            f"color: {tc.get('text_muted')}; font-size: 10px; background: transparent;"
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; background: transparent;"
         )
         chip_layout.addWidget(size_label)
 
@@ -185,7 +185,7 @@ class AttachmentManager:
         remove_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
             f"border: none; font-size: {tc.FONT_MD}px; }}"
-            f"QPushButton:hover {{ color: #ff4444; }}"
+            f"QPushButton:hover {{ color: {tc.get('accent_error')}; }}"
         )
         # Capture index by default arg so the lambda binds to THIS chip,
         # not whatever ``index`` points to at the end of the loop.

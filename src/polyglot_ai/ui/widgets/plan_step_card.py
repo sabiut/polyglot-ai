@@ -13,20 +13,21 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.ai.plan_models import PlanStep, PlanStepStatus
+from polyglot_ai.ui import theme_colors as tc
 
-# Status → (icon, border color, text color)
+# Status → (icon, border color token, text color token)
 _STATUS_STYLE = {
-    PlanStepStatus.PENDING: ("○", "#666", "#999"),
-    PlanStepStatus.APPROVED: ("◉", "#569cd6", "#569cd6"),
-    PlanStepStatus.SKIPPED: ("⊘", "#555", "#666"),
-    PlanStepStatus.IN_PROGRESS: ("◐", "#e5a00d", "#e5a00d"),
-    PlanStepStatus.COMPLETED: ("✔", "#4ec9b0", "#4ec9b0"),
-    PlanStepStatus.FAILED: ("✗", "#f44747", "#f44747"),
+    PlanStepStatus.PENDING: ("○", "plan_pending", "text_secondary"),
+    PlanStepStatus.APPROVED: ("◉", "plan_approved", "plan_approved"),
+    PlanStepStatus.SKIPPED: ("⊘", "plan_skipped", "text_muted"),
+    PlanStepStatus.IN_PROGRESS: ("◐", "plan_in_progress", "plan_in_progress"),
+    PlanStepStatus.COMPLETED: ("✔", "plan_completed", "plan_completed"),
+    PlanStepStatus.FAILED: ("✗", "plan_failed", "plan_failed"),
 }
 
 _BTN_STYLE = """
     QPushButton {{
-        background: {bg}; color: {fg}; font-size: 11px; font-weight: 600;
+        background: {bg}; color: {fg}; font-size: {fs}px; font-weight: 600;
         border: none; border-radius: 4px; padding: 3px 10px;
     }}
     QPushButton:hover {{ background: {hover}; }}
@@ -45,11 +46,14 @@ class PlanStepCard(QWidget):
         self._step = step
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-        icon, border_color, _ = _STATUS_STYLE.get(step.status, ("○", "#666", "#999"))
+        icon, border_token, _ = _STATUS_STYLE.get(
+            step.status, ("○", "plan_pending", "text_secondary")
+        )
+        border_color = tc.get(border_token)
 
         self.setStyleSheet(
-            f"QWidget#stepCard {{ background: #252526; border-left: 3px solid {border_color}; "
-            f"border-radius: 6px; }}"
+            f"QWidget#stepCard {{ background: {tc.get('bg_surface')}; "
+            f"border-left: 3px solid {border_color}; border-radius: 6px; }}"
         )
         self.setObjectName("stepCard")
 
@@ -64,20 +68,23 @@ class PlanStepCard(QWidget):
         self._status_icon = QLabel(icon)
         self._status_icon.setFixedWidth(18)
         self._status_icon.setStyleSheet(
-            f"color: {_STATUS_STYLE[step.status][2]}; font-size: 14px; background: transparent;"
+            f"color: {tc.get(_STATUS_STYLE[step.status][2])}; font-size: {tc.FONT_LG}px; "
+            f"background: transparent;"
         )
         top_row.addWidget(self._status_icon)
 
         step_num = QLabel(f"{step.index + 1}.")
         step_num.setFixedWidth(20)
         step_num.setStyleSheet(
-            "color: #888; font-size: 12px; font-weight: bold; background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px; "
+            f"font-weight: bold; background: transparent;"
         )
         top_row.addWidget(step_num)
 
         title_label = QLabel(step.title)
         title_label.setStyleSheet(
-            "color: #e0e0e0; font-size: 13px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_BASE}px; "
+            f"font-weight: 600; background: transparent;"
         )
         title_label.setWordWrap(True)
         top_row.addWidget(title_label, stretch=1)
@@ -92,21 +99,40 @@ class PlanStepCard(QWidget):
         if step.status == PlanStepStatus.PENDING:
             approve_btn = QPushButton("Approve")
             approve_btn.setStyleSheet(
-                _BTN_STYLE.format(bg="#0e4429", fg="#4ec9b0", hover="#1a5c3a")
+                _BTN_STYLE.format(
+                    bg=tc.get("bg_feedback_pos"),
+                    fg=tc.get("accent_success_muted"),
+                    hover="#1a5c3a",
+                    fs=tc.FONT_SM,
+                )
             )
             approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             approve_btn.clicked.connect(lambda: self.approve_clicked.emit(step.index))
             btn_layout.addWidget(approve_btn)
 
             skip_btn = QPushButton("Skip")
-            skip_btn.setStyleSheet(_BTN_STYLE.format(bg="#333", fg="#999", hover="#444"))
+            skip_btn.setStyleSheet(
+                _BTN_STYLE.format(
+                    bg=tc.get("border_secondary"),
+                    fg=tc.get("text_secondary"),
+                    hover=tc.get("border_menu"),
+                    fs=tc.FONT_SM,
+                )
+            )
             skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             skip_btn.clicked.connect(lambda: self.skip_clicked.emit(step.index))
             btn_layout.addWidget(skip_btn)
 
         elif step.status == PlanStepStatus.FAILED:
             retry_btn = QPushButton("Retry")
-            retry_btn.setStyleSheet(_BTN_STYLE.format(bg="#5c1a1a", fg="#f44747", hover="#7a2a2a"))
+            retry_btn.setStyleSheet(
+                _BTN_STYLE.format(
+                    bg=tc.get("bg_feedback_neg"),
+                    fg=tc.get("accent_error"),
+                    hover="#7a2a2a",
+                    fs=tc.FONT_SM,
+                )
+            )
             retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             retry_btn.clicked.connect(lambda: self.retry_clicked.emit(step.index))
             btn_layout.addWidget(retry_btn)
@@ -122,8 +148,9 @@ class PlanStepCard(QWidget):
             for f in step.files_affected[:5]:
                 chip = QLabel(f)
                 chip.setStyleSheet(
-                    "background: #1a2733; color: #569cd6; font-size: 11px; "
-                    "padding: 1px 6px; border-radius: 3px; font-family: monospace;"
+                    f"background: #1a2733; color: {tc.get('accent_info')}; "
+                    f"font-size: {tc.FONT_SM}px; "
+                    f"padding: 1px 6px; border-radius: 3px; font-family: monospace;"
                 )
                 files_row.addWidget(chip)
             files_row.addStretch()
@@ -134,17 +161,20 @@ class PlanStepCard(QWidget):
             desc = QLabel(step.description[:150])
             desc.setWordWrap(True)
             desc.setStyleSheet(
-                "color: #888; font-size: 11px; background: transparent; padding-left: 26px;"
+                f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+                f"background: transparent; padding-left: 26px;"
             )
             layout.addWidget(desc)
 
         # Row 4: result (after execution)
         if step.result and step.status in (PlanStepStatus.COMPLETED, PlanStepStatus.FAILED):
-            result_color = "#4ec9b0" if step.status == PlanStepStatus.COMPLETED else "#f44747"
+            result_color = tc.get(
+                "plan_completed" if step.status == PlanStepStatus.COMPLETED else "plan_failed"
+            )
             result = QLabel(step.result[:100])
             result.setWordWrap(True)
             result.setStyleSheet(
-                f"color: {result_color}; font-size: 11px; background: transparent; "
+                f"color: {result_color}; font-size: {tc.FONT_SM}px; background: transparent; "
                 f"padding-left: 26px; font-style: italic;"
             )
             layout.addWidget(result)
@@ -152,12 +182,14 @@ class PlanStepCard(QWidget):
     def update_step(self, step: PlanStep) -> None:
         """Update the step and refresh display."""
         self._step = step
-        icon, border_color, text_color = _STATUS_STYLE.get(step.status, ("○", "#666", "#999"))
+        icon, border_token, text_token = _STATUS_STYLE.get(
+            step.status, ("○", "plan_pending", "text_secondary")
+        )
         self._status_icon.setText(icon)
         self._status_icon.setStyleSheet(
-            f"color: {text_color}; font-size: 14px; background: transparent;"
+            f"color: {tc.get(text_token)}; font-size: {tc.FONT_LG}px; background: transparent;"
         )
         self.setStyleSheet(
-            f"QWidget#stepCard {{ background: #252526; border-left: 3px solid {border_color}; "
-            f"border-radius: 6px; }}"
+            f"QWidget#stepCard {{ background: {tc.get('bg_surface')}; "
+            f"border-left: 3px solid {tc.get(border_token)}; border-radius: 6px; }}"
         )

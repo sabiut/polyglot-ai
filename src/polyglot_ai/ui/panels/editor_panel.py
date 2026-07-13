@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels.document_tab import DocumentTab
 from polyglot_ai.ui.panels.editor_tab import EditorTab
 from polyglot_ai.ui.panels.preview_tab import PREVIEW_EXTENSIONS, PreviewTab
@@ -43,7 +44,10 @@ def _ensure_close_icons() -> str:
 
     _ICON_DIR = tempfile.mkdtemp(prefix="codex-icons-")
 
-    for name, color in [("close", "#cccccc"), ("close-hover", "#ffffff")]:
+    for name, color in [
+        ("close", tc.get("text_primary")),
+        ("close-hover", tc.get("text_on_accent")),
+    ]:
         size = 16
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -84,7 +88,7 @@ class EditorPanel(QTabWidget):
             }}
             QTabBar::close-button:hover {{
                 image: url({icon_dir}/close-hover.png);
-                background-color: #c42b1c;
+                background-color: {tc.get("accent_danger")};
             }}
         """)
 
@@ -95,7 +99,7 @@ class EditorPanel(QTabWidget):
         layout = QVBoxLayout(self._placeholder)
         label = QLabel("Open a file to begin editing")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: #6c6c6c; font-size: 16px;")
+        label.setStyleSheet(f"color: {tc.get('text_disabled')}; font-size: {tc.FONT_XL}px;")
         layout.addWidget(label)
         self.addTab(self._placeholder, "Welcome")
 

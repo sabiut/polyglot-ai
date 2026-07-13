@@ -38,6 +38,8 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.task_manager import TaskManager
+from polyglot_ai.ui import theme
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +81,13 @@ class TodayPanel(QWidget):
         self._pending_task_attention: list[_AttentionItem] = []
         self._standalone = standalone
         self._standalone_window: QWidget | None = None
+        self._section_labels: list[QLabel] = []
+        self._card_frames: list[QFrame] = []
 
         self._attention_loaded.connect(self._on_attention_loaded)
 
         self._setup_ui()
+        theme.connect_theme_changed(self._apply_theme_styles)
 
     # ── Wiring ──────────────────────────────────────────────────────
 
@@ -123,21 +128,15 @@ class TodayPanel(QWidget):
         # Header
         header = QWidget()
         header.setFixedHeight(38)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
+        self._header = header
         h = QHBoxLayout(header)
         h.setContentsMargins(14, 0, 8, 0)
 
         title = QLabel("TODAY")
-        title.setStyleSheet(
-            "font-size: 11px; font-weight: 700; color: #ddd; "
-            "letter-spacing: 1px; background: transparent;"
-        )
+        self._title_label = title
         h.addWidget(title)
 
         self._date_label = QLabel("")
-        self._date_label.setStyleSheet(
-            "font-size: 11px; color: #888; background: transparent; margin-left: 8px;"
-        )
         h.addWidget(self._date_label)
         h.addStretch()
 
@@ -155,13 +154,9 @@ class TodayPanel(QWidget):
         # Scrollable body so the dashboard works in any sidebar width.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #1e1e1e; }"
-            "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
-        )
+        self._scroll = scroll
         body = QWidget()
-        body.setStyleSheet("background: #1e1e1e;")
+        self._body = body
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(12, 12, 12, 12)
         body_layout.setSpacing(14)
@@ -198,14 +193,11 @@ class TodayPanel(QWidget):
         ]
         row = QHBoxLayout()
         row.setSpacing(6)
+        self._action_btns: list[QPushButton] = []
         for i, (label, handler) in enumerate(actions):
             btn = QPushButton(label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                "QPushButton { background: #2a2d2e; color: #ddd; border: 1px solid #3a3a3a; "
-                "border-radius: 4px; padding: 7px 10px; font-size: 11px; text-align: left; }"
-                "QPushButton:hover { background: #094771; border-color: #0e639c; color: #fff; }"
-            )
+            self._action_btns.append(btn)
             btn.clicked.connect(handler)
             row.addWidget(btn, stretch=1)
             if (i + 1) % 3 == 0:
@@ -224,14 +216,58 @@ class TodayPanel(QWidget):
         # Set the date string
         self._date_label.setText(datetime.now().strftime("%A, %b %d"))
 
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
+        self._header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        self._title_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 700; color: {tc.get('text_primary')}; "
+            f"letter-spacing: 1px; background: transparent;"
+        )
+        self._date_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; "
+            f"background: transparent; margin-left: 8px;"
+        )
+        self._scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QScrollBar:vertical {{ width: 8px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; "
+            f"border-radius: 4px; }}"
+        )
+        self._body.setStyleSheet(f"background: {tc.get('bg_base')};")
+        for lbl in self._section_labels:
+            lbl.setStyleSheet(
+                f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; font-weight: 700; "
+                f"letter-spacing: 0.8px; background: transparent;"
+            )
+        for frame in self._card_frames:
+            frame.setStyleSheet(
+                f"QFrame {{ background: {tc.get('bg_surface')}; "
+                f"border: 1px solid {tc.get('border_secondary')}; border-radius: 6px; }}"
+            )
+        for btn in self._action_btns:
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {tc.get('bg_hover_subtle')}; "
+                f"color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('border_card')}; "
+                f"border-radius: 4px; padding: 7px 10px; font-size: {tc.FONT_SM}px; "
+                f"text-align: left; }}"
+                f"QPushButton:hover {{ background: {tc.get('bg_active')}; "
+                f"border-color: {tc.get('accent_primary')}; "
+                f"color: {tc.get('text_heading')}; }}"
+            )
+        if self._attention_layout.count():
+            self._on_attention_loaded(self._attention_items)
+
     # ── Helpers (chrome) ────────────────────────────────────────────
 
     def _wrap_card(self, inner: QWidget) -> QWidget:
         """Wrap a content widget in a card frame with consistent styling."""
         frame = QFrame()
-        frame.setStyleSheet(
-            "QFrame { background: #252526; border: 1px solid #333; border-radius: 6px; }"
-        )
+        self._card_frames.append(frame)
         wrap_layout = QVBoxLayout(frame)
         wrap_layout.setContentsMargins(12, 10, 12, 10)
         wrap_layout.setSpacing(0)
@@ -240,10 +276,7 @@ class TodayPanel(QWidget):
 
     def _make_section_label(self, text: str) -> QLabel:
         lbl = QLabel(text.upper())
-        lbl.setStyleSheet(
-            "color: #777; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 0.8px; background: transparent;"
-        )
+        self._section_labels.append(lbl)
         return lbl
 
     def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
@@ -267,7 +300,7 @@ class TodayPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
@@ -283,7 +316,7 @@ class TodayPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.5)
         p.setPen(pen)
         # Small window outline
@@ -335,7 +368,7 @@ class TodayPanel(QWidget):
         win = QWidget(self.window(), Qt.WindowType.Window)
         win.setWindowTitle("Today — Polyglot AI")
         win.resize(1100, 780)
-        win.setStyleSheet("QWidget { background: #1e1e1e; }")
+        win.setStyleSheet(f"QWidget {{ background: {tc.get('bg_base')}; }}")
         inner = TodayPanel(parent=win, standalone=True)
         if self._task_manager is not None:
             inner.set_task_manager(self._task_manager)
@@ -718,7 +751,10 @@ class TodayPanel(QWidget):
     def _empty_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setWordWrap(True)
-        lbl.setStyleSheet("color: #888; font-size: 11px; padding: 4px 0; background: transparent;")
+        lbl.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"padding: 4px 0; background: transparent;"
+        )
         return lbl
 
 
@@ -766,12 +802,15 @@ class _AttentionRow(QWidget):
         icon_glyph = {"error": "🔴", "warn": "🟡", "info": "ℹ"}.get(item.severity, "·")
         icon = QLabel(icon_glyph)
         icon.setFixedWidth(18)
-        icon.setStyleSheet("font-size: 11px; background: transparent;")
+        icon.setStyleSheet(f"font-size: {tc.FONT_SM}px; background: transparent;")
         layout.addWidget(icon)
 
         text = QLabel(item.text)
         text.setWordWrap(True)
-        text.setStyleSheet("color: #ddd; font-size: 11px; background: transparent;")
+        text.setStyleSheet(
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent;"
+        )
         if item.tooltip:
             text.setToolTip(item.tooltip)
         layout.addWidget(text, stretch=1)
@@ -780,9 +819,12 @@ class _AttentionRow(QWidget):
             btn = QPushButton(item.action_label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
-                "QPushButton { background: #094771; color: #fff; border: none; "
-                "border-radius: 3px; padding: 3px 10px; font-size: 10px; font-weight: 600; }"
-                "QPushButton:hover { background: #1a8ae8; }"
+                f"QPushButton {{ background: {tc.get('bg_active')}; "
+                f"color: {tc.get('text_heading')}; border: none; "
+                f"border-radius: 3px; padding: 3px 10px; font-size: {tc.FONT_XS}px; "
+                f"font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; "
+                f"color: {tc.get('text_on_accent')}; }}"
             )
             btn.clicked.connect(self._on_action)
             layout.addWidget(btn)

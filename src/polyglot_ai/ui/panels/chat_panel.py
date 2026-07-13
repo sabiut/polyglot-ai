@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.core.ai.models import Conversation, Message, ToolCall
 from polyglot_ai.core.ai.tool_streaming import ToolCallAccumulator
+from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels import chat_icons
 from polyglot_ai.ui.panels.chat_attachments import ATTACH_DIR as _ATTACH_DIR  # noqa: F401
@@ -280,6 +281,8 @@ class ChatPanel(QWidget):
         self._event_bus = None
 
         self._setup_ui()
+        self._apply_theme_styles()
+        theme.connect_theme_changed(self._apply_theme_styles)
 
         # Accept drops on the entire chat panel
         self.setAcceptDrops(True)
@@ -294,11 +297,8 @@ class ChatPanel(QWidget):
         # Header
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(8, 8, 8, 8)
-        header_label = QLabel("AI ASSISTANT")
-        header_label.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_secondary')}; letter-spacing: 1px;"
-        )
-        header_layout.addWidget(header_label)
+        self._header_label = QLabel("AI ASSISTANT")
+        header_layout.addWidget(self._header_label)
         header_layout.addStretch()
 
         # Bootstrap-mode toggle. When enabled, shell_exec is auto-
@@ -308,14 +308,6 @@ class ChatPanel(QWidget):
         # active state; a QTimer refreshes it once a second so the
         # countdown stays honest and the button auto-reverts when the
         # deadline passes.
-        _btn_base = (
-            f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
-            f"background: {tc.get('bg_input')}; color: #fff; "
-            f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; }}"
-            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
-            f"border-color: {tc.get('accent_primary')}; }}"
-        )
-
         self._bootstrap_btn = QPushButton("  Bootstrap")
         self._bootstrap_btn.setFixedHeight(26)
         self._bootstrap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -325,7 +317,6 @@ class ChatPanel(QWidget):
             "Click again to end early."
         )
         self._bootstrap_btn.setIcon(chat_icons.make_unlock_icon())
-        self._bootstrap_btn.setStyleSheet(_btn_base)
         self._bootstrap_btn.clicked.connect(self._toggle_bootstrap_mode)
         header_layout.addWidget(self._bootstrap_btn)
 
@@ -341,7 +332,6 @@ class ChatPanel(QWidget):
         self._new_chat_btn.setFixedHeight(26)
         self._new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._new_chat_btn.setIcon(chat_icons.make_plus_icon())
-        self._new_chat_btn.setStyleSheet(_btn_base)
         self._new_chat_btn.clicked.connect(self._new_conversation)
         header_layout.addWidget(self._new_chat_btn)
         layout.addLayout(header_layout)
@@ -359,48 +349,27 @@ class ChatPanel(QWidget):
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search conversations...")
         self._search_input.setFixedHeight(28)
-        self._search_input.setStyleSheet(f"""
-            QLineEdit {{
-                font-size: {tc.FONT_MD}px; padding: 4px 8px;
-                background: {tc.get("bg_card")}; border: 1px solid {tc.get("border_primary")};
-                border-radius: {tc.RADIUS_MD}px; color: {tc.get("text_primary")}; margin: 4px;
-            }}
-            QLineEdit:focus {{ border-color: {tc.get("accent_primary")}; }}
-        """)
         self._search_input.textChanged.connect(
             lambda q: conv_list_actions.filter_by_search(self._conv_list, q)
         )
         sidebar_layout.addWidget(self._search_input)
 
         # Category filter buttons
-        cat_widget = QWidget()
-        cat_widget.setStyleSheet(f"background: {tc.get('bg_surface')};")
-        cat_layout = QHBoxLayout(cat_widget)
+        self._cat_widget = QWidget()
+        cat_layout = QHBoxLayout(self._cat_widget)
         cat_layout.setContentsMargins(4, 2, 4, 2)
         cat_layout.setSpacing(2)
         self._active_category = "all"
-        _cat_pill = f"""
-            QPushButton {{
-                background: transparent; color: {tc.get("text_tertiary")};
-                font-size: {tc.FONT_XS}px; border: none;
-                border-radius: {tc.RADIUS_SM}px; padding: 2px 8px;
-            }}
-            QPushButton:hover {{ color: {tc.get("text_heading")}; background: {tc.get("bg_hover_subtle")}; }}
-            QPushButton:checked {{
-                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
-            }}
-        """
         self._cat_buttons = {}
         for cat_name in ("All", "Work", "Personal", "Research"):
             btn = QPushButton(cat_name)
             btn.setCheckable(True)
             btn.setFixedHeight(20)
-            btn.setStyleSheet(_cat_pill)
             btn.clicked.connect(lambda checked, c=cat_name.lower(): self._filter_category(c))
             cat_layout.addWidget(btn)
             self._cat_buttons[cat_name.lower()] = btn
         self._cat_buttons["all"].setChecked(True)
-        sidebar_layout.addWidget(cat_widget)
+        sidebar_layout.addWidget(self._cat_widget)
 
         self._conv_list = QListWidget()
         # Force right-side ellipsis so long titles end with "…" rather
@@ -417,28 +386,6 @@ class ChatPanel(QWidget):
         # list-level padding. Result is roughly the same row height as
         # claude.ai's "Recents" list — visibly more conversations on
         # screen at once without feeling cramped.
-        self._conv_list.setStyleSheet(f"""
-            QListWidget {{
-                font-size: {tc.FONT_MD}px;
-                background: {tc.get("bg_surface")};
-                border: none;
-                outline: none;
-                padding: 2px 0;
-            }}
-            QListWidget::item {{
-                padding: 5px 10px;
-                margin: 0px 4px;
-                border-radius: {tc.RADIUS_SM}px;
-                color: {tc.get("text_primary")};
-            }}
-            QListWidget::item:selected {{
-                background: {tc.get("bg_active")};
-                color: {tc.get("text_heading")};
-            }}
-            QListWidget::item:hover:!selected {{
-                background: {tc.get("bg_hover_subtle")};
-            }}
-        """)
         self._conv_list.currentRowChanged.connect(self._on_conversation_selected)
         self._conv_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._conv_list.customContextMenuRequested.connect(
@@ -465,47 +412,7 @@ class ChatPanel(QWidget):
 
         self._welcome = QLabel()
         self._welcome.setTextFormat(Qt.TextFormat.RichText)
-        q = f"<span style='color:{tc.get('accent_info')};'>&#x275D;</span>"
-        sep = f"border-bottom:1px solid {tc.get('border_secondary')};"
-        row = f"color:{tc.get('text_primary')}; font-size:13px; padding:6px 0;"
-        self._welcome.setText(
-            f"<div style='text-align:center; padding:24px;'>"
-            f"<div style='font-size:18px; font-weight:600; color:{tc.get('text_heading')}; "
-            f"margin-bottom:16px;'>Polyglot AI</div>"
-            # Two columns
-            f"<table width='100%' cellpadding='0' cellspacing='12'><tr>"
-            # Left: coding
-            f"<td valign='top' style='background:{tc.get('bg_surface')}; "
-            f"border-radius:8px; padding:16px; width:48%;'>"
-            f"<div style='font-size:12px; font-weight:600; color:{tc.get('accent_success')}; "
-            f"margin-bottom:10px;'>CODE WITH AI</div>"
-            f"<div style='{row} {sep}'>{q} Review this file for bugs</div>"
-            f"<div style='{row} {sep}'>{q} Write tests for main.py</div>"
-            f"<div style='{row}'>{q} Refactor for readability</div>"
-            f"<div style='font-size:10px; color:{tc.get('text_muted')}; margin-top:8px;'>"
-            f"Open a project first (Ctrl+Shift+O)</div>"
-            f"</td>"
-            # Right: general chat
-            f"<td valign='top' style='background:{tc.get('bg_surface')}; "
-            f"border-radius:8px; padding:16px; width:48%;'>"
-            f"<div style='font-size:12px; font-weight:600; color:{tc.get('accent_info')}; "
-            f"margin-bottom:10px;'>JUST CHAT</div>"
-            f"<div style='{row} {sep}'>{q} Explain a concept to me</div>"
-            f"<div style='{row} {sep}'>{q} Help me draft an email</div>"
-            f"<div style='{row}'>{q} Search for the latest docs</div>"
-            f"<div style='font-size:10px; color:{tc.get('text_muted')}; margin-top:8px;'>"
-            f"No project needed — just start typing</div>"
-            f"</td>"
-            f"</tr></table>"
-            f"<div style='font-size:11px; color:{tc.get('text_muted')}; margin-top:12px;'>"
-            f"Add an API key in Settings (Ctrl+,) to get started</div>"
-            f"</div>"
-        )
         self._welcome.setWordWrap(True)
-        self._welcome.setStyleSheet(
-            f"color: {tc.get('text_secondary')}; padding: 20px; "
-            f"background-color: {tc.get('bg_surface_raised')}; border-radius: {tc.RADIUS_MD}px;"
-        )
         self._message_layout.addWidget(self._welcome)
 
         self._scroll.setWidget(self._message_widget)
@@ -514,9 +421,6 @@ class ChatPanel(QWidget):
         # ── Attachment preview bar (hidden by default) ──
         self._attach_bar = QWidget()
         self._attach_bar.setFixedHeight(40)
-        self._attach_bar.setStyleSheet(
-            f"background: {tc.get('bg_surface_overlay')}; border-top: 1px solid {tc.get('border_primary')};"
-        )
         self._attach_bar.hide()
         self._attach_bar_layout = QHBoxLayout(self._attach_bar)
         self._attach_bar_layout.setContentsMargins(12, 4, 12, 4)
@@ -536,16 +440,9 @@ class ChatPanel(QWidget):
         wrapper_layout.setContentsMargins(10, 4, 10, 8)
         wrapper_layout.setSpacing(0)
 
-        input_card = QWidget()
-        input_card.setObjectName("inputCard")
-        input_card.setStyleSheet(f"""
-            QWidget#inputCard {{
-                background-color: {tc.get("bg_chat_input")};
-                border: 1px solid {tc.get("border_input")};
-                border-radius: {tc.RADIUS_LG}px;
-            }}
-        """)
-        card_layout = QVBoxLayout(input_card)
+        self._input_card = QWidget()
+        self._input_card.setObjectName("inputCard")
+        card_layout = QVBoxLayout(self._input_card)
         card_layout.setContentsMargins(4, 4, 4, 4)
         card_layout.setSpacing(0)
 
@@ -553,14 +450,6 @@ class ChatPanel(QWidget):
         self._input.setPlaceholderText("Reply... (Shift+Enter for new line)")
         self._input.setMinimumHeight(36)
         self._input.setMaximumHeight(100)
-        self._input.setStyleSheet(f"""
-            QTextEdit {{
-                font-size: {tc.FONT_LG}px; background-color: transparent;
-                color: {tc.get("text_heading")}; border: none;
-                padding: 8px 14px 6px 14px;
-                selection-background-color: {tc.get("bg_active")};
-            }}
-        """)
         self._input.submit_requested.connect(self._on_send)
         self._input.file_dropped.connect(self._attachments.add_from_path)
         self._input.image_pasted.connect(self._attachments.add_from_pixmap)
@@ -590,13 +479,6 @@ class ChatPanel(QWidget):
         self._plus_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plus_btn.setToolTip("Attach files, templates, and more")
         self._plus_btn.setIcon(chat_icons.make_toolbar_icon("plus"))
-        self._plus_btn.setStyleSheet(f"""
-            #toolbarIconBtn {{
-                background-color: transparent; border: none;
-                border-radius: {tc.RADIUS_SM}px; padding: 4px;
-            }}
-            #toolbarIconBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
-        """)
         self._plus_btn.clicked.connect(self._show_plus_menu)
         toolbar_layout.addWidget(self._plus_btn)
 
@@ -617,18 +499,6 @@ class ChatPanel(QWidget):
         self._plan_btn.setToolTip("Ask AI to plan before coding")
         self._plan_btn.setFixedHeight(24)
         self._plan_btn.setCheckable(True)
-        self._plan_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {tc.get("text_tertiary")};
-                font-size: {tc.FONT_SM}px; border: 1px solid {tc.get("border_card")};
-                border-radius: {tc.RADIUS_LG}px; padding: 2px 10px;
-            }}
-            QPushButton:hover {{ color: {tc.get("text_heading")}; border-color: {tc.get("border_input")}; }}
-            QPushButton:checked {{
-                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
-                border-color: {tc.get("accent_primary")};
-            }}
-        """)
         self._plan_btn.clicked.connect(self._toggle_plan_mode)
         self._plan_mode = False
         toolbar_layout.addWidget(self._plan_btn)
@@ -641,17 +511,6 @@ class ChatPanel(QWidget):
         self._search_btn.setToolTip("Enable web search for current information")
         self._search_btn.setCheckable(True)
         self._search_btn.setIcon(chat_icons.make_toolbar_icon("search"))
-        self._search_btn.setStyleSheet(f"""
-            #toolbarSearchBtn {{
-                background-color: transparent; border: none;
-                border-radius: {tc.RADIUS_SM}px; padding: 4px;
-            }}
-            #toolbarSearchBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
-            #toolbarSearchBtn:checked {{
-                background-color: {tc.get("accent_info")};
-                border-radius: {tc.RADIUS_SM}px;
-            }}
-        """)
         self._search_btn.clicked.connect(self._toggle_search_mode)
         self._search_mode = False
         toolbar_layout.addWidget(self._search_btn)
@@ -663,13 +522,6 @@ class ChatPanel(QWidget):
         self._template_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._template_btn.setToolTip("Prompt templates")
         self._template_btn.setIcon(chat_icons.make_toolbar_icon("template"))
-        self._template_btn.setStyleSheet(f"""
-            #toolbarTplBtn {{
-                background-color: transparent; border: none;
-                border-radius: {tc.RADIUS_SM}px; padding: 4px;
-            }}
-            #toolbarTplBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
-        """)
         self._template_btn.clicked.connect(self._show_template_menu)
         toolbar_layout.addWidget(self._template_btn)
 
@@ -683,22 +535,13 @@ class ChatPanel(QWidget):
         status_layout.setSpacing(4)
 
         self._streaming_dot = QLabel("●")
-        self._streaming_dot.setStyleSheet(
-            f"color: {tc.get('accent_success')}; font-size: 8px; background: transparent;"
-        )
         self._streaming_dot.hide()
         status_layout.addWidget(self._streaming_dot)
 
         self._token_label = QLabel("")
-        self._token_label.setStyleSheet(
-            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; background: transparent;"
-        )
         status_layout.addWidget(self._token_label)
 
         self._cap_label = QLabel("")
-        self._cap_label.setStyleSheet(
-            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; background: transparent;"
-        )
         status_layout.addWidget(self._cap_label)
         toolbar_layout.addWidget(self._status_widget)
 
@@ -707,14 +550,6 @@ class ChatPanel(QWidget):
         self._stop_btn.setFixedHeight(28)
         self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._stop_btn.setToolTip("Stop generation")
-        self._stop_btn.setStyleSheet(f"""
-            QPushButton {{
-                font-size: {tc.FONT_SM}px; font-weight: bold;
-                padding: 2px 12px; background-color: {tc.get("accent_danger")};
-                color: {tc.get("text_on_accent")}; border: none; border-radius: {tc.RADIUS_SM}px;
-            }}
-            QPushButton:hover {{ background-color: {tc.get("accent_danger_hover")}; }}
-        """)
         self._stop_btn.clicked.connect(self._stop_generation)
         self._stop_btn.hide()
         toolbar_layout.addWidget(self._stop_btn)
@@ -724,15 +559,6 @@ class ChatPanel(QWidget):
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._send_btn.setToolTip("Send message (Enter)")
         self._send_btn.setIcon(chat_icons.make_send_icon())
-        self._send_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #ececec; border: none; border-radius: 16px;
-                padding: 4px;
-            }}
-            QPushButton:hover {{ background-color: #ffffff; }}
-            QPushButton:pressed {{ background-color: {tc.get("text_primary")}; }}
-            QPushButton:disabled {{ background-color: {tc.get("bg_hover")}; }}
-        """)
         self._send_btn.clicked.connect(self._on_send)
         toolbar_layout.addWidget(self._send_btn)
 
@@ -740,13 +566,10 @@ class ChatPanel(QWidget):
 
         # Agent status indicator (shown during streaming)
         self._agent_status_label = QLabel("")
-        self._agent_status_label.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; padding: 2px 8px; background: transparent;"
-        )
         self._agent_status_label.setVisible(False)
         card_layout.addWidget(self._agent_status_label)
 
-        wrapper_layout.addWidget(input_card)
+        wrapper_layout.addWidget(self._input_card)
         msg_layout.addWidget(input_wrapper)
         splitter.addWidget(msg_container)
         # Default sizes: show the conversation sidebar (220px) alongside
@@ -756,6 +579,192 @@ class ChatPanel(QWidget):
         splitter.setSizes([220, 780])
 
         layout.addWidget(splitter)
+
+    def _chrome_button_style(self) -> str:
+        return (
+            f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
+            f"background: {tc.get('bg_input')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+            f"border-color: {tc.get('accent_primary')}; }}"
+        )
+
+    def _apply_theme_styles(self) -> None:
+        """(Re)apply token-based chrome styles; connected to theme changes."""
+        self._header_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_secondary')}; letter-spacing: 1px;"
+        )
+        self._new_chat_btn.setStyleSheet(self._chrome_button_style())
+        self._refresh_bootstrap_label()
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: {tc.FONT_MD}px; padding: 4px 8px;
+                background: {tc.get("bg_card")}; border: 1px solid {tc.get("border_primary")};
+                border-radius: {tc.RADIUS_MD}px; color: {tc.get("text_primary")}; margin: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {tc.get("accent_primary")}; }}
+        """)
+        self._cat_widget.setStyleSheet(f"background: {tc.get('bg_surface')};")
+        _cat_pill = f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("text_tertiary")};
+                font-size: {tc.FONT_XS}px; border: none;
+                border-radius: {tc.RADIUS_SM}px; padding: 2px 8px;
+            }}
+            QPushButton:hover {{ color: {tc.get("text_heading")}; background: {tc.get("bg_hover_subtle")}; }}
+            QPushButton:checked {{
+                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
+            }}
+        """
+        for btn in self._cat_buttons.values():
+            btn.setStyleSheet(_cat_pill)
+        self._conv_list.setStyleSheet(f"""
+            QListWidget {{
+                font-size: {tc.FONT_MD}px;
+                background: {tc.get("bg_surface")};
+                border: none;
+                outline: none;
+                padding: 2px 0;
+            }}
+            QListWidget::item {{
+                padding: 5px 10px;
+                margin: 0px 4px;
+                border-radius: {tc.RADIUS_SM}px;
+                color: {tc.get("text_primary")};
+            }}
+            QListWidget::item:selected {{
+                background: {tc.get("bg_active")};
+                color: {tc.get("text_heading")};
+            }}
+            QListWidget::item:hover:!selected {{
+                background: {tc.get("bg_hover_subtle")};
+            }}
+        """)
+        q = f"<span style='color:{tc.get('accent_info')};'>&#x275D;</span>"
+        sep = f"border-bottom:1px solid {tc.get('border_secondary')};"
+        row = f"color:{tc.get('text_primary')}; font-size:{tc.FONT_BASE}px; padding:6px 0;"
+        self._welcome.setText(
+            f"<div style='text-align:center; padding:24px;'>"
+            f"<div style='font-size:18px; font-weight:600; color:{tc.get('text_heading')}; "
+            f"margin-bottom:16px;'>Polyglot AI</div>"
+            # Two columns
+            f"<table width='100%' cellpadding='0' cellspacing='12'><tr>"
+            # Left: coding
+            f"<td valign='top' style='background:{tc.get('bg_surface')}; "
+            f"border-radius:8px; padding:16px; width:48%;'>"
+            f"<div style='font-size:{tc.FONT_MD}px; font-weight:600; color:{tc.get('accent_success')}; "
+            f"margin-bottom:10px;'>CODE WITH AI</div>"
+            f"<div style='{row} {sep}'>{q} Review this file for bugs</div>"
+            f"<div style='{row} {sep}'>{q} Write tests for main.py</div>"
+            f"<div style='{row}'>{q} Refactor for readability</div>"
+            f"<div style='font-size:{tc.FONT_XS}px; color:{tc.get('text_muted')}; margin-top:8px;'>"
+            f"Open a project first (Ctrl+Shift+O)</div>"
+            f"</td>"
+            # Right: general chat
+            f"<td valign='top' style='background:{tc.get('bg_surface')}; "
+            f"border-radius:8px; padding:16px; width:48%;'>"
+            f"<div style='font-size:{tc.FONT_MD}px; font-weight:600; color:{tc.get('accent_info')}; "
+            f"margin-bottom:10px;'>JUST CHAT</div>"
+            f"<div style='{row} {sep}'>{q} Explain a concept to me</div>"
+            f"<div style='{row} {sep}'>{q} Help me draft an email</div>"
+            f"<div style='{row}'>{q} Search for the latest docs</div>"
+            f"<div style='font-size:{tc.FONT_XS}px; color:{tc.get('text_muted')}; margin-top:8px;'>"
+            f"No project needed — just start typing</div>"
+            f"</td>"
+            f"</tr></table>"
+            f"<div style='font-size:{tc.FONT_SM}px; color:{tc.get('text_muted')}; margin-top:12px;'>"
+            f"Add an API key in Settings (Ctrl+,) to get started</div>"
+            f"</div>"
+        )
+        self._welcome.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; padding: 20px; "
+            f"background-color: {tc.get('bg_surface_raised')}; border-radius: {tc.RADIUS_MD}px;"
+        )
+        self._attach_bar.setStyleSheet(
+            f"background: {tc.get('bg_surface_overlay')}; border-top: 1px solid {tc.get('border_primary')};"
+        )
+        self._input_card.setStyleSheet(f"""
+            QWidget#inputCard {{
+                background-color: {tc.get("bg_chat_input")};
+                border: 1px solid {tc.get("border_input")};
+                border-radius: {tc.RADIUS_LG}px;
+            }}
+        """)
+        self._input.setStyleSheet(f"""
+            QTextEdit {{
+                font-size: {tc.FONT_LG}px; background-color: transparent;
+                color: {tc.get("text_heading")}; border: none;
+                padding: 8px 14px 6px 14px;
+                selection-background-color: {tc.get("bg_active")};
+            }}
+        """)
+        self._plus_btn.setStyleSheet(f"""
+            #toolbarIconBtn {{
+                background-color: transparent; border: none;
+                border-radius: {tc.RADIUS_SM}px; padding: 4px;
+            }}
+            #toolbarIconBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
+        """)
+        if not self._plan_mode:
+            self._plan_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {tc.get("text_tertiary")};
+                    font-size: {tc.FONT_SM}px; border: 1px solid {tc.get("border_card")};
+                    border-radius: {tc.RADIUS_LG}px; padding: 2px 10px;
+                }}
+                QPushButton:hover {{ color: {tc.get("text_heading")}; border-color: {tc.get("border_input")}; }}
+                QPushButton:checked {{
+                    background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
+                    border-color: {tc.get("accent_primary")};
+                }}
+            """)
+        self._search_btn.setStyleSheet(f"""
+            #toolbarSearchBtn {{
+                background-color: transparent; border: none;
+                border-radius: {tc.RADIUS_SM}px; padding: 4px;
+            }}
+            #toolbarSearchBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
+            #toolbarSearchBtn:checked {{
+                background-color: {tc.get("accent_info")};
+                border-radius: {tc.RADIUS_SM}px;
+            }}
+        """)
+        self._template_btn.setStyleSheet(f"""
+            #toolbarTplBtn {{
+                background-color: transparent; border: none;
+                border-radius: {tc.RADIUS_SM}px; padding: 4px;
+            }}
+            #toolbarTplBtn:hover {{ background-color: {tc.get("bg_hover")}; }}
+        """)
+        self._streaming_dot.setStyleSheet(
+            f"color: {tc.get('accent_success')}; font-size: 8px; background: transparent;"
+        )
+        self._token_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; background: transparent;"
+        )
+        self._cap_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; background: transparent;"
+        )
+        self._stop_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: {tc.FONT_SM}px; font-weight: bold;
+                padding: 2px 12px; background-color: {tc.get("accent_danger")};
+                color: {tc.get("text_on_accent")}; border: none; border-radius: {tc.RADIUS_SM}px;
+            }}
+            QPushButton:hover {{ background-color: {tc.get("accent_danger_hover")}; }}
+        """)
+        self._send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #ececec; border: none; border-radius: 16px;
+                padding: 4px;
+            }}
+            QPushButton:hover {{ background-color: #ffffff; }}
+            QPushButton:pressed {{ background-color: {tc.get("text_primary")}; }}
+            QPushButton:disabled {{ background-color: {tc.get("bg_hover")}; }}
+        """)
+        self._agent_status_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; padding: 2px 8px; background: transparent;"
+        )
 
     def _populate_default_models(self) -> None:
         self._default_grouped = {
@@ -860,10 +869,10 @@ class ChatPanel(QWidget):
         if not self._drop_overlay:
             self._drop_overlay = QLabel("Drop files here", self)
             self._drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._drop_overlay.setStyleSheet(
-                f"background: rgba(0, 120, 212, 0.15); border: 2px dashed {tc.get('accent_primary')}; "
-                f"border-radius: {tc.RADIUS_MD}px; color: {tc.get('accent_primary')}; font-size: 16px; font-weight: bold;"
-            )
+        self._drop_overlay.setStyleSheet(
+            f"background: rgba(0, 120, 212, 0.15); border: 2px dashed {tc.get('accent_primary')}; "
+            f"border-radius: {tc.RADIUS_MD}px; color: {tc.get('accent_primary')}; font-size: {tc.FONT_XL}px; font-weight: bold;"
+        )
         self._drop_overlay.setGeometry(self.rect())
         self._drop_overlay.show()
         self._drop_overlay.raise_()
@@ -943,11 +952,11 @@ class ChatPanel(QWidget):
             self._plan_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
-                    border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
+                    border: 1px solid {tc.get("border_feedback_pos")}; border-radius: {tc.RADIUS_LG}px;
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
                 }}
-                QPushButton:hover {{ background: #1f4a35; }}
+                QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
             """)
             self._input.setPlaceholderText("Ask a question with /plan...")
         else:
@@ -959,7 +968,7 @@ class ChatPanel(QWidget):
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
                 }}
-                QPushButton:hover {{ background: {tc.get("bg_user_bubble_long")}; color: {tc.get("text_heading")}; border-color: #666; }}
+                QPushButton:hover {{ background: {tc.get("bg_user_bubble_long")}; color: {tc.get("text_heading")}; border-color: {tc.get("text_muted")}; }}
             """)
             self._input.setPlaceholderText("Reply... (Shift+Enter for new line)")
 
@@ -1146,11 +1155,11 @@ class ChatPanel(QWidget):
                         self._github_btn.setStyleSheet(f"""
                             QPushButton {{
                                 background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
-                                border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
+                                border: 1px solid {tc.get("border_feedback_pos")}; border-radius: {tc.RADIUS_LG}px;
                                 padding: 4px 12px;
                                 font-family: -apple-system, 'Segoe UI', sans-serif;
                             }}
-                            QPushButton:hover {{ background: #1f4a35; }}
+                            QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
                         """)
                         self._add_system_message(
                             "GitHub connected! The AI can now access your repositories."
@@ -1773,7 +1782,7 @@ class ChatPanel(QWidget):
         error_label = QLabel(f"⚠ {error_text}")
         error_label.setWordWrap(True)
         error_label.setStyleSheet(
-            f"color: #ff6b6b; font-size: {tc.FONT_BASE}px; background: transparent;"
+            f"color: {tc.get('accent_error')}; font-size: {tc.FONT_BASE}px; background: transparent;"
         )
         error_layout.addWidget(error_label)
 
@@ -1937,7 +1946,7 @@ class ChatPanel(QWidget):
 
             status_label = QLabel(f"  {done_label}")
             status_label.setStyleSheet(
-                "color: #888; font-size: 12px; font-style: italic; padding: 2px 0;"
+                f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px; font-style: italic; padding: 2px 0;"
             )
             self._message_layout.addWidget(status_label)
 
@@ -2681,7 +2690,7 @@ class ChatPanel(QWidget):
         def animate():
             widget._dot_state = (widget._dot_state + 1) % 4
             s = widget._dot_state
-            colors = ["#888", "#666", "#444"]
+            colors = [tc.get("text_tertiary"), tc.get("text_muted"), tc.get("text_disabled")]
             # Rotate which dot is brightest
             c = [colors[(0 - s) % 3], colors[(1 - s) % 3], colors[(2 - s) % 3]]
             dots_label.setText(
@@ -3166,13 +3175,7 @@ class ChatPanel(QWidget):
         if self._tool_registry is None or not self._tool_registry.is_bootstrap_active():
             self._bootstrap_btn.setText("  Bootstrap")
             self._bootstrap_btn.setIcon(chat_icons.make_unlock_icon())
-            self._bootstrap_btn.setStyleSheet(
-                f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
-                f"background: {tc.get('bg_input')}; color: #fff; "
-                f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; }}"
-                f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
-                f"border-color: {tc.get('accent_primary')}; }}"
-            )
+            self._bootstrap_btn.setStyleSheet(self._chrome_button_style())
             if self._bootstrap_timer.isActive():
                 self._bootstrap_timer.stop()
             return
@@ -3182,7 +3185,7 @@ class ChatPanel(QWidget):
         self._bootstrap_btn.setIcon(chat_icons.make_lock_icon())
         self._bootstrap_btn.setStyleSheet(
             f"QPushButton {{ font-size: {tc.FONT_SM}px; padding: 2px 10px; "
-            f"background: {tc.get('accent_warning')}; color: #fff; "
+            f"background: {tc.get('accent_warning')}; color: {tc.get('text_on_accent')}; "
             "border: none; border-radius: 4px; font-weight: 600; }"
         )
 
@@ -3225,11 +3228,11 @@ class ChatPanel(QWidget):
             self._github_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
-                    border: 1px solid #2a5a3a; border-radius: {tc.RADIUS_LG}px;
+                    border: 1px solid {tc.get("border_feedback_pos")}; border-radius: {tc.RADIUS_LG}px;
                     padding: 4px 12px;
                     font-family: -apple-system, 'Segoe UI', sans-serif;
                 }}
-                QPushButton:hover {{ background: #1f4a35; }}
+                QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
             """)
 
     @property

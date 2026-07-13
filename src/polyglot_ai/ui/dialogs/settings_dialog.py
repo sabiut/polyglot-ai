@@ -103,7 +103,7 @@ _BTN_DANGER = (
 )
 _BTN_OUTLINE = (
     f"QPushButton {{"
-    f"  background-color: transparent; color: #aaa; font-size: {tc.FONT_SM}px;"
+    f"  background-color: transparent; color: {tc.get('text_secondary')}; font-size: {tc.FONT_SM}px;"
     f"  padding: 5px 12px; border: 1px solid {tc.get('border_input')}; border-radius: 5px;"
     f"}}"
     f"QPushButton:hover {{ background-color: {tc.get('border_secondary')}; color: {tc.get('text_heading')}; }}"
@@ -447,7 +447,7 @@ class SettingsDialog(QDialog):
             test_btn = QPushButton("Test")
             test_btn.setFixedWidth(55)
             test_btn.setStyleSheet(
-                f"QPushButton {{ background: {tc.get('border_secondary')}; color: #ccc; border: 1px solid {tc.get('border_input')};"
+                f"QPushButton {{ background: {tc.get('border_secondary')}; color: {tc.get('text_primary')}; border: 1px solid {tc.get('border_input')};"
                 f"  border-radius: {tc.RADIUS_SM}px; padding: 5px; font-size: {tc.FONT_SM}px; }}"
                 f"QPushButton:hover {{ background: {tc.get('border_card')}; }}"
             )
@@ -663,7 +663,7 @@ class SettingsDialog(QDialog):
         layout.addSpacing(16)
         custom_header = QLabel("Custom Server")
         custom_header.setStyleSheet(
-            f"font-size: {tc.FONT_LG}px; font-weight: bold; color: #ccc; margin-top: 8px;"
+            f"font-size: {tc.FONT_LG}px; font-weight: bold; color: {tc.get('text_primary')}; margin-top: 8px;"
         )
         layout.addWidget(custom_header)
 
@@ -968,12 +968,12 @@ class SettingsDialog(QDialog):
 
         if not ClaudeOAuthClient.is_claude_available():
             self._set_claude_oauth_status(
-                "Claude Code CLI not found. Install from claude.ai/download", "#f44747"
+                "Claude Code CLI not found. Install from claude.ai/download", tc.get("accent_error")
             )
             return
 
         self._claude_oauth_btn.setEnabled(False)
-        self.claude_oauth_status_changed.emit("Logging in via terminal...", "#969696")
+        self.claude_oauth_status_changed.emit("Logging in via terminal...", tc.get("text_secondary"))
 
         import threading
 
@@ -984,13 +984,13 @@ class SettingsDialog(QDialog):
                 if client.is_authenticated:
                     sub = client._subscription_type or ""
                     label = f"Signed in ✓{' (' + sub + ')' if sub else ''}"
-                    self.claude_oauth_status_changed.emit(label, "#4ec9b0")
+                    self.claude_oauth_status_changed.emit(label, tc.get("accent_success_muted"))
                 else:
                     self.claude_oauth_status_changed.emit(
-                        "Login completed but no token found", "#e5a00d"
+                        "Login completed but no token found", tc.get("accent_warning")
                     )
             else:
-                self.claude_oauth_status_changed.emit("Login failed or cancelled", "#f44747")
+                self.claude_oauth_status_changed.emit("Login failed or cancelled", tc.get("accent_error"))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1000,7 +1000,7 @@ class SettingsDialog(QDialog):
 
         client = ClaudeOAuthClient(EventBus())
         client.logout()
-        self._set_claude_oauth_status("Signed out", "#969696")
+        self._set_claude_oauth_status("Signed out", tc.get("text_secondary"))
 
     # ── Provider testing ─────────────────────────────────────────
 
@@ -1010,11 +1010,11 @@ class SettingsDialog(QDialog):
 
         if not api_key:
             label.setText("No key")
-            label.setStyleSheet("font-size: 11px; color: #f44747;")
+            label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};")
             return
 
         label.setText("Testing...")
-        label.setStyleSheet("font-size: 11px; color: #969696;")
+        label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_secondary')};")
 
         from polyglot_ai.core.bridge import EventBus
 
@@ -1051,13 +1051,13 @@ class SettingsDialog(QDialog):
                 ok, msg = await client.test_connection()
                 if ok:
                     label.setText("✓ OK")
-                    label.setStyleSheet("font-size: 11px; color: #4ec9b0;")
+                    label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_success_muted')};")
                 else:
                     label.setText(f"✗ {msg[:40]}")
-                    label.setStyleSheet("font-size: 11px; color: #f44747;")
+                    label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};")
             except Exception as e:
                 label.setText(f"✗ {str(e)[:40]}")
-                label.setStyleSheet("font-size: 11px; color: #f44747;")
+                label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};")
 
         from polyglot_ai.core.async_utils import safe_task
 

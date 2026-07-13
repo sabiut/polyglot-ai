@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class AvatarWidget(QWidget):
     """Small colored circle with an initial letter."""
@@ -31,7 +33,7 @@ class AvatarWidget(QWidget):
         painter.setBrush(self._color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, 28, 28, 6, 6)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(QColor(tc.get("text_on_accent")))
         font = QFont("sans-serif", 12, QFont.Weight.Bold)
         painter.setFont(font)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._letter)
@@ -95,11 +97,11 @@ class ChatMessage(QWidget):
             if self._is_long:
                 # Long/pasted content: wider card with subtle left border
                 bubble.setStyleSheet(
-                    "QWidget { background-color: #2a2a2c; border-radius: 12px; "
-                    "border-left: 3px solid #0078d4; }"
+                    f"QWidget {{ background-color: {tc.get('bg_user_bubble_long')}; border-radius: 12px; "
+                    f"border-left: 3px solid {tc.get('accent_primary')}; }}"
                 )
             else:
-                bubble.setStyleSheet("QWidget { background-color: #303030; border-radius: 18px; }")
+                bubble.setStyleSheet(f"QWidget {{ background-color: {tc.get('bg_user_bubble')}; border-radius: 18px; }}")
             bubble_layout = QVBoxLayout(bubble)
             bubble_layout.setContentsMargins(14, 10, 14, 10)
             bubble_layout.setSpacing(0)
@@ -117,7 +119,7 @@ class ChatMessage(QWidget):
             # with sensible floor/ceiling so it works on any screen size
             self._update_bubble_max_width()
             self._content_label.setStyleSheet(
-                "QTextBrowser { color: #e8e8e8; font-size: 13px; background: transparent; "
+                f"QTextBrowser {{ color: {tc.get('text_user_msg')}; font-size: {tc.FONT_BASE}px; background: transparent; "
                 "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', sans-serif; "
                 "line-height: 145%; }"
             )
@@ -149,10 +151,10 @@ class ChatMessage(QWidget):
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             self._content_label.setStyleSheet(
-                "QTextBrowser { color: #d1d5db; font-size: 14px; background: transparent; "
+                f"QTextBrowser {{ color: {tc.get('text_ai_msg')}; font-size: {tc.FONT_LG}px; background: transparent; "
                 "border: none; padding: 0px; font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif; "
                 "line-height: 150%; }"
-                "QTextBrowser a { color: #7cacf8; text-decoration: none; }"
+                f"QTextBrowser a {{ color: {tc.get('text_link')}; text-decoration: none; }}"
             )
             self._content_label.anchorClicked.connect(self._on_link_clicked)
             self._content_label.document().contentsChanged.connect(self._resize_content)
@@ -258,11 +260,11 @@ class ChatMessage(QWidget):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setToolTip(tooltip)
         btn.setIcon(self._draw_action_icon(icon_type))
-        btn.setStyleSheet("""
-            QPushButton {
+        btn.setStyleSheet(f"""
+            QPushButton {{
                 background: transparent; border: none; border-radius: 5px; padding: 4px;
-            }
-            QPushButton:hover { background-color: #3e3e40; }
+            }}
+            QPushButton:hover {{ background-color: {tc.get("bg_hover")}; }}
         """)
         btn.clicked.connect(callback)
         return btn
@@ -277,7 +279,7 @@ class ChatMessage(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#777777"))
+        pen = QPen(QColor(tc.get("text_muted")))
         pen.setWidthF(1.3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -335,7 +337,7 @@ class ChatMessage(QWidget):
                     w.setStyleSheet(
                         "QPushButton { background: transparent; border: none; "
                         "border-radius: 5px; padding: 4px; } "
-                        "QPushButton { background-color: #1a3a2a; }"
+                        f"QPushButton {{ background-color: {tc.get('bg_feedback_pos')}; }}"
                     )
                     break
 
@@ -348,7 +350,7 @@ class ChatMessage(QWidget):
                     w.setStyleSheet(
                         "QPushButton { background: transparent; border: none; "
                         "border-radius: 5px; padding: 4px; } "
-                        "QPushButton { background-color: #3a1a1a; }"
+                        f"QPushButton {{ background-color: {tc.get('bg_feedback_neg')}; }}"
                     )
                     break
 
@@ -372,7 +374,7 @@ class ChatMessage(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#888888"))
+        pen = QPen(QColor(tc.get("text_tertiary")))
         pen.setWidthF(1.3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -399,7 +401,7 @@ class ChatMessage(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#888888"))
+        pen = QPen(QColor(tc.get("text_tertiary")))
         pen.setWidthF(1.3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -422,7 +424,7 @@ class ChatMessage(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#4ec9b0"))
+        pen = QPen(QColor(tc.get("accent_success_muted")))
         pen.setWidthF(2.0)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -456,10 +458,10 @@ class ChatMessage(QWidget):
         from PyQt6.QtWidgets import QMenu
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background: #2d2d30; border: 1px solid #454545; color: #ccc; font-size: 12px; padding: 4px 0; }
-            QMenu::item { padding: 4px 20px; }
-            QMenu::item:selected { background: #094771; }
+        menu.setStyleSheet(f"""
+            QMenu {{ background: {tc.get("bg_surface_overlay")}; border: 1px solid {tc.get("border_menu")}; color: {tc.get("text_primary")}; font-size: {tc.FONT_MD}px; padding: 4px 0; }}
+            QMenu::item {{ padding: 4px 20px; }}
+            QMenu::item:selected {{ background: {tc.get("bg_active")}; }}
         """)
         copy_act = menu.addAction("Copy")
         copy_act.triggered.connect(self._copy_to_clipboard)
@@ -537,9 +539,9 @@ class ChatMessage(QWidget):
         toggle.setChecked(False)
         toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         toggle.setStyleSheet(
-            "QToolButton { background: transparent; color: #9aa0a6; border: none; "
-            "font-size: 12px; font-style: italic; padding: 2px 0; text-align: left; }"
-            "QToolButton:hover { color: #c8c8c8; }"
+            f"QToolButton {{ background: transparent; color: {tc.get('text_secondary')}; border: none; "
+            f"font-size: {tc.FONT_MD}px; font-style: italic; padding: 2px 0; text-align: left; }}"
+            f"QToolButton:hover {{ color: {tc.get('text_primary')}; }}"
         )
 
         view = QTextBrowser()
@@ -547,8 +549,8 @@ class ChatMessage(QWidget):
         view.setFrameShape(QTextBrowser.Shape.NoFrame)
         view.setVisible(False)
         view.setStyleSheet(
-            "QTextBrowser { color: #8a8f98; font-size: 12px; background: #1b1b1d; "
-            "border-left: 2px solid #3a3a3d; border-radius: 4px; padding: 6px 8px; "
+            f"QTextBrowser {{ color: {tc.get('text_secondary')}; font-size: {tc.FONT_MD}px; background: {tc.get('bg_input_deep')}; "
+            f"border-left: 2px solid {tc.get('border_card')}; border-radius: 4px; padding: 6px 8px; "
             "font-family: -apple-system, 'Segoe UI', sans-serif; line-height: 140%; }"
         )
         toggle.toggled.connect(view.setVisible)
@@ -709,27 +711,27 @@ class ChatMessage(QWidget):
         for line in lines:
             # Comments first (so they don't get inner-highlighted)
             if "comments" in patterns:
-                line = re.sub(patterns["comments"], lambda m: stash(m, "#6a9955"), line)
+                line = re.sub(patterns["comments"], lambda m: stash(m, tc.get("syn_comment")), line)
 
             # Strings
             if "strings" in patterns:
-                line = re.sub(patterns["strings"], lambda m: stash(m, "#ce9178"), line)
+                line = re.sub(patterns["strings"], lambda m: stash(m, tc.get("syn_string")), line)
 
             # Decorators
             if "decorators" in patterns:
-                line = re.sub(patterns["decorators"], lambda m: stash(m, "#dcdcaa"), line)
+                line = re.sub(patterns["decorators"], lambda m: stash(m, tc.get("syn_decorator")), line)
 
             # Flags (bash)
             if "flags" in patterns:
-                line = re.sub(patterns["flags"], lambda m: stash(m, "#9cdcfe"), line)
+                line = re.sub(patterns["flags"], lambda m: stash(m, tc.get("syn_identifier")), line)
 
             # Keywords
             if "keywords" in patterns:
-                line = re.sub(patterns["keywords"], lambda m: stash(m, "#569cd6"), line)
+                line = re.sub(patterns["keywords"], lambda m: stash(m, tc.get("syn_keyword")), line)
 
             # Numbers
             if "numbers" in patterns:
-                line = re.sub(patterns["numbers"], lambda m: stash(m, "#b5cea8"), line)
+                line = re.sub(patterns["numbers"], lambda m: stash(m, tc.get("syn_number")), line)
 
             result_lines.append(line)
 
@@ -763,18 +765,18 @@ class ChatMessage(QWidget):
             html = (
                 # Outer container with rounded corners
                 f'<div style="border-radius:8px; overflow:hidden; margin:8px 0; '
-                f'border:1px solid #374151;">'
+                f'border:1px solid {tc.get("border_code")};">'
                 # Header bar — dark with language label and copy icon
-                f'<div style="background:#2f2f2f; padding:6px 12px; '
-                f"display:flex; font-size:12px; color:#b4b4b4; "
-                f'border-bottom:1px solid #374151;">'
-                f'<span style="font-family:sans-serif; font-size:12px; color:#b4b4b4;">'
+                f'<div style="background:{tc.get("bg_code_header")}; padding:6px 12px; '
+                f"display:flex; font-size:{tc.FONT_MD}px; color:{tc.get('text_secondary')}; "
+                f'border-bottom:1px solid {tc.get("border_code")};">'
+                f'<span style="font-family:sans-serif; font-size:{tc.FONT_MD}px; color:{tc.get("text_secondary")};">'
                 f"{display_lang}</span>"
                 f"</div>"
                 # Code content
-                f'<div style="background:#1e1e1e; padding:12px 16px; '
+                f'<div style="background:{tc.get("bg_code_block")}; padding:12px 16px; '
                 f"font-family:'Consolas','Monaco','Courier New',monospace; "
-                f"font-size:13px; color:#d4d4d4; line-height:155%; "
+                f"font-size:{tc.FONT_BASE}px; color:{tc.get('text_primary')}; line-height:155%; "
                 f'white-space:pre-wrap; overflow-x:auto;">'
                 f"{highlighted}</div>"
                 f"</div>"
@@ -792,21 +794,21 @@ class ChatMessage(QWidget):
             r"`([^`]+)`",
             r'<code style="background:rgba(255,255,255,0.06); padding:2px 7px; '
             r"border-radius:6px; font-family:'Consolas','Monaco','SF Mono',monospace; "
-            r'font-size:13px; color:#e06c75; border:1px solid rgba(255,255,255,0.08);">'
+            rf'font-size:{tc.FONT_BASE}px; color:{tc.get("text_inline_code")}; border:1px solid rgba(255,255,255,0.08);">'
             r"\1</code>",
             text,
         )
 
         # Bold — bright white for emphasis
-        text = re.sub(r"\*\*(.+?)\*\*", r'<b style="color:#f5f5f5; font-weight:600;">\1</b>', text)
+        text = re.sub(r"\*\*(.+?)\*\*", rf'<b style="color:{tc.get("text_heading")}; font-weight:600;">\1</b>', text)
 
         # Italic
-        text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r'<i style="color:#b8b8b8;">\1</i>', text)
+        text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", rf'<i style="color:{tc.get("text_primary")};">\1</i>', text)
 
         # Links — underline on hover feel
         text = re.sub(
             r"\[(.+?)\]\((.+?)\)",
-            r'<a href="\2" style="color:#7cacf8; text-decoration:none; '
+            rf'<a href="\2" style="color:{tc.get("text_link")}; text-decoration:none; '
             r'border-bottom:1px solid rgba(124,172,248,0.3);">\1</a>',
             text,
         )
@@ -824,7 +826,7 @@ class ChatMessage(QWidget):
                 '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
                 "<tr>"
                 '<td style="width:8px;"></td>'
-                '<td style="vertical-align:top; padding-right:8px; color:#888; width:12px;">•</td>'
+                f'<td style="vertical-align:top; padding-right:8px; color:{tc.get("text_tertiary")}; width:12px;">•</td>'
                 f'<td style="vertical-align:top;">{content}</td>'
                 "</tr></table>"
             )
@@ -834,7 +836,7 @@ class ChatMessage(QWidget):
                 '<table cellspacing="0" cellpadding="0" style="margin:3px 0;">'
                 "<tr>"
                 '<td style="width:6px;"></td>'
-                f'<td style="vertical-align:top; padding-right:6px; color:#888; '
+                f'<td style="vertical-align:top; padding-right:6px; color:{tc.get("text_tertiary")}; '
                 f'font-weight:600; width:18px; text-align:right;">{num}.</td>'
                 f'<td style="vertical-align:top;">{content}</td>'
                 "</tr></table>"
@@ -864,8 +866,8 @@ class ChatMessage(QWidget):
             if stripped.startswith("### "):
                 in_list = False
                 html_lines.append(
-                    f'<div style="font-size:14px; font-weight:600; '
-                    f'margin:10px 0 3px 0; color:#e8e8e8;">{stripped[4:]}</div>'
+                    f'<div style="font-size:{tc.FONT_LG}px; font-weight:600; '
+                    f'margin:10px 0 3px 0; color:{tc.get("text_heading")};">{stripped[4:]}</div>'
                 )
                 continue
             if stripped.startswith("## "):
@@ -874,16 +876,16 @@ class ChatMessage(QWidget):
                     f'<div style="font-size:15px; font-weight:700; '
                     f"margin:12px 0 4px 0; padding-bottom:3px; "
                     f"border-bottom:1px solid rgba(255,255,255,0.08); "
-                    f'color:#f0f0f0;">{stripped[3:]}</div>'
+                    f'color:{tc.get("text_heading")};">{stripped[3:]}</div>'
                 )
                 continue
             if stripped.startswith("# "):
                 in_list = False
                 html_lines.append(
-                    f'<div style="font-size:16px; font-weight:700; '
+                    f'<div style="font-size:{tc.FONT_XL}px; font-weight:700; '
                     f"margin:14px 0 4px 0; padding-bottom:4px; "
                     f"border-bottom:1px solid rgba(255,255,255,0.1); "
-                    f'color:#ffffff;">{stripped[2:]}</div>'
+                    f'color:{tc.get("text_heading")};">{stripped[2:]}</div>'
                 )
                 continue
 
@@ -916,7 +918,7 @@ class ChatMessage(QWidget):
                 html_lines.append(
                     f'<div style="margin:4px 0; padding:3px 12px; '
                     f"border-left:3px solid rgba(124,172,248,0.4); "
-                    f'color:#aaa; font-style:italic;">{stripped[5:]}</div>'
+                    f'color:{tc.get("text_secondary")}; font-style:italic;">{stripped[5:]}</div>'
                 )
                 continue
 

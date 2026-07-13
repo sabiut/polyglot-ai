@@ -15,15 +15,16 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.review.models import ReviewFinding, ReviewResult
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
-_SEVERITY_COLORS = {
-    "critical": "#f44747",
-    "high": "#e5a00d",
-    "medium": "#569cd6",
-    "low": "#4ec9b0",
-    "info": "#888888",
+_SEVERITY_TOKENS = {
+    "critical": "severity_critical",
+    "high": "severity_high",
+    "medium": "severity_medium",
+    "low": "severity_low",
+    "info": "severity_info",
 }
 
 _SEVERITY_LABELS = {
@@ -59,7 +60,7 @@ class ReviewPanel(QWidget):
         # Set later via set_event_bus() once init_task_manager has run.
         self._task_manager = None
 
-        self.setStyleSheet("background-color: #1e1e1e;")
+        self.setStyleSheet(f"background-color: {tc.get('bg_base')};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -68,12 +69,18 @@ class ReviewPanel(QWidget):
         # ── Header bar ──
         header = QWidget()
         header.setFixedHeight(44)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
+        header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 12, 0)
 
         title = QLabel("CODE REVIEW")
-        title.setStyleSheet("font-size: 11px; font-weight: bold; color: #888; letter-spacing: 1px;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; "
+            f"color: {tc.get('text_tertiary')}; letter-spacing: 1px;"
+        )
         header_layout.addWidget(title)
         header_layout.addStretch()
 
@@ -110,13 +117,16 @@ class ReviewPanel(QWidget):
 
         # Run review button
         self._run_btn = QPushButton("▶ Run Review")
-        self._run_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0078d4; color: white; font-weight: 600;
-                padding: 5px 14px; border: none; border-radius: 5px; font-size: 12px;
-            }
-            QPushButton:hover { background-color: #1a8ae8; }
-            QPushButton:disabled { background-color: #3e3e40; color: #666; }
+        self._run_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')};
+                font-weight: 600;
+                padding: 5px 14px; border: none; border-radius: 5px; font-size: {tc.FONT_MD}px;
+            }}
+            QPushButton:hover {{ background-color: {tc.get('accent_primary_hover')}; }}
+            QPushButton:disabled {{
+                background-color: {tc.get('bg_hover')}; color: {tc.get('text_muted')};
+            }}
         """)
         self._run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._run_btn.clicked.connect(self._on_run_review)
@@ -124,13 +134,20 @@ class ReviewPanel(QWidget):
 
         # Copy results button — enabled only when results are displayed
         self._copy_btn = QPushButton("📋 Copy")
-        self._copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333; color: #ccc; font-weight: 600;
-                padding: 5px 12px; border: 1px solid #555; border-radius: 5px; font-size: 12px;
-            }
-            QPushButton:hover { background-color: #444; color: #fff; }
-            QPushButton:disabled { background-color: #2a2a2a; color: #555; border-color: #333; }
+        self._copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {tc.get('bg_surface_raised')}; color: {tc.get('text_primary')};
+                font-weight: 600;
+                padding: 5px 12px; border: 1px solid {tc.get('border_input')};
+                border-radius: 5px; font-size: {tc.FONT_MD}px;
+            }}
+            QPushButton:hover {{
+                background-color: {tc.get('bg_hover')}; color: {tc.get('text_heading')};
+            }}
+            QPushButton:disabled {{
+                background-color: {tc.get('bg_card')}; color: {tc.get('text_disabled')};
+                border-color: {tc.get('border_secondary')};
+            }}
         """)
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_btn.setEnabled(False)
@@ -142,19 +159,19 @@ class ReviewPanel(QWidget):
         # ── Content area (scrollable) ──
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea { border: none; background-color: #1e1e1e; }
-            QScrollBar:vertical {
-                background: #1e1e1e; width: 8px; margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background: #444; min-height: 30px; border-radius: 4px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ border: none; background-color: {tc.get('bg_base')}; }}
+            QScrollBar:vertical {{
+                background: {tc.get('scrollbar_track')}; width: 8px; margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {tc.get('scrollbar_thumb')}; min-height: 30px; border-radius: 4px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
 
         self._content = QWidget()
-        self._content.setStyleSheet("background-color: #1e1e1e;")
+        self._content.setStyleSheet(f"background-color: {tc.get('bg_base')};")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(20, 20, 20, 20)
         self._content_layout.setSpacing(10)
@@ -162,18 +179,18 @@ class ReviewPanel(QWidget):
 
         # Welcome state
         welcome_card = QWidget()
-        welcome_card.setStyleSheet("""
-            QWidget {
-                background-color: #252526; border: 1px solid #333;
+        welcome_card.setStyleSheet(f"""
+            QWidget {{
+                background-color: {tc.get('bg_surface')}; border: 1px solid {tc.get('border_secondary')};
                 border-radius: 8px;
-            }
+            }}
         """)
         wc_layout = QVBoxLayout(welcome_card)
         wc_layout.setContentsMargins(20, 20, 20, 20)
 
         welcome_title = QLabel("🔍 Code Review")
         welcome_title.setStyleSheet(
-            "font-size: 18px; font-weight: bold; color: #e0e0e0; "
+            f"font-size: 18px; font-weight: bold; color: {tc.get('text_heading')}; "
             "background: transparent; border: none;"
         )
         wc_layout.addWidget(welcome_title)
@@ -182,7 +199,8 @@ class ReviewPanel(QWidget):
             "Select a review mode above and click Run Review to analyze your code changes."
         )
         welcome_desc.setStyleSheet(
-            "font-size: 13px; color: #aaa; margin-top: 4px; background: transparent; border: none;"
+            f"font-size: {tc.FONT_BASE}px; color: {tc.get('text_secondary')}; "
+            "margin-top: 4px; background: transparent; border: none;"
         )
         welcome_desc.setWordWrap(True)
         wc_layout.addWidget(welcome_desc)
@@ -190,15 +208,20 @@ class ReviewPanel(QWidget):
         # Mode descriptions
         modes_text = QLabel(
             "<div style='margin-top: 12px;'>"
-            "<div style='color: #d4d4d4; margin: 6px 0;'>"
-            "  <b style='color: #569cd6;'>Working Changes</b> — review unstaged modifications</div>"
-            "<div style='color: #d4d4d4; margin: 6px 0;'>"
-            "  <b style='color: #569cd6;'>Staged Changes</b> — review what will be committed</div>"
-            "<div style='color: #d4d4d4; margin: 6px 0;'>"
-            "  <b style='color: #569cd6;'>Branch vs Main</b> — review all commits on this branch</div>"
+            f"<div style='color: {tc.get('text_primary')}; margin: 6px 0;'>"
+            f"  <b style='color: {tc.get('accent_info')};'>Working Changes</b>"
+            " — review unstaged modifications</div>"
+            f"<div style='color: {tc.get('text_primary')}; margin: 6px 0;'>"
+            f"  <b style='color: {tc.get('accent_info')};'>Staged Changes</b>"
+            " — review what will be committed</div>"
+            f"<div style='color: {tc.get('text_primary')}; margin: 6px 0;'>"
+            f"  <b style='color: {tc.get('accent_info')};'>Branch vs Main</b>"
+            " — review all commits on this branch</div>"
             "</div>"
         )
-        modes_text.setStyleSheet("font-size: 13px; background: transparent; border: none;")
+        modes_text.setStyleSheet(
+            f"font-size: {tc.FONT_BASE}px; background: transparent; border: none;"
+        )
         modes_text.setTextFormat(Qt.TextFormat.RichText)
         modes_text.setWordWrap(True)
         wc_layout.addWidget(modes_text)
@@ -242,10 +265,10 @@ class ReviewPanel(QWidget):
 
     def _on_run_review(self) -> None:
         if not self._project_root:
-            self._show_message("Open a project first.", "#f44747")
+            self._show_message("Open a project first.", tc.get("accent_error"))
             return
         if not self._review_engine:
-            self._show_message("Review engine not available.", "#f44747")
+            self._show_message("Review engine not available.", tc.get("accent_error"))
             return
 
         self._run_btn.setEnabled(False)
@@ -292,18 +315,21 @@ class ReviewPanel(QWidget):
             # Existing diff review path
             mode = diff_modes[idx]
             self._clear_results()
-            self._show_message("Getting git diff...", "#888")
+            self._show_message("Getting git diff...", tc.get("text_tertiary"))
 
             diff_text = await get_git_diff(self._project_root, mode)
             if not diff_text.strip():
                 self._clear_results()
-                self._show_message("No changes found. Your working tree is clean.", "#4ec9b0")
+                self._show_message(
+                    "No changes found. Your working tree is clean.",
+                    tc.get("accent_success_muted"),
+                )
                 self._run_btn.setEnabled(True)
                 self._run_btn.setText("▶ Run Review")
                 return
 
             self._clear_results()
-            self._show_message("Analyzing changes with AI...", "#569cd6")
+            self._show_message("Analyzing changes with AI...", tc.get("accent_info"))
             result = await self._review_engine.review_diff(diff_text, model_id=model_id)
             review_mode_label = mode
             # Diff modes embed file info in the diff itself — listing
@@ -324,19 +350,21 @@ class ReviewPanel(QWidget):
                 "frontend_design": "frontend",
             }.get(iac_mode, iac_mode)
             self._clear_results()
-            self._show_message(f"Scanning for {mode_pretty} files...", "#888")
+            self._show_message(f"Scanning for {mode_pretty} files...", tc.get("text_tertiary"))
 
             files = collect_iac_files(self._project_root, iac_mode)
             if not files:
                 self._clear_results()
-                self._show_message(f"No {mode_pretty} files found in this project.", "#cca700")
+                self._show_message(
+                    f"No {mode_pretty} files found in this project.", tc.get("accent_warning")
+                )
                 self._run_btn.setEnabled(True)
                 self._run_btn.setText("▶ Run Review")
                 return
 
             self._clear_results()
             self._show_message(
-                f"Analyzing {len(files)} {mode_pretty} file(s) with AI...", "#569cd6"
+                f"Analyzing {len(files)} {mode_pretty} file(s) with AI...", tc.get("accent_info")
             )
             result = await self._review_engine.review_content(files, iac_mode, model_id=model_id)
             review_mode_label = iac_mode
@@ -369,7 +397,7 @@ class ReviewPanel(QWidget):
             logger.exception("review_panel: failed to publish review snapshot")
             self._show_message(
                 "Review complete, but AI integration failed. The chat may not see these findings.",
-                "#cca700",
+                tc.get("accent_warning"),
             )
 
     def _record_review_on_task(self, result) -> None:
@@ -424,7 +452,7 @@ class ReviewPanel(QWidget):
     def _show_message(self, text: str, color: str) -> None:
         self._clear_results()
         label = QLabel(text)
-        label.setStyleSheet(f"color: {color}; font-size: 13px; padding: 20px;")
+        label.setStyleSheet(f"color: {color}; font-size: {tc.FONT_BASE}px; padding: 20px;")
         label.setWordWrap(True)
         self._content_layout.addWidget(label)
 
@@ -438,10 +466,12 @@ class ReviewPanel(QWidget):
 
         # ── Summary card ──
         summary_card = QWidget()
-        border = "#f44747" if result.status == "failed" else "#333"
+        border = (
+            tc.get("accent_error") if result.status == "failed" else tc.get("border_secondary")
+        )
         summary_card.setStyleSheet(
             "QWidget {"
-            " background-color: #252526;"
+            f" background-color: {tc.get('bg_surface')};"
             f" border: 1px solid {border};"
             " border-radius: 8px;"
             "}"
@@ -451,27 +481,33 @@ class ReviewPanel(QWidget):
 
         # Stats row
         stats = QHBoxLayout()
-        stats.addWidget(self._stat_badge(f"{result.files_reviewed} files", "#888"))
-        stats.addWidget(self._stat_badge(f"+{result.total_additions}", "#4ec9b0"))
-        stats.addWidget(self._stat_badge(f"-{result.total_deletions}", "#f44747"))
-        stats.addWidget(self._stat_badge(f"{len(result.findings)} findings", "#569cd6"))
+        stats.addWidget(self._stat_badge(f"{result.files_reviewed} files", tc.get("text_tertiary")))
+        stats.addWidget(self._stat_badge(f"+{result.total_additions}", tc.get("diff_add_fg")))
+        stats.addWidget(self._stat_badge(f"-{result.total_deletions}", tc.get("accent_error")))
+        stats.addWidget(self._stat_badge(f"{len(result.findings)} findings", tc.get("accent_info")))
 
         if result.critical_count:
-            stats.addWidget(self._stat_badge(f"{result.critical_count} critical", "#f44747"))
+            stats.addWidget(
+                self._stat_badge(f"{result.critical_count} critical", tc.get("severity_critical"))
+            )
         if result.high_count:
-            stats.addWidget(self._stat_badge(f"{result.high_count} high", "#e5a00d"))
+            stats.addWidget(
+                self._stat_badge(f"{result.high_count} high", tc.get("severity_high"))
+            )
 
         stats.addStretch()
         if result.model:
             model_lbl = QLabel(result.model)
-            model_lbl.setStyleSheet("font-size: 10px; color: #666;")
+            model_lbl.setStyleSheet(f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')};")
             stats.addWidget(model_lbl)
         sc_layout.addLayout(stats)
 
         # Summary text
         summary_text = QLabel(result.summary)
         summary_text.setWordWrap(True)
-        summary_text.setStyleSheet("color: #d4d4d4; font-size: 13px; margin-top: 6px;")
+        summary_text.setStyleSheet(
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_BASE}px; margin-top: 6px;"
+        )
         sc_layout.addWidget(summary_text)
 
         self._content_layout.addWidget(summary_card)
@@ -485,14 +521,18 @@ class ReviewPanel(QWidget):
             )
             warn.setWordWrap(True)
             warn.setStyleSheet(
-                "color: #e5a00d; font-size: 12px; padding: 8px 12px; "
-                "background: #2a2416; border: 1px solid #4a3a1a; border-radius: 4px;"
+                f"color: {tc.get('accent_warning')}; font-size: {tc.FONT_MD}px; "
+                "padding: 8px 12px; "
+                f"background: {tc.get('bg_feedback_warn')}; border: 1px solid {tc.get('border_feedback_warn')}; border-radius: 4px;"
             )
             self._content_layout.addWidget(warn)
 
         if not result.findings:
             ok_label = QLabel("✅ No issues found — the changes look good!")
-            ok_label.setStyleSheet("color: #4ec9b0; font-size: 14px; padding: 16px;")
+            ok_label.setStyleSheet(
+                f"color: {tc.get('accent_success_muted')}; "
+                f"font-size: {tc.FONT_LG}px; padding: 16px;"
+            )
             self._content_layout.addWidget(ok_label)
             return
 
@@ -504,28 +544,33 @@ class ReviewPanel(QWidget):
         """Render a review failure as a distinct red error card."""
         card = QWidget()
         card.setStyleSheet(
-            "QWidget { background-color: #2a1717; border: 1px solid #f44747; border-radius: 8px;}"
+            f"QWidget {{ background-color: {tc.get('bg_feedback_neg')}; "
+            f"border: 1px solid {tc.get('accent_error')}; border-radius: 8px;}}"
         )
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
 
         title = QLabel("🔴 Review failed")
         title.setStyleSheet(
-            "color: #f44747; font-size: 14px; font-weight: bold; "
+            f"color: {tc.get('accent_error')}; font-size: {tc.FONT_LG}px; font-weight: bold; "
             "background: transparent; border: none;"
         )
         layout.addWidget(title)
 
         msg = QLabel(result.summary or "The review did not complete.")
         msg.setWordWrap(True)
-        msg.setStyleSheet("color: #e0d0d0; font-size: 12px; background: transparent; border: none;")
+        msg.setStyleSheet(
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+            "background: transparent; border: none;"
+        )
         layout.addWidget(msg)
 
         if result.error:
             detail = QLabel(result.error)
             detail.setWordWrap(True)
             detail.setStyleSheet(
-                "color: #b08080; font-size: 11px; font-family: monospace; "
+                f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_SM}px; "
+                "font-family: monospace; "
                 "background: transparent; border: none; margin-top: 4px;"
             )
             layout.addWidget(detail)
@@ -537,7 +582,7 @@ class ReviewPanel(QWidget):
     def _stat_badge(self, text: str, color: str) -> QLabel:
         badge = QLabel(text)
         badge.setStyleSheet(
-            f"background: {color}22; color: {color}; font-size: 11px; "
+            f"background: {color}22; color: {color}; font-size: {tc.FONT_SM}px; "
             f"font-weight: 600; padding: 3px 8px; border-radius: 4px; "
             f"border: 1px solid {color}44;"
         )
@@ -546,11 +591,11 @@ class ReviewPanel(QWidget):
     def _create_finding_card(self, finding: ReviewFinding) -> QWidget:
         """Create a card for a single review finding."""
         card = QWidget()
-        severity_color = _SEVERITY_COLORS.get(finding.severity.value, "#888")
+        severity_color = tc.get(_SEVERITY_TOKENS.get(finding.severity.value, "severity_info"))
         card.setStyleSheet(f"""
             QWidget {{
-                background-color: #252526;
-                border: 1px solid #333;
+                background-color: {tc.get('bg_surface')};
+                border: 1px solid {tc.get('border_secondary')};
                 border-left: 3px solid {severity_color};
                 border-radius: 6px;
             }}
@@ -566,7 +611,7 @@ class ReviewPanel(QWidget):
 
         sev_label = QLabel(_SEVERITY_LABELS.get(finding.severity.value, finding.severity.value))
         sev_label.setStyleSheet(
-            f"font-size: 11px; font-weight: bold; color: {severity_color}; "
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {severity_color}; "
             "background: transparent; border: none;"
         )
         top.addWidget(sev_label)
@@ -574,7 +619,8 @@ class ReviewPanel(QWidget):
         cat_icon = _CATEGORY_ICONS.get(finding.category.value, "📝")
         cat_label = QLabel(f"{cat_icon} {finding.category.value}")
         cat_label.setStyleSheet(
-            "font-size: 11px; color: #888; background: transparent; border: none;"
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; "
+            "background: transparent; border: none;"
         )
         top.addWidget(cat_label)
 
@@ -582,7 +628,8 @@ class ReviewPanel(QWidget):
 
         file_label = QLabel(f"📄 {finding.file}:{finding.line}")
         file_label.setStyleSheet(
-            "font-size: 11px; color: #569cd6; background: transparent; border: none;"
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_info')}; "
+            "background: transparent; border: none;"
         )
         file_label.setCursor(Qt.CursorShape.PointingHandCursor)
         top.addWidget(file_label)
@@ -592,7 +639,7 @@ class ReviewPanel(QWidget):
         # Title
         title = QLabel(finding.title)
         title.setStyleSheet(
-            "font-size: 13px; font-weight: bold; color: #e0e0e0; "
+            f"font-size: {tc.FONT_BASE}px; font-weight: bold; color: {tc.get('text_heading')}; "
             "background: transparent; border: none;"
         )
         title.setWordWrap(True)
@@ -601,7 +648,8 @@ class ReviewPanel(QWidget):
         # Body
         body = QLabel(finding.body)
         body.setStyleSheet(
-            "font-size: 12px; color: #b0b0b0; background: transparent; border: none;"
+            f"font-size: {tc.FONT_MD}px; color: {tc.get('text_secondary')}; "
+            "background: transparent; border: none;"
         )
         body.setWordWrap(True)
         layout.addWidget(body)
@@ -610,8 +658,9 @@ class ReviewPanel(QWidget):
         if finding.suggestion:
             suggestion = QLabel(f"💡 Suggestion:\n{finding.suggestion}")
             suggestion.setStyleSheet(
-                "font-size: 12px; color: #4ec9b0; background: #1a2e2a; "
-                "border: 1px solid #2a4a3a; border-radius: 4px; "
+                f"font-size: {tc.FONT_MD}px; color: {tc.get('accent_success_muted')}; "
+                f"background: {tc.get('bg_feedback_pos')}; "
+                f"border: 1px solid {tc.get('border_feedback_pos')}; border-radius: 4px; "
                 "padding: 6px 8px; font-family: monospace; "
             )
             suggestion.setWordWrap(True)

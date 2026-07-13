@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class GitHubConnectDialog(QDialog):
     """Styled dialog that collects a GitHub token for the MCP GitHub server.
@@ -32,15 +34,15 @@ class GitHubConnectDialog(QDialog):
         self._token = ""
         self.setWindowTitle("Connect GitHub")
         self.setFixedSize(440, 560)
-        self.setStyleSheet("QDialog { background-color: #202020; }")
+        self.setStyleSheet(f"QDialog {{ background-color: {tc.get('bg_base')}; }}")
 
         # Request dark title bar on GNOME/KDE via Qt palette hints.
         try:
             dark_palette = self.palette()
-            dark_palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
-            dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#e0e0e0"))
-            dark_palette.setColor(QPalette.ColorRole.Button, QColor("#333333"))
-            dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#cccccc"))
+            dark_palette.setColor(QPalette.ColorRole.Window, QColor(tc.get("bg_base")))
+            dark_palette.setColor(QPalette.ColorRole.WindowText, QColor(tc.get("text_heading")))
+            dark_palette.setColor(QPalette.ColorRole.Button, QColor(tc.get("bg_input")))
+            dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor(tc.get("text_primary")))
             self.setPalette(dark_palette)
         except Exception:
             pass
@@ -56,9 +58,10 @@ class GitHubConnectDialog(QDialog):
         close_btn.setFixedSize(28, 28)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #666; font-size: 16px; "
-            "border: none; border-radius: 14px; }"
-            "QPushButton:hover { background: #333; color: #ccc; }"
+            f"QPushButton {{ background: transparent; color: {tc.get('text_muted')}; "
+            f"font-size: {tc.FONT_XL}px; "
+            f"border: none; border-radius: 14px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; color: {tc.get('text_primary')}; }}"
         )
         close_btn.clicked.connect(self.reject)
         close_row.addWidget(close_btn)
@@ -72,9 +75,11 @@ class GitHubConnectDialog(QDialog):
         icons_row.setSpacing(10)
         from polyglot_ai.ui.panels.chat_message import AvatarWidget
 
-        icons_row.addWidget(AvatarWidget("C", "#10a37f"))  # Codex
+        icons_row.addWidget(AvatarWidget("C", tc.get("accent_success")))  # Codex
         dots = QLabel("···")
-        dots.setStyleSheet("color: #555; font-size: 18px; background: transparent;")
+        dots.setStyleSheet(
+            f"color: {tc.get('text_disabled')}; font-size: 18px; background: transparent;"
+        )
         dots.setFixedWidth(30)
         dots.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icons_row.addWidget(dots)
@@ -86,13 +91,16 @@ class GitHubConnectDialog(QDialog):
         title = QLabel("Connect GitHub")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            "font-size: 17px; font-weight: bold; color: #e8e8e8; background: transparent;"
+            f"font-size: 17px; font-weight: bold; color: {tc.get('text_heading')}; "
+            f"background: transparent;"
         )
         layout.addWidget(title)
 
         subtitle = QLabel("via MCP Server")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("font-size: 11px; color: #666; background: transparent;")
+        subtitle.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; background: transparent;"
+        )
         layout.addWidget(subtitle)
 
         layout.addSpacing(18)
@@ -118,7 +126,7 @@ class GitHubConnectDialog(QDialog):
             if i > 0:
                 sep = QWidget()
                 sep.setFixedHeight(1)
-                sep.setStyleSheet("background-color: #333;")
+                sep.setStyleSheet(f"background-color: {tc.get('border_secondary')};")
                 layout.addWidget(sep)
 
             section = QWidget()
@@ -129,14 +137,18 @@ class GitHubConnectDialog(QDialog):
 
             h = QLabel(heading)
             h.setStyleSheet(
-                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent;"
+                f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
+                f"color: {tc.get('text_heading')}; background: transparent;"
             )
             sec_layout.addWidget(h)
 
             d = QLabel(desc)
             d.setWordWrap(True)
             d.setMinimumHeight(36)
-            d.setStyleSheet("font-size: 12px; color: #9a9a9a; background: transparent;")
+            d.setStyleSheet(
+                f"font-size: {tc.FONT_MD}px; color: {tc.get('text_secondary')}; "
+                f"background: transparent;"
+            )
             sec_layout.addWidget(d)
 
             layout.addWidget(section)
@@ -147,9 +159,10 @@ class GitHubConnectDialog(QDialog):
         self._token_input.setPlaceholderText("Paste your token here...")
         self._token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._token_input.setStyleSheet(
-            "QLineEdit { background: #161616; color: #d4d4d4; border: 1px solid #3a3a3a; "
-            "border-radius: 10px; padding: 10px 14px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #555; }"
+            f"QLineEdit {{ background: {tc.get('bg_input_deep')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; "
+            f"border-radius: 10px; padding: 10px 14px; font-size: {tc.FONT_BASE}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('border_input')}; }}"
         )
         layout.addWidget(self._token_input)
 
@@ -159,11 +172,11 @@ class GitHubConnectDialog(QDialog):
         connect_btn.setFixedHeight(44)
         connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         connect_btn.setStyleSheet(
-            "QPushButton { background-color: #f0f0f0; color: #111; font-size: 14px; "
-            "font-weight: 600; border: none; border-radius: 22px; "
-            "font-family: -apple-system, 'Segoe UI', sans-serif; }"
-            "QPushButton:hover { background-color: #fff; }"
-            "QPushButton:pressed { background-color: #ddd; }"
+            f"QPushButton {{ background-color: #f0f0f0; color: #111; font-size: {tc.FONT_LG}px; "
+            f"font-weight: 600; border: none; border-radius: 22px; "
+            f"font-family: -apple-system, 'Segoe UI', sans-serif; }}"
+            f"QPushButton:hover {{ background-color: #fff; }}"
+            f"QPushButton:pressed {{ background-color: #ddd; }}"
         )
         connect_btn.clicked.connect(self._on_connect)
         layout.addWidget(connect_btn)
@@ -173,9 +186,9 @@ class GitHubConnectDialog(QDialog):
         if not token:
             # Flash the input border red to signal the validation failure.
             self._token_input.setStyleSheet(
-                "QLineEdit { background: #161616; color: #d4d4d4; "
-                "border: 1px solid #d32f2f; border-radius: 10px; "
-                "padding: 10px 14px; font-size: 13px; }"
+                f"QLineEdit {{ background: {tc.get('bg_input_deep')}; color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('accent_danger')}; border-radius: 10px; "
+                f"padding: 10px 14px; font-size: {tc.FONT_BASE}px; }}"
             )
             return
         self._token = token

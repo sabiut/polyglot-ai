@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.ai.plan_models import Plan, PlanStatus, PlanStepStatus
+from polyglot_ai.ui import theme, theme_colors as tc
 from polyglot_ai.ui.widgets.plan_step_card import PlanStepCard
 
 logger = logging.getLogger(__name__)
@@ -35,18 +36,15 @@ class PlanPanel(QWidget):
         layout.setSpacing(0)
 
         # ── Header bar ──
-        header = QWidget()
-        header.setFixedHeight(44)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
-        header_layout = QHBoxLayout(header)
+        self._header = QWidget()
+        self._header.setFixedHeight(44)
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(16, 0, 16, 0)
 
-        title = QLabel("PLAN")
-        title.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
-        header_layout.addWidget(title)
+        self._title = QLabel("PLAN")
+        header_layout.addWidget(self._title)
 
         self._progress_label = QLabel("")
-        self._progress_label.setStyleSheet("color: #4ec9b0; font-size: 12px;")
         header_layout.addWidget(self._progress_label)
         header_layout.addStretch()
 
@@ -54,13 +52,6 @@ class PlanPanel(QWidget):
         self._approve_btn = QPushButton("Approve All")
         self._approve_btn.setFixedHeight(28)
         self._approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._approve_btn.setStyleSheet("""
-            QPushButton {
-                background: #0e4429; color: #4ec9b0; font-size: 11px; font-weight: 600;
-                border: none; border-radius: 6px; padding: 4px 14px;
-            }
-            QPushButton:hover { background: #1a5c3a; }
-        """)
         self._approve_btn.clicked.connect(self._on_approve_all)
         self._approve_btn.hide()
         header_layout.addWidget(self._approve_btn)
@@ -69,13 +60,6 @@ class PlanPanel(QWidget):
         self._execute_btn = QPushButton("▶ Execute")
         self._execute_btn.setFixedHeight(28)
         self._execute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._execute_btn.setStyleSheet("""
-            QPushButton {
-                background: #0078d4; color: white; font-size: 11px; font-weight: 600;
-                border: none; border-radius: 6px; padding: 4px 14px;
-            }
-            QPushButton:hover { background: #1a8ae8; }
-        """)
         self._execute_btn.clicked.connect(self._on_execute_clicked)
         self._execute_btn.hide()
         header_layout.addWidget(self._execute_btn)
@@ -84,42 +68,22 @@ class PlanPanel(QWidget):
         self._pause_btn = QPushButton("⏸ Pause")
         self._pause_btn.setFixedHeight(28)
         self._pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pause_btn.setStyleSheet("""
-            QPushButton {
-                background: #5c4a00; color: #e5a00d; font-size: 11px; font-weight: 600;
-                border: none; border-radius: 6px; padding: 4px 14px;
-            }
-            QPushButton:hover { background: #7a6500; }
-        """)
         self._pause_btn.clicked.connect(self._on_pause)
         self._pause_btn.hide()
         header_layout.addWidget(self._pause_btn)
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         # ── Progress bar ──
         self._progress_bar = QProgressBar()
         self._progress_bar.setFixedHeight(3)
         self._progress_bar.setTextVisible(False)
-        self._progress_bar.setStyleSheet("""
-            QProgressBar { background: #1e1e1e; border: none; }
-            QProgressBar::chunk { background: #4ec9b0; }
-        """)
         self._progress_bar.hide()
         layout.addWidget(self._progress_bar)
 
         # ── Content area ──
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea { border: none; background: #1e1e1e; }
-            QScrollBar:vertical {
-                background: transparent; width: 8px;
-            }
-            QScrollBar::handle:vertical {
-                background: #444; border-radius: 4px; min-height: 30px;
-            }
-        """)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
@@ -134,11 +98,67 @@ class PlanPanel(QWidget):
             "a structured implementation plan."
         )
         self._welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._welcome.setStyleSheet("color: #666; font-size: 13px; padding: 40px;")
         self._content_layout.addWidget(self._welcome)
 
-        scroll.setWidget(self._content)
-        layout.addWidget(scroll)
+        self._scroll.setWidget(self._content)
+        layout.addWidget(self._scroll)
+
+        self._apply_theme_styles()
+        theme.connect_theme_changed(self._apply_theme_styles)
+
+    def _apply_theme_styles(self) -> None:
+        """(Re-)apply token-based styles to the static chrome."""
+        self._header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        self._title.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            "font-weight: bold; letter-spacing: 1px;"
+        )
+        self._progress_label.setStyleSheet(
+            f"color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_MD}px;"
+        )
+        self._approve_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")};
+                font-size: {tc.FONT_SM}px; font-weight: 600;
+                border: none; border-radius: 6px; padding: 4px 14px;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
+        """)
+        self._execute_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {tc.get("accent_primary")}; color: white;
+                font-size: {tc.FONT_SM}px; font-weight: 600;
+                border: none; border-radius: 6px; padding: 4px 14px;
+            }}
+            QPushButton:hover {{ background: {tc.get("accent_primary_hover")}; }}
+        """)
+        self._pause_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {tc.get("bg_feedback_warn")}; color: {tc.get("accent_warning")};
+                font-size: {tc.FONT_SM}px; font-weight: 600;
+                border: none; border-radius: 6px; padding: 4px 14px;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_feedback_warn_hover")}; }}
+        """)
+        self._progress_bar.setStyleSheet(f"""
+            QProgressBar {{ background: {tc.get("bg_base")}; border: none; }}
+            QProgressBar::chunk {{ background: {tc.get("accent_success_muted")}; }}
+        """)
+        self._scroll.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: {tc.get("bg_base")}; }}
+            QScrollBar:vertical {{
+                background: transparent; width: 8px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {tc.get("scrollbar_thumb")}; border-radius: 4px; min-height: 30px;
+            }}
+        """)
+        self._welcome.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_BASE}px; padding: 40px;"
+        )
 
     def set_plan(self, plan: Plan) -> None:
         """Display a plan with its steps."""
@@ -149,7 +169,8 @@ class PlanPanel(QWidget):
         # Summary card
         summary_card = QWidget()
         summary_card.setStyleSheet(
-            "QWidget { background: #252526; border: 1px solid #333; border-radius: 8px; }"
+            f"QWidget {{ background: {tc.get('bg_surface')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 8px; }}"
         )
         summary_layout = QVBoxLayout(summary_card)
         summary_layout.setContentsMargins(14, 12, 14, 12)
@@ -157,7 +178,8 @@ class PlanPanel(QWidget):
 
         plan_title = QLabel(plan.title)
         plan_title.setStyleSheet(
-            "font-size: 15px; font-weight: bold; color: #e0e0e0; background: transparent; border: none;"
+            f"font-size: 15px; font-weight: bold; color: {tc.get('text_heading')}; "
+            "background: transparent; border: none;"
         )
         plan_title.setWordWrap(True)
         summary_layout.addWidget(plan_title)
@@ -166,12 +188,16 @@ class PlanPanel(QWidget):
             plan_summary = QLabel(plan.summary[:200])
             plan_summary.setWordWrap(True)
             plan_summary.setStyleSheet(
-                "font-size: 12px; color: #999; background: transparent; border: none;"
+                f"font-size: {tc.FONT_MD}px; color: {tc.get('text_secondary')}; "
+                "background: transparent; border: none;"
             )
             summary_layout.addWidget(plan_summary)
 
         stats = QLabel(f"{len(plan.steps)} steps · {plan.status.value}")
-        stats.setStyleSheet("font-size: 11px; color: #666; background: transparent; border: none;")
+        stats.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; "
+            "background: transparent; border: none;"
+        )
         summary_layout.addWidget(stats)
 
         self._content_layout.addWidget(summary_card)

@@ -24,25 +24,26 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
 _POD_STATUS = {
-    "Running": ("🟢", "#4ec9b0"),
-    "Succeeded": ("🟢", "#4ec9b0"),
-    "Completed": ("🟢", "#4ec9b0"),
-    "Pending": ("🟡", "#cca700"),
-    "ContainerCreating": ("🟡", "#cca700"),
-    "Init": ("🟡", "#cca700"),
-    "Terminating": ("🟡", "#cca700"),
-    "Failed": ("🔴", "#f44747"),
-    "CrashLoopBackOff": ("🔴", "#f44747"),
-    "Error": ("🔴", "#f44747"),
-    "ImagePullBackOff": ("🔴", "#f44747"),
-    "ErrImagePull": ("🔴", "#f44747"),
-    "OOMKilled": ("🔴", "#f44747"),
-    "Unknown": ("⚪", "#6a6a6a"),
+    "Running": ("🟢", "accent_success_muted"),
+    "Succeeded": ("🟢", "accent_success_muted"),
+    "Completed": ("🟢", "accent_success_muted"),
+    "Pending": ("🟡", "accent_warning"),
+    "ContainerCreating": ("🟡", "accent_warning"),
+    "Init": ("🟡", "accent_warning"),
+    "Terminating": ("🟡", "accent_warning"),
+    "Failed": ("🔴", "accent_error"),
+    "CrashLoopBackOff": ("🔴", "accent_error"),
+    "Error": ("🔴", "accent_error"),
+    "ImagePullBackOff": ("🔴", "accent_error"),
+    "ErrImagePull": ("🔴", "accent_error"),
+    "OOMKilled": ("🔴", "accent_error"),
+    "Unknown": ("⚪", "text_disabled"),
 }
 
 
@@ -59,6 +60,8 @@ class K8sPanel(QWidget):
         self._current_namespace: str = ""
 
         self._setup_ui()
+        self._apply_theme_styles()
+        theme.connect_theme_changed(self._apply_theme_styles)
 
         # Auto-refresh every 10 seconds
         self._refresh_timer = QTimer(self)
@@ -77,23 +80,14 @@ class K8sPanel(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setObjectName("k8sHeader")
-        header.setFixedHeight(36)
-        header.setStyleSheet(
-            f"#k8sHeader {{ background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
-        )
-        h_layout = QHBoxLayout(header)
+        self._header = QWidget()
+        self._header.setObjectName("k8sHeader")
+        self._header.setFixedHeight(36)
+        h_layout = QHBoxLayout(self._header)
         h_layout.setContentsMargins(12, 0, 8, 0)
 
-        title = QLabel("KUBERNETES")
-        title.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; font-weight: 600; "
-            f"color: {tc.get('text_tertiary')}; letter-spacing: 0.5px; "
-            "background: transparent;"
-        )
-        h_layout.addWidget(title)
+        self._title = QLabel("KUBERNETES")
+        h_layout.addWidget(self._title)
         h_layout.addStretch()
 
         # Refresh button (painted icon)
@@ -105,7 +99,7 @@ class K8sPanel(QWidget):
         r_pixmap = QPixmap(16, 16)
         r_pixmap.fill(QColor(0, 0, 0, 0))
         rp = QPainter(r_pixmap)
-        rp_pen = QPen(QColor("#aaaaaa"))
+        rp_pen = QPen(QColor(tc.get("text_secondary")))
         rp_pen.setWidthF(1.5)
         rp.setPen(rp_pen)
         rp.drawArc(3, 3, 10, 10, 30 * 16, 300 * 16)
@@ -121,79 +115,50 @@ class K8sPanel(QWidget):
         refresh_btn.clicked.connect(self._refresh_direct)
         h_layout.addWidget(refresh_btn)
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         # Context + namespace selectors
-        selector_bar = QWidget()
-        selector_bar.setObjectName("k8sSelectorBar")
-        selector_bar.setStyleSheet(f"#k8sSelectorBar {{ background: {tc.get('bg_base')}; }}")
-        sel_layout = QVBoxLayout(selector_bar)
+        self._selector_bar = QWidget()
+        self._selector_bar.setObjectName("k8sSelectorBar")
+        sel_layout = QVBoxLayout(self._selector_bar)
         sel_layout.setContentsMargins(8, 4, 8, 4)
         sel_layout.setSpacing(4)
 
-        combo_style = (
-            f"QComboBox {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
-            f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
-            f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
-            f"QComboBox::drop-down {{ border: none; width: 20px; }}"
-            f"QComboBox::down-arrow {{ image: none; border-left: 4px solid transparent; "
-            f"border-right: 4px solid transparent; border-top: 5px solid {tc.get('text_secondary')}; "
-            f"margin-right: 6px; }}"
-        )
-
         # Context selector
         ctx_row = QHBoxLayout()
-        ctx_label = QLabel("Cluster:")
-        ctx_label.setFixedWidth(60)
-        ctx_label.setStyleSheet(f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px;")
-        ctx_row.addWidget(ctx_label)
+        self._ctx_label = QLabel("Cluster:")
+        self._ctx_label.setFixedWidth(60)
+        ctx_row.addWidget(self._ctx_label)
         self._ctx_combo = QComboBox()
-        self._ctx_combo.setStyleSheet(combo_style)
         self._ctx_combo.currentTextChanged.connect(self._on_context_changed)
         ctx_row.addWidget(self._ctx_combo, stretch=1)
         sel_layout.addLayout(ctx_row)
 
         # Namespace selector
         ns_row = QHBoxLayout()
-        ns_label = QLabel("Namespace:")
-        ns_label.setFixedWidth(60)
-        ns_label.setStyleSheet(f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px;")
-        ns_row.addWidget(ns_label)
+        self._ns_label = QLabel("Namespace:")
+        self._ns_label.setFixedWidth(60)
+        ns_row.addWidget(self._ns_label)
         self._ns_combo = QComboBox()
-        self._ns_combo.setStyleSheet(combo_style)
         self._ns_combo.addItem("All Namespaces")
         self._ns_combo.currentTextChanged.connect(self._on_namespace_changed)
         ns_row.addWidget(self._ns_combo, stretch=1)
         sel_layout.addLayout(ns_row)
 
-        layout.addWidget(selector_bar)
+        layout.addWidget(self._selector_bar)
 
         # Main splitter
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setStyleSheet(
-            f"QSplitter::handle {{ background: {tc.get('border_secondary')}; height: 2px; }}"
-        )
-
-        tree_style = (
-            f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
-            f"border: none; font-size: {tc.FONT_SM}px; }}"
-            f"QTreeWidget::item {{ padding: 2px; }}"
-            f"QTreeWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
-            f"QHeaderView::section {{ background: {tc.get('bg_surface')}; "
-            f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
-            f"padding: 3px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
-        )
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Resource tree
         self._resource_tree = QTreeWidget()
         self._resource_tree.setHeaderLabels(["Resource", "Status", "Info"])
         self._resource_tree.setColumnWidth(0, 180)
         self._resource_tree.setColumnWidth(1, 80)
-        self._resource_tree.setStyleSheet(tree_style)
         self._resource_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._resource_tree.customContextMenuRequested.connect(self._show_context_menu)
         self._resource_tree.currentItemChanged.connect(self._on_item_selected)
-        splitter.addWidget(self._resource_tree)
+        self._splitter.addWidget(self._resource_tree)
 
         # Details/logs viewer
         details_widget = QWidget()
@@ -201,21 +166,13 @@ class K8sPanel(QWidget):
         d_layout.setContentsMargins(0, 0, 0, 0)
         d_layout.setSpacing(0)
 
-        details_header = QWidget()
-        details_header.setObjectName("k8sDetailsHeader")
-        details_header.setFixedHeight(28)
-        details_header.setStyleSheet(
-            f"#k8sDetailsHeader {{ background: {tc.get('bg_surface')}; "
-            f"border-top: 1px solid {tc.get('border_secondary')}; }}"
-        )
-        dh_layout = QHBoxLayout(details_header)
+        self._details_header = QWidget()
+        self._details_header.setObjectName("k8sDetailsHeader")
+        self._details_header.setFixedHeight(28)
+        dh_layout = QHBoxLayout(self._details_header)
         dh_layout.setContentsMargins(8, 0, 8, 0)
 
         self._details_title = QLabel("DETAILS")
-        self._details_title.setStyleSheet(
-            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; "
-            "font-weight: 600; background: transparent;"
-        )
         dh_layout.addWidget(self._details_title)
         dh_layout.addStretch()
 
@@ -228,7 +185,7 @@ class K8sPanel(QWidget):
         exp_pixmap = QPixmap(16, 16)
         exp_pixmap.fill(QColor(0, 0, 0, 0))
         ep = QPainter(exp_pixmap)
-        ep_pen = QPen(QColor("#aaaaaa"))
+        ep_pen = QPen(QColor(tc.get("text_secondary")))
         ep_pen.setWidthF(1.5)
         ep.setPen(ep_pen)
         ep.drawLine(9, 2, 14, 2)
@@ -246,33 +203,82 @@ class K8sPanel(QWidget):
         expand_btn.clicked.connect(self._open_details_window)
         dh_layout.addWidget(expand_btn)
 
-        d_layout.addWidget(details_header)
+        d_layout.addWidget(self._details_header)
 
         self._details_viewer = QPlainTextEdit()
         self._details_viewer.setReadOnly(True)
         mono = QFont("Monospace", 10)
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self._details_viewer.setFont(mono)
-        self._details_viewer.setStyleSheet(
-            f"QPlainTextEdit {{ background: {tc.get('bg_base')}; "
-            f"color: {tc.get('text_primary')}; border: none; padding: 4px; }}"
-        )
         self._details_viewer.setPlaceholderText("Click a resource to view details")
         d_layout.addWidget(self._details_viewer)
 
-        splitter.addWidget(details_widget)
-        splitter.setSizes([300, 150])
+        self._splitter.addWidget(details_widget)
+        self._splitter.setSizes([300, 150])
 
-        layout.addWidget(splitter)
+        layout.addWidget(self._splitter)
 
         # Status bar
         self._status_label = QLabel("  Kubernetes: checking...")
         self._status_label.setFixedHeight(24)
+        layout.addWidget(self._status_label)
+
+    def _apply_theme_styles(self) -> None:
+        self._header.setStyleSheet(
+            f"#k8sHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self._title.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"color: {tc.get('text_tertiary')}; letter-spacing: 0.5px; "
+            "background: transparent;"
+        )
+        self._selector_bar.setStyleSheet(f"#k8sSelectorBar {{ background: {tc.get('bg_base')}; }}")
+
+        combo_style = (
+            f"QComboBox {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
+            f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
+            f"QComboBox::drop-down {{ border: none; width: 20px; }}"
+            f"QComboBox::down-arrow {{ image: none; border-left: 4px solid transparent; "
+            f"border-right: 4px solid transparent; border-top: 5px solid {tc.get('text_secondary')}; "
+            f"margin-right: 6px; }}"
+        )
+        self._ctx_combo.setStyleSheet(combo_style)
+        self._ns_combo.setStyleSheet(combo_style)
+
+        label_style = f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px;"
+        self._ctx_label.setStyleSheet(label_style)
+        self._ns_label.setStyleSheet(label_style)
+
+        self._splitter.setStyleSheet(
+            f"QSplitter::handle {{ background: {tc.get('border_secondary')}; height: 2px; }}"
+        )
+        self._resource_tree.setStyleSheet(
+            f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
+            f"border: none; font-size: {tc.FONT_SM}px; }}"
+            f"QTreeWidget::item {{ padding: 2px; }}"
+            f"QTreeWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
+            f"QHeaderView::section {{ background: {tc.get('bg_surface')}; "
+            f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
+            f"padding: 3px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
+        )
+        self._details_header.setStyleSheet(
+            f"#k8sDetailsHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-top: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self._details_title.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; "
+            "font-weight: 600; background: transparent;"
+        )
+        self._details_viewer.setStyleSheet(
+            f"QPlainTextEdit {{ background: {tc.get('bg_base')}; "
+            f"color: {tc.get('text_primary')}; border: none; padding: 4px; }}"
+        )
         self._status_label.setStyleSheet(
             f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; "
             f"background: {tc.get('bg_surface')}; padding-left: 8px;"
         )
-        layout.addWidget(self._status_label)
 
     # ── kubectl execution ───────────────────────────────────────────
 
@@ -393,7 +399,9 @@ class K8sPanel(QWidget):
                     display_status = waiting["reason"]
                     break
 
-            icon, color = _POD_STATUS.get(display_status, _POD_STATUS.get(phase, ("⚪", "#6a6a6a")))
+            icon, color_token = _POD_STATUS.get(
+                display_status, _POD_STATUS.get(phase, ("⚪", "text_disabled"))
+            )
 
             item = QTreeWidgetItem(pods_root)
             name = meta.get("name", "")

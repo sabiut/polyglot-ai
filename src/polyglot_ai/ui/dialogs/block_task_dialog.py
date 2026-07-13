@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class BlockTaskDialog(QDialog):
     """Prompt for a blocker reason. Returns the trimmed text or ``""``."""
@@ -32,7 +34,7 @@ class BlockTaskDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Block task")
         self.setMinimumWidth(420)
-        self.setStyleSheet("QDialog { background: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
         self.setModal(True)
 
         self._reason: str = ""
@@ -43,7 +45,7 @@ class BlockTaskDialog(QDialog):
 
         header = QLabel(f"Block <b>{task_title}</b>")
         header.setStyleSheet(
-            "color: #e0e0e0; font-size: 14px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_LG}px; font-weight: 600; background: transparent;"
         )
         header.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(header)
@@ -54,7 +56,9 @@ class BlockTaskDialog(QDialog):
             "tell at a glance what's needed to unblock it."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+        hint.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
         layout.addWidget(hint)
 
         self._reason_edit = QPlainTextEdit()
@@ -62,10 +66,10 @@ class BlockTaskDialog(QDialog):
         self._reason_edit.setPlainText(current_reason)
         self._reason_edit.setMaximumHeight(120)
         self._reason_edit.setStyleSheet(
-            "QPlainTextEdit { background: #252526; color: #e0e0e0; "
-            "border: 1px solid #333; border-radius: 4px; "
-            "padding: 7px 10px; font-size: 12px; }"
-            "QPlainTextEdit:focus { border-color: #0e639c; }"
+            f"QPlainTextEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 4px; "
+            f"padding: 7px 10px; font-size: {tc.FONT_MD}px; }}"
+            f"QPlainTextEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         self._reason_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._reason_edit)
@@ -76,10 +80,10 @@ class BlockTaskDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel.setStyleSheet(
-            "QPushButton { background: #3c3c3c; color: #ddd; "
-            "border: 1px solid #555; border-radius: 4px; "
-            "padding: 6px 14px; font-size: 12px; }"
-            "QPushButton:hover { background: #4a4a4a; }"
+            f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('text_disabled')}; border-radius: 4px; "
+            f"padding: 6px 14px; font-size: {tc.FONT_MD}px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
         )
         cancel.clicked.connect(self.reject)
         btn_row.addWidget(cancel)
@@ -91,11 +95,11 @@ class BlockTaskDialog(QDialog):
         # dialog can't accidentally submit an empty string.
         self._confirm.setEnabled(bool(current_reason.strip()))
         self._confirm.setStyleSheet(
-            "QPushButton { background: #b5651d; color: white; border: none; "
-            "border-radius: 4px; padding: 6px 18px; font-size: 12px; "
-            "font-weight: 600; }"
-            "QPushButton:hover { background: #d4792a; }"
-            "QPushButton:disabled { background: #4a4a4a; color: #888; }"
+            f"QPushButton {{ background: {tc.get('accent_warning')}; color: {tc.get('text_on_accent')}; border: none; "
+            f"border-radius: 4px; padding: 6px 18px; font-size: {tc.FONT_MD}px; "
+            f"font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_warning_hover')}; }}"
+            f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; color: {tc.get('text_tertiary')}; }}"
         )
         self._confirm.clicked.connect(self._on_confirm)
         btn_row.addWidget(self._confirm)

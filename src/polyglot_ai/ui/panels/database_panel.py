@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.async_utils import safe_task
 from polyglot_ai.core.db_explorer import QueryResult, get_global_db_manager
 from polyglot_ai.core.db_notebook import get_notebook_store
+from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels.database_dialogs import (
     AddConnectionDialog,
@@ -72,6 +73,7 @@ class DatabasePanel(QWidget):
         self._full_window: _DatabaseWindow | None = None
 
         self._setup_ui()
+        theme.connect_theme_changed(self._apply_theme_styles)
         self._load_saved_connections()
 
     def set_mcp_client(self, mcp_client) -> None:
@@ -83,23 +85,14 @@ class DatabasePanel(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setObjectName("dbHeader")
-        header.setFixedHeight(36)
-        header.setStyleSheet(
-            f"#dbHeader {{ background: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
-        )
-        h_layout = QHBoxLayout(header)
+        self._header = QWidget()
+        self._header.setObjectName("dbHeader")
+        self._header.setFixedHeight(36)
+        h_layout = QHBoxLayout(self._header)
         h_layout.setContentsMargins(12, 0, 8, 0)
 
-        title = QLabel("DATABASES")
-        title.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; font-weight: 600; "
-            f"color: {tc.get('text_tertiary')}; letter-spacing: 0.5px; "
-            "background: transparent;"
-        )
-        h_layout.addWidget(title)
+        self._title_label = QLabel("DATABASES")
+        h_layout.addWidget(self._title_label)
         h_layout.addStretch()
 
         # Add connection button (painted + icon)
@@ -111,7 +104,7 @@ class DatabasePanel(QWidget):
         plus_pixmap = QPixmap(16, 16)
         plus_pixmap.fill(QColor(0, 0, 0, 0))
         pp = QPainter(plus_pixmap)
-        plus_pen = QPen(QColor("#aaaaaa"))
+        plus_pen = QPen(QColor(tc.get("text_secondary")))
         plus_pen.setWidthF(2.0)
         pp.setPen(plus_pen)
         pp.drawLine(8, 3, 8, 13)
@@ -125,22 +118,16 @@ class DatabasePanel(QWidget):
         add_btn.clicked.connect(self._show_add_dialog)
         h_layout.addWidget(add_btn)
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         # Connection selector
-        conn_bar = QWidget()
-        conn_bar.setObjectName("dbConnBar")
-        conn_bar.setStyleSheet(f"#dbConnBar {{ background: {tc.get('bg_base')}; }}")
-        conn_layout = QHBoxLayout(conn_bar)
+        self._conn_bar = QWidget()
+        self._conn_bar.setObjectName("dbConnBar")
+        conn_layout = QHBoxLayout(self._conn_bar)
         conn_layout.setContentsMargins(8, 4, 8, 4)
         conn_layout.setSpacing(4)
 
         self._conn_combo = QComboBox()
-        self._conn_combo.setStyleSheet(
-            f"QComboBox {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
-            f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
-            f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
-        )
         self._conn_combo.setPlaceholderText("No connections")
         self._conn_combo.currentTextChanged.connect(self._on_connection_changed)
         conn_layout.addWidget(self._conn_combo, stretch=1)
@@ -154,7 +141,7 @@ class DatabasePanel(QWidget):
         conn_pixmap = QPixmap(16, 16)
         conn_pixmap.fill(QColor(0, 0, 0, 0))
         cp = QPainter(conn_pixmap)
-        cp_pen = QPen(QColor("#4ec9b0"))
+        cp_pen = QPen(QColor(tc.get("accent_success_muted")))
         cp_pen.setWidthF(2.0)
         cp.setPen(cp_pen)
         cp.drawLine(4, 8, 8, 4)
@@ -181,7 +168,7 @@ class DatabasePanel(QWidget):
         dc_pixmap = QPixmap(16, 16)
         dc_pixmap.fill(QColor(0, 0, 0, 0))
         dp = QPainter(dc_pixmap)
-        dp_pen = QPen(QColor("#f44747"))
+        dp_pen = QPen(QColor(tc.get("accent_error")))
         dp_pen.setWidthF(2.0)
         dp.setPen(dp_pen)
         # Draw an X
@@ -196,12 +183,61 @@ class DatabasePanel(QWidget):
         disconnect_btn.clicked.connect(self._disconnect_selected)
         conn_layout.addWidget(disconnect_btn)
 
-        layout.addWidget(conn_bar)
+        layout.addWidget(self._conn_bar)
 
         # Schema tree (compact, in sidebar)
         self._schema_tree = QTreeWidget()
         self._schema_tree.setHeaderLabels(["Name", "Type"])
         self._schema_tree.setColumnWidth(0, 180)
+        self._schema_tree.itemDoubleClicked.connect(self._on_schema_double_click)
+        layout.addWidget(self._schema_tree)
+
+        layout.addStretch()
+
+        # Open Explorer button at bottom
+        self._open_bar = QWidget()
+        self._open_bar.setObjectName("dbOpenBar")
+        self._open_bar.setFixedHeight(40)
+        ob_layout = QHBoxLayout(self._open_bar)
+        ob_layout.setContentsMargins(8, 0, 8, 0)
+
+        self._open_btn = QPushButton("Open SQL Editor")
+        self._open_btn.setObjectName("dbOpenExplorer")
+        self._open_btn.setFixedHeight(28)
+        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open_btn.clicked.connect(self._open_full_window)
+        ob_layout.addWidget(self._open_btn)
+
+        layout.addWidget(self._open_bar)
+
+        # Status bar
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("dbStatusBar")
+        self._status_label.setFixedHeight(24)
+        layout.addWidget(self._status_label)
+
+        self._apply_theme_styles()
+
+        # Keyboard shortcut: Ctrl+Enter opens full window
+        shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        shortcut.activated.connect(self._open_full_window)
+
+    def _apply_theme_styles(self) -> None:
+        self._header.setStyleSheet(
+            f"#dbHeader {{ background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self._title_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"color: {tc.get('text_tertiary')}; letter-spacing: 0.5px; "
+            "background: transparent;"
+        )
+        self._conn_bar.setStyleSheet(f"#dbConnBar {{ background: {tc.get('bg_base')}; }}")
+        self._conn_combo.setStyleSheet(
+            f"QComboBox {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
+            f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
+        )
         self._schema_tree.setStyleSheet(
             f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
             f"border: none; font-size: {tc.FONT_SM}px; }}"
@@ -211,50 +247,20 @@ class DatabasePanel(QWidget):
             f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
             f"padding: 3px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
         )
-        self._schema_tree.itemDoubleClicked.connect(self._on_schema_double_click)
-        layout.addWidget(self._schema_tree)
-
-        layout.addStretch()
-
-        # Open Explorer button at bottom
-        open_bar = QWidget()
-        open_bar.setObjectName("dbOpenBar")
-        open_bar.setFixedHeight(40)
-        open_bar.setStyleSheet(
+        self._open_bar.setStyleSheet(
             f"#dbOpenBar {{ background: {tc.get('bg_surface')}; "
             f"border-top: 1px solid {tc.get('border_secondary')}; }}"
         )
-        ob_layout = QHBoxLayout(open_bar)
-        ob_layout.setContentsMargins(8, 0, 8, 0)
-
-        self._open_btn = QPushButton("Open SQL Editor")
-        self._open_btn.setObjectName("dbOpenExplorer")
-        self._open_btn.setFixedHeight(28)
-        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_btn.setStyleSheet(
             f"#dbOpenExplorer {{ background: {tc.get('accent_primary')}; "
             f"color: {tc.get('text_on_accent')}; border: none; border-radius: 4px; "
             f"padding: 0 16px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"#dbOpenExplorer:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
-        self._open_btn.clicked.connect(self._open_full_window)
-        ob_layout.addWidget(self._open_btn)
-
-        layout.addWidget(open_bar)
-
-        # Status bar
-        self._status_label = QLabel("")
-        self._status_label.setObjectName("dbStatusBar")
-        self._status_label.setFixedHeight(24)
         self._status_label.setStyleSheet(
             f"#dbStatusBar {{ color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
             f"background: {tc.get('bg_surface')}; padding-left: 8px; }}"
         )
-        layout.addWidget(self._status_label)
-
-        # Keyboard shortcut: Ctrl+Enter opens full window
-        shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        shortcut.activated.connect(self._open_full_window)
 
     # ── Connection Management ───────────────────────────────────────
 
@@ -544,21 +550,22 @@ class _DatabaseWindow(QWidget):
 
         side_tabs = QTabWidget()
         side_tabs.setStyleSheet(
-            "QTabWidget::pane { border: none; background: #1e1e1e; }"
-            "QTabBar::tab { background: #252526; color: #888; padding: 5px 12px; "
-            "font-size: 11px; border-top: 2px solid transparent; }"
-            "QTabBar::tab:selected { background: #1e1e1e; color: #ddd; "
-            "border-top-color: #0e639c; }"
+            f"QTabWidget::pane {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QTabBar::tab {{ background: {tc.get('bg_surface')}; color: {tc.get('text_tertiary')}; "
+            f"padding: 5px 12px; font-size: {tc.FONT_SM}px; border-top: 2px solid transparent; }}"
+            f"QTabBar::tab:selected {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
+            f"border-top-color: {tc.get('accent_primary')}; }}"
         )
 
         # History tab
         self._history_list = QListWidget()
         self._history_list.setStyleSheet(
-            "QListWidget { background: #1e1e1e; color: #ddd; border: none; "
-            "font-size: 11px; }"
-            "QListWidget::item { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; }"
-            "QListWidget::item:hover { background: #2a2d2e; }"
-            "QListWidget::item:selected { background: #094771; color: #fff; }"
+            f"QListWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
+            f"border: none; font-size: {tc.FONT_SM}px; }}"
+            f"QListWidget::item {{ padding: 4px 8px; border-bottom: 1px solid {tc.get('bg_card')}; }}"
+            f"QListWidget::item:hover {{ background: {tc.get('bg_hover_subtle')}; }}"
+            f"QListWidget::item:selected {{ background: {tc.get('bg_active')}; "
+            f"color: {tc.get('text_on_accent')}; }}"
         )
         self._history_list.itemDoubleClicked.connect(self._on_history_picked)
         side_tabs.addTab(self._history_list, "History")
@@ -621,7 +628,7 @@ class _DatabaseWindow(QWidget):
         play_pixmap.fill(QColor(0, 0, 0, 0))
         play_p = QPainter(play_pixmap)
         play_p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        play_p.setBrush(QColor("#10a37f"))
+        play_p.setBrush(QColor(tc.get("accent_success")))
         play_p.setPen(Qt.PenStyle.NoPen)
         play_p.drawPolygon(QPolygonF([QPointF(4, 2), QPointF(14, 8), QPointF(4, 14)]))
         play_p.end()
@@ -644,8 +651,9 @@ class _DatabaseWindow(QWidget):
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self._sql_editor.setFont(mono)
         self._sql_editor.setStyleSheet(
-            f"QPlainTextEdit {{ background: #1a1a2e; color: {tc.get('text_primary')}; "
-            f"border: none; padding: 10px 12px; font-size: 13px; "
+            f"QPlainTextEdit {{ background: {tc.get('status_bar_bg')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: none; padding: 10px 12px; font-size: {tc.FONT_BASE}px; "
             f"selection-background-color: {tc.get('accent_primary')}; }}"
         )
         sql_layout.addWidget(self._sql_editor)
@@ -874,10 +882,10 @@ class _DatabaseWindow(QWidget):
         btn.setToolTip(tooltip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(
-            "#dbWinHdrBtn { background: transparent; color: #cccccc; "
-            "border: none; font-size: 14px; }"
+            f"#dbWinHdrBtn {{ background: transparent; color: {tc.get('text_primary')}; "
+            f"border: none; font-size: {tc.FONT_LG}px; }}"
             "#dbWinHdrBtn:hover { background: rgba(255,255,255,0.1); "
-            "color: #ffffff; border-radius: 3px; }"
+            f"color: {tc.get('text_on_accent')}; border-radius: 3px; }}"
         )
         return btn
 
@@ -984,9 +992,10 @@ class _DatabaseWindow(QWidget):
             return
         menu = QMenu(self)
         menu.setStyleSheet(
-            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_menu')}; }}"
             "QMenu::item { padding: 4px 20px; }"
-            "QMenu::item:selected { background: #094771; }"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
         load_action = menu.addAction("Load into editor")
         delete_action = menu.addAction("Delete snippet")

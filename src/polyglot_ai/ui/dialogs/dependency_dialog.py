@@ -32,6 +32,7 @@ from polyglot_ai.core.dependency_check import (
     new_installer_log_path,
     parse_progress_marker,
 )
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class DependencyDialog(QDialog):
         self.setMinimumSize(640, 480)
         self.setModal(True)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setStyleSheet("QDialog { background: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 16)
@@ -83,7 +84,8 @@ class DependencyDialog(QDialog):
         # ── Header ──
         header = QLabel("⚠ Some optional features are unavailable")
         header.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #e5a00d; background: transparent;"
+            f"font-size: {tc.FONT_XL}px; font-weight: bold; "
+            f"color: {tc.get('accent_warning')}; background: transparent;"
         )
         layout.addWidget(header)
 
@@ -95,25 +97,30 @@ class DependencyDialog(QDialog):
         )
         if self._distro == "unknown":
             subtitle_text += (
-                " <br><span style='color: #e5a00d;'>Could not auto-detect your Linux distribution "
+                f" <br><span style='color: {tc.get('accent_warning')};'>"
+                "Could not auto-detect your Linux distribution "
                 "— automatic install is disabled. See the manual commands below.</span>"
             )
         subtitle = QLabel(subtitle_text)
         subtitle.setTextFormat(Qt.TextFormat.RichText)
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #aaa; font-size: 12px; background: transparent;")
+        subtitle.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_MD}px; "
+            f"background: transparent;"
+        )
         layout.addWidget(subtitle)
 
         # ── Scrollable list of missing deps ──
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #333; background: #252526; border-radius: 6px; }"
-            "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
+            f"QScrollArea {{ border: 1px solid {tc.get('border_secondary')}; "
+            f"background: {tc.get('bg_surface')}; border-radius: 6px; }}"
+            f"QScrollBar:vertical {{ width: 8px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; border-radius: 4px; }}"
         )
         content = QWidget()
-        content.setStyleSheet("background: #252526;")
+        content.setStyleSheet(f"background: {tc.get('bg_surface')};")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(14, 12, 14, 12)
         content_layout.setSpacing(14)
@@ -140,7 +147,8 @@ class DependencyDialog(QDialog):
         self._global_status = QLabel("")
         self._global_status.setWordWrap(True)
         self._global_status.setStyleSheet(
-            "color: #4ec9b0; font-size: 11px; background: transparent; padding: 4px 0;"
+            f"color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent; padding: 4px 0;"
         )
         layout.addWidget(self._global_status)
 
@@ -163,8 +171,9 @@ class DependencyDialog(QDialog):
         bottom = QHBoxLayout()
         self._dont_show_cb = QCheckBox("Don't show this again")
         self._dont_show_cb.setStyleSheet(
-            "QCheckBox { color: #aaa; font-size: 12px; background: transparent; }"
-            "QCheckBox::indicator { width: 14px; height: 14px; }"
+            f"QCheckBox {{ color: {tc.get('text_secondary')}; font-size: {tc.FONT_MD}px; "
+            f"background: transparent; }}"
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; }}"
         )
         bottom.addWidget(self._dont_show_cb)
         bottom.addStretch()
@@ -172,9 +181,10 @@ class DependencyDialog(QDialog):
         copy_btn = QPushButton("Copy all commands")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.setStyleSheet(
-            "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-            "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
-            "QPushButton:hover { background: #4a4a4a; }"
+            f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_input')}; "
+            f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_MD}px; }}"
+            f"QPushButton:hover {{ background: {tc.get('border_input')}; }}"
         )
         copy_btn.clicked.connect(self._on_copy)
         bottom.addWidget(copy_btn)
@@ -190,10 +200,11 @@ class DependencyDialog(QDialog):
                 "all missing system dependencies. uv is installed separately."
             )
             install_all_btn.setStyleSheet(
-                "QPushButton { background: #4ec9b0; color: #0a1512; border: none; "
-                "border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: 600; }"
-                "QPushButton:hover { background: #6fe0c8; }"
-                "QPushButton:disabled { background: #355; color: #888; }"
+                f"QPushButton {{ background: {tc.get('accent_success_muted')}; color: {tc.get('text_on_success_muted')}; "
+                f"border: none; "
+                f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {tc.get('accent_success_muted_hover')}; }}"
+                f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; color: {tc.get('text_tertiary')}; }}"
             )
             install_all_btn.clicked.connect(lambda _, b=install_all_btn: self._install_all(b))
             bottom.addWidget(install_all_btn)
@@ -204,9 +215,9 @@ class DependencyDialog(QDialog):
         dismiss_btn = QPushButton("Dismiss")
         dismiss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         dismiss_btn.setStyleSheet(
-            "QPushButton { background: #0e639c; color: white; border: none; "
-            "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
-            "QPushButton:hover { background: #1a8ae8; }"
+            f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; border: none; "
+            f"border-radius: 4px; padding: 6px 16px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         dismiss_btn.clicked.connect(self._on_dismiss)
         bottom.addWidget(dismiss_btn)
@@ -223,13 +234,19 @@ class DependencyDialog(QDialog):
         # Header line: • name
         header = QLabel(f"• <b>{dep.name}</b> not found")
         header.setTextFormat(Qt.TextFormat.RichText)
-        header.setStyleSheet("color: #e0e0e0; font-size: 13px; background: transparent;")
+        header.setStyleSheet(
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_BASE}px; "
+            f"background: transparent;"
+        )
         rl.addWidget(header)
 
         # Purpose line
         purpose = QLabel(f"    {dep.purpose}")
         purpose.setWordWrap(True)
-        purpose.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+        purpose.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent;"
+        )
         rl.addWidget(purpose)
 
         # Install command line
@@ -242,7 +259,8 @@ class DependencyDialog(QDialog):
         cmd.setWordWrap(True)
         cmd.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         cmd.setStyleSheet(
-            "color: #4ec9b0; font-size: 11px; font-family: monospace; background: transparent;"
+            f"color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_SM}px; "
+            f"font-family: monospace; background: transparent;"
         )
         rl.addWidget(cmd)
 
@@ -253,14 +271,18 @@ class DependencyDialog(QDialog):
             install_btn = QPushButton("Install uv now")
             install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             install_btn.setStyleSheet(
-                "QPushButton { background: #4ec9b0; color: #0a1512; border: none; "
-                "border-radius: 4px; padding: 5px 12px; font-size: 11px; font-weight: 600; }"
-                "QPushButton:hover { background: #6fe0c8; }"
-                "QPushButton:disabled { background: #355; color: #888; }"
+                f"QPushButton {{ background: {tc.get('accent_success_muted')}; color: {tc.get('text_on_success_muted')}; "
+                f"border: none; "
+                f"border-radius: 4px; padding: 5px 12px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {tc.get('accent_success_muted_hover')}; }}"
+                f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; color: {tc.get('text_tertiary')}; }}"
             )
             status = QLabel("")
             status.setWordWrap(True)
-            status.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+            status.setStyleSheet(
+                f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+                f"background: transparent;"
+            )
             self._uv_row_status = status
 
             install_btn.clicked.connect(lambda _, b=install_btn: self._install_uv(b))
@@ -277,7 +299,8 @@ class DependencyDialog(QDialog):
         if self._uv_row_status:
             self._uv_row_status.setText("Running the official uv installer…")
             self._uv_row_status.setStyleSheet(
-                "color: #e5a00d; font-size: 11px; background: transparent;"
+                f"color: {tc.get('accent_warning')}; font-size: {tc.FONT_SM}px; "
+                f"background: transparent;"
             )
         safe_task(self._run_uv_install(button), name="install_uv")
 
@@ -297,10 +320,10 @@ class DependencyDialog(QDialog):
 
     def _apply_uv_result(self, button: QPushButton, result: InstallResult) -> None:
         if self._uv_row_status:
-            colour = "#4ec9b0" if result.ok else "#f48771"
+            colour = tc.get("accent_success_muted") if result.ok else tc.get("accent_error")
             self._uv_row_status.setText(result.message)
             self._uv_row_status.setStyleSheet(
-                f"color: {colour}; font-size: 11px; background: transparent;"
+                f"color: {colour}; font-size: {tc.FONT_SM}px; background: transparent;"
             )
         if result.ok:
             button.setText("Installed ✓")
@@ -337,7 +360,8 @@ class DependencyDialog(QDialog):
 
         self._progress_label = QLabel("Preparing…")
         self._progress_label.setStyleSheet(
-            "color: #e0e0e0; font-size: 12px; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_MD}px; "
+            f"background: transparent;"
         )
         v.addWidget(self._progress_label)
 
@@ -347,9 +371,10 @@ class DependencyDialog(QDialog):
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setFixedHeight(8)
         self._progress_bar.setStyleSheet(
-            "QProgressBar { background: #1a1a1a; border: 1px solid #333; "
-            "border-radius: 4px; }"
-            "QProgressBar::chunk { background: #4ec9b0; border-radius: 3px; }"
+            f"QProgressBar {{ background: {tc.get('bg_base')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; }}"
+            f"QProgressBar::chunk {{ background: {tc.get('accent_success_muted')}; border-radius: 3px; }}"
         )
         v.addWidget(self._progress_bar)
 
@@ -359,9 +384,10 @@ class DependencyDialog(QDialog):
         self._show_output_btn.setCheckable(True)
         self._show_output_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._show_output_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #888; border: none; "
-            "font-size: 11px; padding: 2px 0; text-align: left; }"
-            "QPushButton:hover { color: #ccc; }"
+            f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
+            f"border: none; "
+            f"font-size: {tc.FONT_SM}px; padding: 2px 0; text-align: left; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_primary')}; }}"
         )
         self._show_output_btn.toggled.connect(self._on_toggle_output)
         toggle_row.addWidget(self._show_output_btn)
@@ -378,8 +404,8 @@ class DependencyDialog(QDialog):
         font.setPointSize(10)
         self._output_view.setFont(font)
         self._output_view.setStyleSheet(
-            "QPlainTextEdit { background: #0a0a0a; color: #cfcfcf; "
-            "border: 1px solid #333; border-radius: 4px; padding: 6px; }"
+            f"QPlainTextEdit {{ background: {tc.get('bg_terminal')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 4px; padding: 6px; }}"
         )
         v.addWidget(self._output_view)
 
@@ -436,7 +462,8 @@ class DependencyDialog(QDialog):
                 "and restart Polyglot AI once it finishes."
             )
         self._global_status.setStyleSheet(
-            "color: #e5a00d; font-size: 11px; background: transparent; padding: 4px 0;"
+            f"color: {tc.get('accent_warning')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent; padding: 4px 0;"
         )
         safe_task(self._run_install_all(button, to_install), name="install_system_deps")
 
@@ -574,9 +601,9 @@ class DependencyDialog(QDialog):
 
     def _apply_install_all_result(self, button: QPushButton, result: InstallResult) -> None:
         self._global_status.setText(result.message)
-        colour = "#4ec9b0" if result.ok else "#f48771"
+        colour = tc.get("accent_success_muted") if result.ok else tc.get("accent_error")
         self._global_status.setStyleSheet(
-            f"color: {colour}; font-size: 11px; background: transparent; padding: 4px 0;"
+            f"color: {colour}; font-size: {tc.FONT_SM}px; background: transparent; padding: 4px 0;"
         )
         if result.ok:
             button.setText("Done ✓")
@@ -601,14 +628,16 @@ class DependencyDialog(QDialog):
                 "Clipboard unavailable — select the text manually from the list above."
             )
             self._global_status.setStyleSheet(
-                "color: #e5a00d; font-size: 11px; background: transparent; padding: 4px 0;"
+                f"color: {tc.get('accent_warning')}; font-size: {tc.FONT_SM}px; "
+                f"background: transparent; padding: 4px 0;"
             )
             return
         clip.setText(text)
         logger.info("Copied dependency install commands to clipboard")
         self._global_status.setText("Install commands copied to clipboard.")
         self._global_status.setStyleSheet(
-            "color: #4ec9b0; font-size: 11px; background: transparent; padding: 4px 0;"
+            f"color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent; padding: 4px 0;"
         )
 
     def _on_dismiss(self) -> None:

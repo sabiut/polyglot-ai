@@ -89,11 +89,15 @@ class ChangesetPanel(QWidget):
         header_layout.addWidget(title)
 
         self._count_label = QLabel("0 files")
-        self._count_label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: #666;")
+        self._count_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')};"
+        )
         header_layout.addWidget(self._count_label)
 
         self._summary_label = QLabel("")
-        self._summary_label.setStyleSheet(f"font-size: 10px; color: {tc.get('accent_info')};")
+        self._summary_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_info')};"
+        )
         header_layout.addWidget(self._summary_label)
 
         header_layout.addStretch()
@@ -102,8 +106,8 @@ class ChangesetPanel(QWidget):
         self._prev_btn = QPushButton("◀ Prev")
         self._prev_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; border: 1px solid {tc.get('border_card')}; "
-            f"border-radius: 3px; padding: 2px 8px; font-size: 10px; }}"
-            f"QPushButton:hover {{ color: {tc.get('text_heading')}; border-color: #666; }}"
+            f"border-radius: 3px; padding: 2px 8px; font-size: {tc.FONT_XS}px; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_heading')}; border-color: {tc.get('border_input')}; }}"
         )
         self._prev_btn.clicked.connect(self._review_prev)
         self._prev_btn.hide()
@@ -112,8 +116,8 @@ class ChangesetPanel(QWidget):
         self._next_btn = QPushButton("Next ▶")
         self._next_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; border: 1px solid {tc.get('border_card')}; "
-            f"border-radius: 3px; padding: 2px 8px; font-size: 10px; }}"
-            f"QPushButton:hover {{ color: {tc.get('text_heading')}; border-color: #666; }}"
+            f"border-radius: 3px; padding: 2px 8px; font-size: {tc.FONT_XS}px; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_heading')}; border-color: {tc.get('border_input')}; }}"
         )
         self._next_btn.clicked.connect(self._review_next)
         self._next_btn.hide()
@@ -127,7 +131,7 @@ class ChangesetPanel(QWidget):
                 padding: 4px 14px; border: none; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
             QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
-            QPushButton:disabled {{ background-color: {tc.get("border_secondary")}; color: #666; }}
+            QPushButton:disabled {{ background-color: {tc.get("border_secondary")}; color: {tc.get("text_muted")}; }}
         """)
         self._apply_all_btn.clicked.connect(self._apply_all)
         self._apply_all_btn.setEnabled(False)
@@ -163,7 +167,7 @@ class ChangesetPanel(QWidget):
                 font-size: {tc.FONT_MD}px;
             }}
             QListWidget::item {{
-                padding: 8px 12px; color: {tc.get("text_primary")}; border-bottom: 1px solid #2a2a2a;
+                padding: 8px 12px; color: {tc.get("text_primary")}; border-bottom: 1px solid {tc.get("border_subtle")};
             }}
             QListWidget::item:selected {{
                 background-color: {tc.get("bg_surface_overlay")}; color: {tc.get("text_on_accent")};
@@ -232,7 +236,7 @@ class ChangesetPanel(QWidget):
                 background-color: transparent; color: {tc.get("accent_warning")};
                 padding: 3px 12px; border: 1px solid {tc.get("border_input")}; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
             }}
-            QPushButton:hover {{ background-color: #2a2a1a; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_feedback_warn_hover")}; }}
         """)
         self._rollback_btn.clicked.connect(self._rollback_selected)
         self._rollback_btn.setVisible(False)
@@ -246,7 +250,7 @@ class ChangesetPanel(QWidget):
         self._diff_view.setFont(QFont("Consolas, Monaco, Courier New", 12))
         self._diff_view.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #1a1a1a; color: {tc.get("text_primary")}; border: none;
+                background-color: {tc.get("bg_code_block")}; color: {tc.get("text_primary")}; border: none;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: {tc.FONT_MD}px; line-height: 150%;
             }}
@@ -263,7 +267,7 @@ class ChangesetPanel(QWidget):
 
     def _show_empty_state(self) -> None:
         self._diff_view.setHtml(
-            f'<div style="color:#666; padding:40px; text-align:center; font-size:{tc.FONT_BASE}px;">'
+            f'<div style="color:{tc.get("text_muted")}; padding:40px; text-align:center; font-size:{tc.FONT_BASE}px;">'
             "No pending changes.<br><br>"
             "When the AI proposes file modifications, they will appear here<br>"
             "for review before being applied to your project."

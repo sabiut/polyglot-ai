@@ -20,6 +20,8 @@ import tempfile
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 def make_unlock_icon() -> QIcon:
     """White open-padlock icon for the inactive bootstrap button."""
@@ -27,7 +29,7 @@ def make_unlock_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(1.5)
     p.setPen(pen)
     p.setBrush(QColor(0, 0, 0, 0))
@@ -45,7 +47,7 @@ def make_lock_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(1.5)
     p.setPen(pen)
     p.setBrush(QColor(0, 0, 0, 0))
@@ -63,7 +65,7 @@ def make_plus_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(1.8)
     p.setPen(pen)
     # Horizontal line
@@ -81,7 +83,7 @@ def make_toolbar_icon(icon_type: str) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(2.0)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -132,7 +134,7 @@ def make_menu_icon(icon_type: str) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#b0b0b0"))
+    pen = QPen(QColor(tc.get("text_secondary")))
     pen.setWidthF(1.3)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -186,7 +188,7 @@ def create_plus_png() -> str:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(2.0)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
@@ -205,7 +207,7 @@ def create_arrow_png() -> str:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"))
+    pen = QPen(QColor(tc.get("text_heading")))
     pen.setWidthF(1.5)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)

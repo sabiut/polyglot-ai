@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class TwoLineDelegate(QStyledItemDelegate):
     """Custom delegate that draws two-line items: name + description, with checkmark."""
@@ -35,7 +37,7 @@ class TwoLineDelegate(QStyledItemDelegate):
 
         # Background
         if is_selected or is_hovered:
-            painter.setBrush(QColor("#3e3e40"))
+            painter.setBrush(QColor(tc.get("bg_hover")))
             painter.setPen(Qt.PenStyle.NoPen)
             bg_rect = rect.adjusted(4, 1, -4, -1)
             painter.drawRoundedRect(bg_rect, 6, 6)
@@ -49,7 +51,7 @@ class TwoLineDelegate(QStyledItemDelegate):
 
         if is_header:
             # Draw as section header
-            painter.setPen(QColor("#666666"))
+            painter.setPen(QColor(tc.get("text_muted")))
             font = QFont("sans-serif", 8)
             font.setBold(True)
             painter.setFont(font)
@@ -65,7 +67,7 @@ class TwoLineDelegate(QStyledItemDelegate):
         name_font = QFont("sans-serif", 9)
         name_font.setWeight(QFont.Weight.Medium)
         painter.setFont(name_font)
-        painter.setPen(QColor("#e0e0e0"))
+        painter.setPen(QColor(tc.get("text_heading")))
 
         if description:
             name_rect = QRect(rect.x() + 14, rect.y() + 5, rect.width() - 44, 18)
@@ -79,7 +81,7 @@ class TwoLineDelegate(QStyledItemDelegate):
         if description:
             desc_font = QFont("sans-serif", 8)
             painter.setFont(desc_font)
-            painter.setPen(QColor("#777777"))
+            painter.setPen(QColor(tc.get("text_muted")))
             desc_rect = QRect(rect.x() + 14, rect.y() + 22, rect.width() - 44, 16)
             painter.drawText(
                 desc_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, description
@@ -87,7 +89,7 @@ class TwoLineDelegate(QStyledItemDelegate):
 
         # Checkmark for current selection
         if is_current:
-            painter.setPen(QPen(QColor("#569cd6"), 2.0, cap=Qt.PenCapStyle.RoundCap))
+            painter.setPen(QPen(QColor(tc.get("accent_info")), 2.0, cap=Qt.PenCapStyle.RoundCap))
             cx = rect.right() - 22
             cy = rect.y() + rect.height() // 2
             painter.drawLine(cx - 4, cy, cx - 1, cy + 3)
@@ -117,19 +119,19 @@ class StyledComboBox(QComboBox):
 
         # Dark palette for everything
         pal = self.palette()
-        pal.setColor(QPalette.ColorRole.Base, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.Text, QColor("#e0e0e0"))
-        pal.setColor(QPalette.ColorRole.Window, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.WindowText, QColor("#e0e0e0"))
-        pal.setColor(QPalette.ColorRole.Button, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.ButtonText, QColor("#e0e0e0"))
-        pal.setColor(QPalette.ColorRole.Highlight, QColor("#3e3e40"))
-        pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-        pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.Light, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.Midlight, QColor("#2b2b2d"))
-        pal.setColor(QPalette.ColorRole.Mid, QColor("#444444"))
-        pal.setColor(QPalette.ColorRole.Dark, QColor("#2b2b2d"))
+        pal.setColor(QPalette.ColorRole.Base, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.Text, QColor(tc.get("text_heading")))
+        pal.setColor(QPalette.ColorRole.Window, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.WindowText, QColor(tc.get("text_heading")))
+        pal.setColor(QPalette.ColorRole.Button, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.ButtonText, QColor(tc.get("text_heading")))
+        pal.setColor(QPalette.ColorRole.Highlight, QColor(tc.get("bg_hover")))
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor(tc.get("text_on_accent")))
+        pal.setColor(QPalette.ColorRole.AlternateBase, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.Light, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.Midlight, QColor(tc.get("bg_surface_overlay")))
+        pal.setColor(QPalette.ColorRole.Mid, QColor(tc.get("border_menu")))
+        pal.setColor(QPalette.ColorRole.Dark, QColor(tc.get("bg_surface_overlay")))
         pal.setColor(QPalette.ColorRole.Shadow, QColor("#1a1a1a"))
         self._pal = pal
         self.setPalette(pal)
@@ -137,19 +139,19 @@ class StyledComboBox(QComboBox):
         # Custom popup view
         popup = QListView()
         popup.setPalette(pal)
-        popup.setStyleSheet("""
-            QListView {
-                background-color: #2b2b2d;
-                color: #e0e0e0;
-                border: 1px solid #444;
+        popup.setStyleSheet(f"""
+            QListView {{
+                background-color: {tc.get("bg_surface_overlay")};
+                color: {tc.get("text_heading")};
+                border: 1px solid {tc.get("border_menu")};
                 border-radius: 10px;
                 padding: 6px 2px;
                 outline: none;
-            }
-            QListView::item {
+            }}
+            QListView::item {{
                 background: transparent;
                 border: none;
-            }
+            }}
         """)
         self.setView(popup)
 
@@ -161,16 +163,16 @@ class StyledComboBox(QComboBox):
         arrow_path = self._make_arrow()
         self.setStyleSheet(f"""
             QComboBox {{
-                font-size: 13px;
+                font-size: {tc.FONT_BASE}px;
                 padding: 4px 28px 4px 12px;
-                background-color: #3e3e40;
-                color: #b0b0b0;
+                background-color: {tc.get("bg_input")};
+                color: {tc.get("text_secondary")};
                 border: none;
                 border-radius: 8px;
             }}
             QComboBox:hover {{
-                background-color: #4e4e50;
-                color: #ffffff;
+                background-color: {tc.get("bg_hover")};
+                color: {tc.get("text_on_accent")};
             }}
             QComboBox::drop-down {{
                 border: none; width: 24px;
@@ -199,7 +201,8 @@ class StyledComboBox(QComboBox):
                 )
                 container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
                 container.setStyleSheet(
-                    "background-color: #2b2b2d; border: 1px solid #444; border-radius: 10px;"
+                    f"background-color: {tc.get('bg_surface_overlay')}; "
+                    f"border: 1px solid {tc.get('border_menu')}; border-radius: 10px;"
                 )
                 container.setPalette(self._pal)
                 container.show()
@@ -230,7 +233,7 @@ class StyledComboBox(QComboBox):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#aaaaaa"))
+        pen = QPen(QColor(tc.get("text_secondary")))
         pen.setWidthF(1.8)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)

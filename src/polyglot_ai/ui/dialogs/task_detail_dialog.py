@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.core.task_manager import TaskManager
 from polyglot_ai.core.tasks import Task, TaskKind, TaskNote, TaskState
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ class TaskDetailDialog(QDialog):
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
         self.setMinimumSize(720, 600)
         self.resize(900, 720)
-        self.setStyleSheet("QDialog { background: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
         self._plan_ready.connect(self._on_plan_ready)
         self._setup_ui()
@@ -136,14 +137,15 @@ class TaskDetailDialog(QDialog):
         title_row.setSpacing(8)
         kind_dot = QLabel("●")
         kind_dot.setStyleSheet(
-            f"color: {_KIND_COLOURS.get(self._task.kind, '#888')}; "
-            "font-size: 14px; background: transparent;"
+            f"color: {_KIND_COLOURS.get(self._task.kind, tc.get('text_tertiary'))}; "
+            f"font-size: {tc.FONT_LG}px; background: transparent;"
         )
         title_row.addWidget(kind_dot)
 
         title_lbl = QLabel(self._task.title)
         title_lbl.setStyleSheet(
-            "color: #ffffff; font-size: 17px; font-weight: 700; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: 17px; font-weight: 700; "
+            "background: transparent;"
         )
         title_lbl.setWordWrap(True)
         title_row.addWidget(title_lbl, stretch=1)
@@ -156,9 +158,11 @@ class TaskDetailDialog(QDialog):
         self._max_btn.setToolTip("Maximize / restore window")
         self._max_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._max_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #888; "
-            "border: 1px solid #3c3c3c; border-radius: 3px; font-size: 14px; }"
-            "QPushButton:hover { color: #ddd; border-color: #555; }"
+            f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
+            f"border: 1px solid {tc.get('border_primary')}; border-radius: 3px; "
+            f"font-size: {tc.FONT_LG}px; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_primary')}; "
+            f"border-color: {tc.get('border_input')}; }}"
         )
         self._max_btn.clicked.connect(self._toggle_maximize)
         title_row.addWidget(self._max_btn)
@@ -173,7 +177,9 @@ class TaskDetailDialog(QDialog):
         if self._task.pr_url:
             meta_parts.append(f"PR #{self._task.pr_number or '?'}")
         meta_lbl = QLabel("  ·  ".join(meta_parts))
-        meta_lbl.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+        meta_lbl.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
         header.addWidget(meta_lbl)
 
         layout.addLayout(header)
@@ -182,7 +188,7 @@ class TaskDetailDialog(QDialog):
         if self._task.description:
             desc_label = QLabel("Description")
             desc_label.setStyleSheet(
-                "color: #777; font-size: 10px; font-weight: 700; "
+                f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; font-weight: 700; "
                 "letter-spacing: 0.6px; background: transparent;"
             )
             layout.addWidget(desc_label)
@@ -191,8 +197,9 @@ class TaskDetailDialog(QDialog):
             desc.setReadOnly(True)
             desc.setMaximumHeight(140)
             desc.setStyleSheet(
-                "QTextEdit { background: #252526; color: #d0d0d0; border: 1px solid #333; "
-                "border-radius: 4px; padding: 8px 10px; font-size: 12px; }"
+                f"QTextEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('border_secondary')}; "
+                f"border-radius: 4px; padding: 8px 10px; font-size: {tc.FONT_MD}px; }}"
             )
             layout.addWidget(desc)
 
@@ -217,7 +224,7 @@ class TaskDetailDialog(QDialog):
         # ── Timeline ──
         timeline_label = QLabel("Timeline")
         timeline_label.setStyleSheet(
-            "color: #777; font-size: 10px; font-weight: 700; "
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; font-weight: 700; "
             "letter-spacing: 0.6px; background: transparent; margin-top: 4px;"
         )
         layout.addWidget(timeline_label)
@@ -225,13 +232,15 @@ class TaskDetailDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #333; background: #181818; "
+            f"QScrollArea {{ border: 1px solid {tc.get('border_secondary')}; "
+            f"background: {tc.get('bg_terminal')}; "
             "border-radius: 4px; }"
             "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; "
+            "border-radius: 4px; }"
         )
         timeline_inner = QWidget()
-        timeline_inner.setStyleSheet("background: #181818;")
+        timeline_inner.setStyleSheet(f"background: {tc.get('bg_terminal')};")
         timeline_layout = QVBoxLayout(timeline_inner)
         timeline_layout.setContentsMargins(14, 12, 14, 12)
         timeline_layout.setSpacing(8)
@@ -242,7 +251,8 @@ class TaskDetailDialog(QDialog):
         if not notes:
             empty = QLabel("No events yet. Activity from other panels shows up here.")
             empty.setStyleSheet(
-                "color: #666; font-size: 11px; background: transparent; padding: 8px;"
+                f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; "
+                "background: transparent; padding: 8px;"
             )
             timeline_layout.addWidget(empty)
         else:
@@ -327,7 +337,8 @@ class TaskDetailDialog(QDialog):
 
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background: #252526; border: 1px solid #333; border-radius: 6px; }"
+            f"QFrame {{ background: {tc.get('bg_surface')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 6px; }}"
         )
         v = QVBoxLayout(card)
         v.setContentsMargins(14, 10, 14, 10)
@@ -335,28 +346,36 @@ class TaskDetailDialog(QDialog):
 
         header = QLabel("CHECKLIST")
         header.setStyleSheet(
-            "color: #777; font-size: 9px; font-weight: 700; "
+            f"color: {tc.get('text_muted')}; font-size: 9px; font-weight: 700; "
             "letter-spacing: 0.6px; background: transparent;"
         )
         v.addWidget(header)
 
         glyphs = {
-            "pending": ("☐", "#888"),
-            "in_progress": ("◐", "#e5a00d"),
-            "done": ("☑", "#4ec9b0"),
-            "skipped": ("⊘", "#666"),
+            "pending": ("☐", tc.get("plan_pending")),
+            "in_progress": ("◐", tc.get("plan_in_progress")),
+            "done": ("☑", tc.get("plan_completed")),
+            "skipped": ("⊘", tc.get("plan_skipped")),
         }
         for step in steps:
-            glyph, colour = glyphs.get(step.status, ("·", "#888"))
+            glyph, colour = glyphs.get(step.status, ("·", tc.get("text_tertiary")))
             row = QHBoxLayout()
             row.setSpacing(8)
             icon = QLabel(glyph)
             icon.setFixedWidth(16)
-            icon.setStyleSheet(f"color: {colour}; font-size: 13px; background: transparent;")
+            icon.setStyleSheet(
+                f"color: {colour}; font-size: {tc.FONT_BASE}px; background: transparent;"
+            )
             row.addWidget(icon)
-            text_colour = "#666" if step.status in ("done", "skipped") else "#d0d0d0"
+            text_colour = (
+                tc.get("text_muted")
+                if step.status in ("done", "skipped")
+                else tc.get("text_primary")
+            )
             text = QLabel(step.text or "(untitled step)")
-            text.setStyleSheet(f"color: {text_colour}; font-size: 12px; background: transparent;")
+            text.setStyleSheet(
+                f"color: {text_colour}; font-size: {tc.FONT_MD}px; background: transparent;"
+            )
             text.setWordWrap(True)
             row.addWidget(text, stretch=1)
             v.addLayout(row)
@@ -373,7 +392,8 @@ class TaskDetailDialog(QDialog):
         """
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background: #1a3a5c; border: 1px solid #0e639c; border-radius: 6px; }"
+            f"QFrame {{ background: #1a3a5c; border: 1px solid {tc.get('accent_primary')}; "
+            "border-radius: 6px; }"
         )
         v = QVBoxLayout(card)
         v.setContentsMargins(16, 14, 16, 14)
@@ -390,7 +410,9 @@ class TaskDetailDialog(QDialog):
             "No checklist yet. Let the AI break this task into ordered "
             "steps so you can track progress and scope."
         )
-        blurb.setStyleSheet("color: #d8e8f5; font-size: 12px; background: transparent;")
+        blurb.setStyleSheet(
+            f"color: #d8e8f5; font-size: {tc.FONT_MD}px; background: transparent;"
+        )
         blurb.setWordWrap(True)
         v.addWidget(blurb)
 
@@ -404,11 +426,12 @@ class TaskDetailDialog(QDialog):
             "Ask the configured AI provider to draft an ordered checklist for this task."
         )
         self._plan_btn.setStyleSheet(
-            "QPushButton { background: #0e639c; color: white; "
+            f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; "
             "border: none; border-radius: 4px; "
-            "padding: 8px 18px; font-size: 12px; font-weight: 600; }"
-            "QPushButton:hover { background: #1a8ae8; }"
-            "QPushButton:disabled { background: #3c3c3c; color: #777; }"
+            f"padding: 8px 18px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+            f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; "
+            f"color: {tc.get('text_tertiary')}; }}"
         )
         self._plan_btn.clicked.connect(self._on_generate_plan)
         btn_row.addWidget(self._plan_btn)
@@ -442,14 +465,15 @@ class TaskDetailDialog(QDialog):
 
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background: #252526; border: 1px solid #333; border-radius: 6px; }"
+            f"QFrame {{ background: {tc.get('bg_surface')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 6px; }}"
         )
         layout = QHBoxLayout(card)
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(20)
 
         if tr is not None and tr.total > 0:
-            colour = "#4ec9b0" if tr.all_green else "#f48771"
+            colour = tc.get("accent_success_muted") if tr.all_green else tc.get("accent_error")
             layout.addWidget(
                 self._stat_block(
                     "Tests",
@@ -461,10 +485,10 @@ class TaskDetailDialog(QDialog):
 
         if ci is not None and ci.status:
             symbol_colour = {
-                "success": ("✓", "#4ec9b0"),
-                "failure": ("✗", "#f48771"),
-                "in_progress": ("…", "#e5a00d"),
-            }.get(ci.status, ("·", "#888"))
+                "success": ("✓", tc.get("accent_success_muted")),
+                "failure": ("✗", tc.get("accent_error")),
+                "in_progress": ("…", tc.get("accent_warning")),
+            }.get(ci.status, ("·", tc.get("text_tertiary")))
             layout.addWidget(
                 self._stat_block(
                     "CI",
@@ -479,7 +503,7 @@ class TaskDetailDialog(QDialog):
                 self._stat_block(
                     "Files touched",
                     str(len(files)),
-                    "#9cdcfe",
+                    tc.get("syn_identifier"),
                     sub=", ".join(files[:2]) + (" …" if len(files) > 2 else ""),
                 )
             )
@@ -489,7 +513,7 @@ class TaskDetailDialog(QDialog):
                 self._stat_block(
                     "Pull request",
                     f"#{self._task.pr_number or '?'}",
-                    "#9cdcfe",
+                    tc.get("syn_identifier"),
                     sub="open",
                 )
             )
@@ -505,18 +529,22 @@ class TaskDetailDialog(QDialog):
         v.setSpacing(2)
         lbl = QLabel(label.upper())
         lbl.setStyleSheet(
-            "color: #777; font-size: 9px; font-weight: 700; "
+            f"color: {tc.get('text_muted')}; font-size: 9px; font-weight: 700; "
             "letter-spacing: 0.6px; background: transparent;"
         )
         v.addWidget(lbl)
         val = QLabel(value)
         val.setStyleSheet(
-            f"color: {colour}; font-size: 14px; font-weight: 600; background: transparent;"
+            f"color: {colour}; font-size: {tc.FONT_LG}px; font-weight: 600; "
+            "background: transparent;"
         )
         v.addWidget(val)
         if sub:
             sub_lbl = QLabel(sub)
-            sub_lbl.setStyleSheet("color: #666; font-size: 10px; background: transparent;")
+            sub_lbl.setStyleSheet(
+                f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
+                "background: transparent;"
+            )
             sub_lbl.setWordWrap(True)
             v.addWidget(sub_lbl)
         return wrap
@@ -528,11 +556,12 @@ class TaskDetailDialog(QDialog):
         h.setContentsMargins(0, 2, 0, 2)
         h.setSpacing(10)
 
-        glyph, colour = _NOTE_GLYPHS.get(note.kind, ("·", "#888888"))
+        glyph, colour = _NOTE_GLYPHS.get(note.kind, ("·", tc.get("text_tertiary")))
         icon = QLabel(glyph)
         icon.setFixedWidth(18)
         icon.setStyleSheet(
-            f"color: {colour}; font-size: 13px; font-weight: 700; background: transparent;"
+            f"color: {colour}; font-size: {tc.FONT_BASE}px; font-weight: 700; "
+            "background: transparent;"
         )
         h.addWidget(icon)
 
@@ -540,11 +569,17 @@ class TaskDetailDialog(QDialog):
         body = QHBoxLayout()
         body.setSpacing(6)
         text_lbl = QLabel(note.text or note.kind)
-        text_lbl.setStyleSheet("color: #d0d0d0; font-size: 12px; background: transparent;")
+        text_lbl.setStyleSheet(
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+            "background: transparent;"
+        )
         text_lbl.setWordWrap(True)
         body.addWidget(text_lbl, stretch=1)
         time_lbl = QLabel(_relative_time(note.timestamp))
-        time_lbl.setStyleSheet("color: #666; font-size: 10px; background: transparent;")
+        time_lbl.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
+            "background: transparent;"
+        )
         body.addWidget(time_lbl)
         h.addLayout(body, stretch=1)
         return row
@@ -554,16 +589,19 @@ class TaskDetailDialog(QDialog):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if primary:
             btn.setStyleSheet(
-                "QPushButton { background: #0e639c; color: white; border: none; "
-                "border-radius: 4px; padding: 7px 18px; font-size: 12px; "
+                f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; "
+                "border: none; "
+                f"border-radius: 4px; padding: 7px 18px; font-size: {tc.FONT_MD}px; "
                 "font-weight: 600; }"
-                "QPushButton:hover { background: #1a8ae8; }"
+                f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
             )
         else:
             btn.setStyleSheet(
-                "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-                "border-radius: 4px; padding: 6px 14px; font-size: 11px; }"
-                "QPushButton:hover { background: #4a4a4a; }"
+                f"QPushButton {{ background: {tc.get('bg_input')}; "
+                f"color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('border_input')}; "
+                f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_SM}px; }}"
+                f"QPushButton:hover {{ background: {tc.get('border_input')}; }}"
             )
         return btn
 

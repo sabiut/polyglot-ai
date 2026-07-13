@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 # (display name, keyring slot, placeholder, "where to get a key" URL).
 # Order matters — the first entry is the default in the combo box.
@@ -44,7 +46,7 @@ class OnboardingDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Welcome to Polyglot AI")
         self.setFixedSize(520, 480)
-        self.setStyleSheet("QDialog { background-color: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background-color: {tc.get('bg_base')}; }}")
 
         self._api_key = ""
         self._current_page = 0
@@ -67,7 +69,10 @@ class OnboardingDialog(QDialog):
 
         # Bottom nav bar
         nav = QWidget()
-        nav.setStyleSheet("background-color: #252526; border-top: 1px solid #333;")
+        nav.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-top: 1px solid {tc.get('border_secondary')};"
+        )
         nav_layout = QHBoxLayout(nav)
         nav_layout.setContentsMargins(24, 12, 24, 12)
 
@@ -78,7 +83,8 @@ class OnboardingDialog(QDialog):
         for i in range(4):
             dot = QLabel("●" if i == 0 else "○")
             dot.setStyleSheet(
-                f"color: {'#0078d4' if i == 0 else '#555'}; font-size: 10px; background: transparent;"
+                f"color: {tc.get('accent_primary') if i == 0 else tc.get('text_disabled')}; "
+                f"font-size: {tc.FONT_XS}px; background: transparent;"
             )
             dots_row.addWidget(dot)
             self._dots.append(dot)
@@ -87,9 +93,10 @@ class OnboardingDialog(QDialog):
 
         self._back_btn = QPushButton("Back")
         self._back_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #888; font-size: 13px; "
-            "border: 1px solid #555; border-radius: 8px; padding: 6px 20px; }"
-            "QPushButton:hover { background: #333; color: #ddd; }"
+            f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
+            f"font-size: {tc.FONT_BASE}px; "
+            f"border: 1px solid {tc.get('border_input')}; border-radius: 8px; padding: 6px 20px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; color: {tc.get('text_primary')}; }}"
         )
         self._back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._back_btn.clicked.connect(self._go_back)
@@ -103,9 +110,10 @@ class OnboardingDialog(QDialog):
         # "seen" and doesn't re-open it on every launch.
         self._skip_btn = QPushButton("Skip for now")
         self._skip_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #888; font-size: 13px; "
-            "border: none; padding: 6px 12px; }"
-            "QPushButton:hover { color: #ddd; text-decoration: underline; }"
+            f"QPushButton {{ background: transparent; color: {tc.get('text_tertiary')}; "
+            f"font-size: {tc.FONT_BASE}px; "
+            f"border: none; padding: 6px 12px; }}"
+            f"QPushButton:hover {{ color: {tc.get('text_primary')}; text-decoration: underline; }}"
         )
         self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._skip_btn.clicked.connect(self.accept)
@@ -113,9 +121,10 @@ class OnboardingDialog(QDialog):
 
         self._next_btn = QPushButton("Get Started →")
         self._next_btn.setStyleSheet(
-            "QPushButton { background: #0078d4; color: white; font-size: 13px; "
-            "font-weight: 600; border: none; border-radius: 8px; padding: 6px 24px; }"
-            "QPushButton:hover { background: #1a8ae8; }"
+            f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; "
+            f"font-size: {tc.FONT_BASE}px; "
+            f"font-weight: 600; border: none; border-radius: 8px; padding: 6px 24px; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._next_btn.clicked.connect(self._go_next)
@@ -156,7 +165,9 @@ class OnboardingDialog(QDialog):
 
         title = QLabel("Welcome to Polyglot AI")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #e8e8e8;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_3XL}px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         layout.addWidget(title)
         layout.addSpacing(8)
 
@@ -166,7 +177,9 @@ class OnboardingDialog(QDialog):
         )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #999; line-height: 160%;")
+        subtitle.setStyleSheet(
+            f"font-size: {tc.FONT_LG}px; color: {tc.get('text_secondary')}; line-height: 160%;"
+        )
         layout.addWidget(subtitle)
         layout.addSpacing(30)
 
@@ -190,11 +203,15 @@ class OnboardingDialog(QDialog):
             text_col.setSpacing(1)
             h = QLabel(heading)
             h.setStyleSheet(
-                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent;"
+                f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
+                f"color: {tc.get('text_heading')}; background: transparent;"
             )
             text_col.addWidget(h)
             d = QLabel(desc)
-            d.setStyleSheet("font-size: 12px; color: #888; background: transparent;")
+            d.setStyleSheet(
+                f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')}; "
+                f"background: transparent;"
+            )
             text_col.addWidget(d)
             row.addLayout(text_col, stretch=1)
             layout.addLayout(row)
@@ -209,7 +226,9 @@ class OnboardingDialog(QDialog):
         layout.setContentsMargins(40, 40, 40, 20)
 
         title = QLabel("Connect your AI")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #e8e8e8;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_2XL}px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         layout.addWidget(title)
         layout.addSpacing(6)
 
@@ -218,7 +237,7 @@ class OnboardingDialog(QDialog):
             "You can always change this later in Settings."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #999;")
+        desc.setStyleSheet(f"font-size: {tc.FONT_BASE}px; color: {tc.get('text_secondary')};")
         layout.addWidget(desc)
         layout.addSpacing(20)
 
@@ -227,15 +246,18 @@ class OnboardingDialog(QDialog):
         chatgpt_btn.setFixedHeight(44)
         chatgpt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         chatgpt_btn.setStyleSheet(
-            "QPushButton { background: #10a37f; color: white; font-size: 14px; "
-            "font-weight: 600; border: none; border-radius: 10px; }"
-            "QPushButton:hover { background: #1bbd96; }"
+            f"QPushButton {{ background: {tc.get('accent_success')}; color: white; "
+            f"font-size: {tc.FONT_LG}px; "
+            f"font-weight: 600; border: none; border-radius: 10px; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_success_hover')}; }}"
         )
         chatgpt_btn.clicked.connect(self._login_chatgpt)
         layout.addWidget(chatgpt_btn)
 
         self._chatgpt_status = QLabel("")
-        self._chatgpt_status.setStyleSheet("font-size: 11px; color: #888;")
+        self._chatgpt_status.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};"
+        )
         layout.addWidget(self._chatgpt_status)
         layout.addSpacing(8)
 
@@ -244,15 +266,18 @@ class OnboardingDialog(QDialog):
         claude_btn.setFixedHeight(44)
         claude_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         claude_btn.setStyleSheet(
-            "QPushButton { background: #d97706; color: white; font-size: 14px; "
-            "font-weight: 600; border: none; border-radius: 10px; }"
-            "QPushButton:hover { background: #e69500; }"
+            f"QPushButton {{ background: {tc.get('accent_claude')}; color: white; "
+            f"font-size: {tc.FONT_LG}px; "
+            f"font-weight: 600; border: none; border-radius: 10px; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_claude_hover')}; }}"
         )
         claude_btn.clicked.connect(self._login_claude)
         layout.addWidget(claude_btn)
 
         self._claude_status = QLabel("")
-        self._claude_status.setStyleSheet("font-size: 11px; color: #888;")
+        self._claude_status.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')};"
+        )
         layout.addWidget(self._claude_status)
         layout.addSpacing(16)
 
@@ -260,14 +285,14 @@ class OnboardingDialog(QDialog):
         or_row = QHBoxLayout()
         line1 = QWidget()
         line1.setFixedHeight(1)
-        line1.setStyleSheet("background: #333;")
+        line1.setStyleSheet(f"background: {tc.get('border_secondary')};")
         or_row.addWidget(line1, stretch=1)
         or_label = QLabel("  or use an API key  ")
-        or_label.setStyleSheet("color: #666; font-size: 12px;")
+        or_label.setStyleSheet(f"color: {tc.get('text_muted')}; font-size: {tc.FONT_MD}px;")
         or_row.addWidget(or_label)
         line2 = QWidget()
         line2.setFixedHeight(1)
-        line2.setStyleSheet("background: #333;")
+        line2.setStyleSheet(f"background: {tc.get('border_secondary')};")
         or_row.addWidget(line2, stretch=1)
         layout.addLayout(or_row)
         layout.addSpacing(12)
@@ -282,16 +307,16 @@ class OnboardingDialog(QDialog):
         provider_row = QHBoxLayout()
         provider_row.setSpacing(8)
         provider_lbl = QLabel("Provider:")
-        provider_lbl.setStyleSheet("font-size: 12px; color: #bbb;")
+        provider_lbl.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('text_primary')};")
         provider_row.addWidget(provider_lbl)
         self._provider_combo = QComboBox()
         for display, _slot, _placeholder, _url in _PROVIDER_CHOICES:
             self._provider_combo.addItem(display)
         self._provider_combo.setStyleSheet(
-            "QComboBox { background: #161616; color: #d4d4d4; "
-            "border: 1px solid #3a3a3a; border-radius: 6px; "
-            "padding: 6px 10px; font-size: 12px; }"
-            "QComboBox::drop-down { border: none; }"
+            f"QComboBox {{ background: {tc.get('bg_input_deep')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 6px; "
+            f"padding: 6px 10px; font-size: {tc.FONT_MD}px; }}"
+            f"QComboBox::drop-down {{ border: none; }}"
         )
         self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         provider_row.addWidget(self._provider_combo, stretch=1)
@@ -300,16 +325,19 @@ class OnboardingDialog(QDialog):
 
         # Key input — placeholder updates when the provider changes.
         self._key_label = QLabel("OpenAI API Key:")
-        self._key_label.setStyleSheet("font-size: 12px; color: #bbb;")
+        self._key_label.setStyleSheet(
+            f"font-size: {tc.FONT_MD}px; color: {tc.get('text_primary')};"
+        )
         layout.addWidget(self._key_label)
 
         self._key_input = QLineEdit()
         self._key_input.setPlaceholderText("sk-...")
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._key_input.setStyleSheet(
-            "QLineEdit { background: #161616; color: #d4d4d4; border: 1px solid #3a3a3a; "
-            "border-radius: 8px; padding: 10px 14px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #0078d4; }"
+            f"QLineEdit {{ background: {tc.get('bg_input_deep')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; "
+            f"border-radius: 8px; padding: 10px 14px; font-size: {tc.FONT_BASE}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         layout.addWidget(self._key_input)
 
@@ -320,11 +348,15 @@ class OnboardingDialog(QDialog):
         # is unless it's clickable).
         self._key_url_label = QLabel()
         self._key_url_label.setOpenExternalLinks(True)
-        self._key_url_label.setStyleSheet("font-size: 11px; color: #888; margin-top: 4px;")
+        self._key_url_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; margin-top: 4px;"
+        )
         layout.addWidget(self._key_url_label)
 
         skip_label = QLabel("You can skip this and configure later in Settings.")
-        skip_label.setStyleSheet("font-size: 11px; color: #666; margin-top: 8px;")
+        skip_label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 8px;"
+        )
         layout.addWidget(skip_label)
 
         # Set initial state — defaults to the first entry (OpenAI).
@@ -345,7 +377,7 @@ class OnboardingDialog(QDialog):
         self._key_label.setText(f"{display} API Key:")
         self._key_input.setPlaceholderText(placeholder)
         self._key_url_label.setText(
-            f'<a href="{url}" style="color:#0078d4;">Get a {display} API key →</a>'
+            f'<a href="{url}" style="color:{tc.get("accent_primary")};">Get a {display} API key →</a>'
         )
 
     def _create_features_page(self) -> QWidget:
@@ -354,7 +386,9 @@ class OnboardingDialog(QDialog):
         layout.setContentsMargins(40, 40, 40, 20)
 
         title = QLabel("How it works")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #e8e8e8;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_2XL}px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         layout.addWidget(title)
         layout.addSpacing(16)
 
@@ -383,7 +417,8 @@ class OnboardingDialog(QDialog):
         for num, heading, desc in steps:
             card = QWidget()
             card.setStyleSheet(
-                "QWidget { background: #252526; border: 1px solid #333; border-radius: 8px; }"
+                f"QWidget {{ background: {tc.get('bg_surface')}; "
+                f"border: 1px solid {tc.get('border_secondary')}; border-radius: 8px; }}"
             )
             card_layout = QHBoxLayout(card)
             card_layout.setContentsMargins(14, 12, 14, 12)
@@ -393,8 +428,9 @@ class OnboardingDialog(QDialog):
             num_label.setFixedSize(32, 32)
             num_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             num_label.setStyleSheet(
-                "background: #0078d4; color: white; font-size: 14px; font-weight: bold; "
-                "border-radius: 16px; border: none;"
+                f"background: {tc.get('accent_primary')}; color: white; "
+                f"font-size: {tc.FONT_LG}px; font-weight: bold; "
+                f"border-radius: 16px; border: none;"
             )
             card_layout.addWidget(num_label)
 
@@ -402,12 +438,16 @@ class OnboardingDialog(QDialog):
             text_col.setSpacing(2)
             h = QLabel(heading)
             h.setStyleSheet(
-                "font-size: 13px; font-weight: 600; color: #e0e0e0; background: transparent; border: none;"
+                f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
+                f"color: {tc.get('text_heading')}; background: transparent; border: none;"
             )
             text_col.addWidget(h)
             d = QLabel(desc)
             d.setWordWrap(True)
-            d.setStyleSheet("font-size: 12px; color: #999; background: transparent; border: none;")
+            d.setStyleSheet(
+                f"font-size: {tc.FONT_MD}px; color: {tc.get('text_secondary')}; "
+                f"background: transparent; border: none;"
+            )
             text_col.addWidget(d)
             card_layout.addLayout(text_col, stretch=1)
 
@@ -426,13 +466,17 @@ class OnboardingDialog(QDialog):
         # Big checkmark
         check = QLabel("✓")
         check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        check.setStyleSheet("font-size: 48px; color: #4ec9b0; background: transparent;")
+        check.setStyleSheet(
+            f"font-size: 48px; color: {tc.get('accent_success_muted')}; background: transparent;"
+        )
         layout.addWidget(check)
         layout.addSpacing(16)
 
         title = QLabel("You're all set!")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #e8e8e8;")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_3XL}px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         layout.addWidget(title)
         layout.addSpacing(8)
 
@@ -443,7 +487,9 @@ class OnboardingDialog(QDialog):
         )
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 14px; color: #999; line-height: 160%;")
+        desc.setStyleSheet(
+            f"font-size: {tc.FONT_LG}px; color: {tc.get('text_secondary')}; line-height: 160%;"
+        )
         layout.addWidget(desc)
 
         layout.addStretch()
@@ -469,8 +515,8 @@ class OnboardingDialog(QDialog):
         for i, dot in enumerate(self._dots):
             dot.setText("●" if i == self._current_page else "○")
             dot.setStyleSheet(
-                f"color: {'#0078d4' if i == self._current_page else '#555'}; "
-                f"font-size: 10px; background: transparent;"
+                f"color: {tc.get('accent_primary') if i == self._current_page else tc.get('text_disabled')}; "
+                f"font-size: {tc.FONT_XS}px; background: transparent;"
             )
         self._back_btn.setVisible(self._current_page > 0)
         # Hide the Skip link on the final "You're all set!" page —
@@ -514,11 +560,15 @@ class OnboardingDialog(QDialog):
                     "npx is installed but errored. Run `npx --version` in a "
                     f"terminal for details. {('(' + detail + '…)' if detail else '')}"
                 )
-            self._chatgpt_status.setStyleSheet("font-size: 11px; color: #f44747;")
+            self._chatgpt_status.setStyleSheet(
+                f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};"
+            )
             return
 
         self._chatgpt_status.setText("Opening login in terminal...")
-        self._chatgpt_status.setStyleSheet("font-size: 11px; color: #969696;")
+        self._chatgpt_status.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_secondary')};"
+        )
 
         import threading
 
@@ -538,8 +588,8 @@ class OnboardingDialog(QDialog):
     def _on_login_result(self, success: bool, message: str) -> None:
         """Handle ChatGPT login result on the main thread (via signal)."""
         self._chatgpt_status.setText(message)
-        color = "#4ec9b0" if success else "#f44747"
-        self._chatgpt_status.setStyleSheet(f"font-size: 11px; color: {color};")
+        color = tc.get("accent_success_muted") if success else tc.get("accent_error")
+        self._chatgpt_status.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {color};")
 
     def _login_claude(self) -> None:
         from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
@@ -548,11 +598,15 @@ class OnboardingDialog(QDialog):
             self._claude_status.setText(
                 "Claude Code CLI not found. Install from claude.ai/download"
             )
-            self._claude_status.setStyleSheet("font-size: 11px; color: #f44747;")
+            self._claude_status.setStyleSheet(
+                f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};"
+            )
             return
 
         self._claude_status.setText("Opening login in terminal...")
-        self._claude_status.setStyleSheet("font-size: 11px; color: #969696;")
+        self._claude_status.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_secondary')};"
+        )
 
         import threading
 
@@ -572,8 +626,8 @@ class OnboardingDialog(QDialog):
     def _on_claude_login_result(self, success: bool, message: str) -> None:
         """Handle Claude login result on the main thread (via signal)."""
         self._claude_status.setText(message)
-        color = "#4ec9b0" if success else "#f44747"
-        self._claude_status.setStyleSheet(f"font-size: 11px; color: {color};")
+        color = tc.get("accent_success_muted") if success else tc.get("accent_error")
+        self._claude_status.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {color};")
 
     @property
     def api_key(self) -> str:

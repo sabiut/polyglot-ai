@@ -28,6 +28,7 @@ from PyQt6.QtGui import QColor, QMouseEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from polyglot_ai.core.notifications import Notification, NotificationLevel
+from polyglot_ai.ui import theme_colors as tc
 
 # Auto-dismiss timeout. Errors stick around longer because the user is
 # likely *not* watching when one fires (the whole point of the toast
@@ -39,14 +40,12 @@ _DISMISS_MS = {
     NotificationLevel.ERROR: 8_000,
 }
 
-# Severity → left-edge accent colour. Kept in sync with the broader
-# theme palette by hand; if the theme picker grows a "warn" colour
-# we can swap to that here.
+# Severity → left-edge accent colour token.
 _ACCENT = {
-    NotificationLevel.INFO: "#4d8fc4",
-    NotificationLevel.SUCCESS: "#4caf50",
-    NotificationLevel.WARN: "#e0a23a",
-    NotificationLevel.ERROR: "#d9534f",
+    NotificationLevel.INFO: "accent_info",
+    NotificationLevel.SUCCESS: "accent_success",
+    NotificationLevel.WARN: "accent_warning",
+    NotificationLevel.ERROR: "accent_error",
 }
 
 # Layout constants — gap between stacked toasts and offset from the
@@ -74,36 +73,36 @@ class Toast(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(_TOAST_WIDTH)
 
-        accent = _ACCENT[notification.level]
+        accent = tc.get(_ACCENT[notification.level])
         # Two-tone styling: a thick coloured left border plus the dark
         # body. Border-left-* in QSS is reliably honoured on PyQt6 so
         # we don't need a separate accent-strip widget.
         self.setStyleSheet(
             f"""
             QFrame#Toast {{
-                background-color: #2b2b2d;
-                border: 1px solid #444;
+                background-color: {tc.get("bg_surface_overlay")};
+                border: 1px solid {tc.get("border_menu")};
                 border-left: 3px solid {accent};
                 border-radius: 6px;
             }}
             QLabel#ToastTitle {{
-                color: #ffffff;
+                color: {tc.get("text_heading")};
                 font-weight: 600;
                 font-size: 11pt;
             }}
             QLabel#ToastBody {{
-                color: #c8c8c8;
+                color: {tc.get("text_primary")};
                 font-size: 10pt;
             }}
             QToolButton#ToastClose {{
-                color: #888;
+                color: {tc.get("text_tertiary")};
                 background: transparent;
                 border: none;
                 font-size: 14pt;
                 padding: 0 4px;
             }}
             QToolButton#ToastClose:hover {{
-                color: #fff;
+                color: {tc.get("text_heading")};
             }}
             """
         )
@@ -279,4 +278,4 @@ class ToastManager(QObject):
 
 def severity_to_qcolor(level: NotificationLevel) -> QColor:
     """Public helper for callers that want the accent colour directly."""
-    return QColor(_ACCENT[level])
+    return QColor(tc.get(_ACCENT[level]))

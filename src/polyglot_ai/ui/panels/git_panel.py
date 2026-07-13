@@ -118,7 +118,8 @@ class GitPanel(QWidget):
         self._task_hint_label.setFixedHeight(20)
         self._task_hint_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._task_hint_label.setStyleSheet(
-            "color: #e5a00d; font-size: 11px; background: transparent; padding-left: 12px;"
+            f"color: {tc.get('accent_warning')}; font-size: {tc.FONT_SM}px; "
+            "background: transparent; padding-left: 12px;"
         )
         self._task_hint_label.mousePressEvent = lambda _e: self._on_task_hint_clicked()  # type: ignore
         self._task_hint_label.hide()

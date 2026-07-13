@@ -24,18 +24,19 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 
+from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
 _CONTAINER_STATUS = {
-    "running": ("🟢", "#4ec9b0"),
-    "exited": ("🔴", "#f44747"),
-    "created": ("⚪", "#6a6a6a"),
-    "paused": ("🟡", "#cca700"),
-    "restarting": ("🟡", "#cca700"),
-    "removing": ("🔴", "#f44747"),
-    "dead": ("🔴", "#f44747"),
+    "running": ("🟢", "accent_success_muted"),
+    "exited": ("🔴", "accent_error"),
+    "created": ("⚪", "text_disabled"),
+    "paused": ("🟡", "accent_warning"),
+    "restarting": ("🟡", "accent_warning"),
+    "removing": ("🔴", "accent_error"),
+    "dead": ("🔴", "accent_error"),
 }
 
 
@@ -202,7 +203,7 @@ class DockerPanel(QWidget):
         pixmap = QPixmap(16, 16)
         pixmap.fill(QColor(0, 0, 0, 0))
         p = QPainter(pixmap)
-        pen = QPen(QColor("#aaaaaa"))
+        pen = QPen(QColor(tc.get("text_secondary")))
         pen.setWidthF(1.5)
         p.setPen(pen)
         # Top-right arrow
@@ -349,7 +350,7 @@ class DockerPanel(QWidget):
         self._container_tree.clear()
         for container in self._containers:
             state = container.get("State", "unknown")
-            icon, color = _CONTAINER_STATUS.get(state, ("⚪", "#6a6a6a"))
+            icon, color = _CONTAINER_STATUS.get(state, ("⚪", tc.get("text_muted")))
 
             item = QTreeWidgetItem(self._container_tree)
             item.setText(0, icon)

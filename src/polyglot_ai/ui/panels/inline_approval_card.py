@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,7 @@ class InlineApprovalCard(QWidget):
 
         self._label = QLabel(f"  {description}")
         self._label.setStyleSheet(
-            "color: #888; font-size: 12px; font-style: italic; "
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px; font-style: italic; "
             "padding: 2px 0; background: transparent;"
         )
         self._label.setWordWrap(True)
@@ -105,7 +107,7 @@ class InlineApprovalCard(QWidget):
         # subtle, no frame around them.
         btn_style = (
             "QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {border}; "
-            "border-radius: 3px; padding: 2px 10px; font-size: 11px; "
+            f"border-radius: 3px; padding: 2px 10px; font-size: {tc.FONT_SM}px; "
             "font-weight: 600; }}"
             "QPushButton:hover {{ background: {hover}; }}"
         )
@@ -115,9 +117,9 @@ class InlineApprovalCard(QWidget):
         self._reject_btn.setStyleSheet(
             btn_style.format(
                 bg="transparent",
-                fg="#f48771",
-                border="#5a1d1d",
-                hover="#3c1a1a",
+                fg=tc.get("accent_error"),
+                border=tc.get("border_feedback_neg"),
+                hover=tc.get("bg_feedback_neg"),
             )
         )
         self._reject_btn.clicked.connect(lambda: self._finalise(False))
@@ -128,10 +130,10 @@ class InlineApprovalCard(QWidget):
         self._approve_btn.setDefault(True)
         self._approve_btn.setStyleSheet(
             btn_style.format(
-                bg="#0e639c",
-                fg="white",
-                border="#0e639c",
-                hover="#1a8ae8",
+                bg=tc.get("accent_primary"),
+                fg=tc.get("text_on_accent"),
+                border=tc.get("accent_primary"),
+                hover=tc.get("accent_primary_hover"),
             )
         )
         self._approve_btn.clicked.connect(lambda: self._finalise(True))
@@ -146,7 +148,7 @@ class InlineApprovalCard(QWidget):
         self._decided_already = True
         self._approve_btn.hide()
         self._reject_btn.hide()
-        suffix_colour = "#4ec9b0" if approved else "#f48771"
+        suffix_colour = tc.get("accent_success_muted") if approved else tc.get("accent_error")
         suffix = "Approved" if approved else "Rejected"
         # Re-render the label with the existing description plus a
         # coloured suffix so the transcript still shows what was

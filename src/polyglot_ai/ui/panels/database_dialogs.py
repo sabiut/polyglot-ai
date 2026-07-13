@@ -136,10 +136,11 @@ class InsertRowDialog(QDialog):
         insert_btn.setObjectName("insertConfirm")
         insert_btn.setFixedHeight(30)
         insert_btn.setStyleSheet(
-            f"#insertConfirm {{ background: {tc.get('accent_success')}; color: #fff; "
+            f"#insertConfirm {{ background: {tc.get('accent_success')}; "
+            f"color: {tc.get('text_on_accent')}; "
             f"border: none; border-radius: 4px; padding: 0 20px; "
             f"font-size: {tc.FONT_SM}px; font-weight: 600; }}"
-            f"#insertConfirm:hover {{ background: #0eb87a; }}"
+            f"#insertConfirm:hover {{ background: {tc.get('accent_success_hover')}; }}"
         )
         insert_btn.clicked.connect(self.accept)
         f_layout.addWidget(insert_btn)
@@ -593,7 +594,7 @@ def get_dropdown_arrow_path() -> str:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#cccccc"))
+    pen = QPen(QColor(tc.get("text_primary")))
     pen.setWidthF(1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -615,18 +616,21 @@ def combo_dropdown_style() -> str:
     """
     arrow = get_dropdown_arrow_path()
     return (
-        "QComboBox { background: #1e1e1e; color: #ddd; border: 1px solid #444; "
-        "border-radius: 3px; padding: 3px 24px 3px 10px; font-size: 11px; "
+        f"QComboBox {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
+        f"border: 1px solid {tc.get('border_menu')}; "
+        f"border-radius: 3px; padding: 3px 24px 3px 10px; font-size: {tc.FONT_SM}px; "
         "min-width: 100px; }"
-        "QComboBox:hover { border-color: #0e639c; }"
-        "QComboBox:focus { border-color: #0e639c; }"
+        f"QComboBox:hover {{ border-color: {tc.get('accent_primary')}; }}"
+        f"QComboBox:focus {{ border-color: {tc.get('accent_primary')}; }}"
         "QComboBox::drop-down { subcontrol-origin: padding; "
         "subcontrol-position: center right; width: 22px; "
-        "border-left: 1px solid #444; background: transparent; }"
+        f"border-left: 1px solid {tc.get('border_menu')}; background: transparent; }}"
         "QComboBox::down-arrow { "
         f"image: url({arrow}); width: 12px; height: 12px; }}"
-        "QComboBox QAbstractItemView { background: #252526; color: #ddd; "
-        "selection-background-color: #094771; border: 1px solid #444; "
+        f"QComboBox QAbstractItemView {{ background: {tc.get('bg_surface')}; "
+        f"color: {tc.get('text_primary')}; "
+        f"selection-background-color: {tc.get('bg_active')}; "
+        f"border: 1px solid {tc.get('border_menu')}; "
         "outline: none; padding: 2px; }"
     )
 
@@ -646,22 +650,26 @@ def prompt_text(
     dlg.setWindowTitle(title)
     dlg.setModal(True)
     dlg.setMinimumWidth(360)
-    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+    dlg.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(18, 16, 18, 14)
     layout.setSpacing(10)
 
     lbl = QLabel(label)
-    lbl.setStyleSheet("color: #ccc; font-size: 12px; font-weight: 600; background: transparent;")
+    lbl.setStyleSheet(
+        f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+        "font-weight: 600; background: transparent;"
+    )
     layout.addWidget(lbl)
 
     field = QLineEdit()
     field.setPlaceholderText(placeholder)
     field.setStyleSheet(
-        "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-        "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
-        "QLineEdit:focus { border-color: #0e639c; }"
+        f"QLineEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+        f"border: 1px solid {tc.get('border_secondary')}; "
+        f"border-radius: 4px; padding: 7px 10px; font-size: {tc.FONT_BASE}px; }}"
+        f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
     )
     layout.addWidget(field)
 
@@ -672,9 +680,10 @@ def prompt_text(
     cancel = QPushButton("Cancel")
     cancel.setCursor(Qt.CursorShape.PointingHandCursor)
     cancel.setStyleSheet(
-        "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-        "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
-        "QPushButton:hover { background: #4a4a4a; }"
+        f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+        f"border: 1px solid {tc.get('border_input')}; "
+        f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_MD}px; }}"
+        f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
     )
     cancel.clicked.connect(dlg.reject)
     btn_row.addWidget(cancel)
@@ -683,9 +692,10 @@ def prompt_text(
     ok.setCursor(Qt.CursorShape.PointingHandCursor)
     ok.setDefault(True)
     ok.setStyleSheet(
-        "QPushButton { background: #0e639c; color: white; border: none; "
-        "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background: #1a8ae8; }"
+        f"QPushButton {{ background: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')}; "
+        f"border: none; border-radius: 4px; padding: 6px 16px; "
+        f"font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+        f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
     )
     ok.clicked.connect(dlg.accept)
     btn_row.addWidget(ok)

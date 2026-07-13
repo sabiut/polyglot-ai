@@ -12,6 +12,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QListWidget, QTextEdit, QVBoxLayout, QWidget
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class FileMentionPopup(QWidget):
     """Popup for @file mention fuzzy search."""
@@ -20,13 +22,13 @@ class FileMentionPopup(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("""
-            QWidget { background: #2d2d2d; border: 1px solid #555; border-radius: 6px; }
-            QListWidget { background: transparent; border: none; color: #d4d4d4;
-                          font-size: 13px; font-family: monospace; }
-            QListWidget::item { padding: 4px 8px; border-radius: 3px; }
-            QListWidget::item:selected { background: #094771; }
-            QListWidget::item:hover { background: #3e3e40; }
+        self.setStyleSheet(f"""
+            QWidget {{ background: {tc.get("bg_surface_raised")}; border: 1px solid {tc.get("border_input")}; border-radius: 6px; }}
+            QListWidget {{ background: transparent; border: none; color: {tc.get("text_primary")};
+                          font-size: {tc.FONT_BASE}px; font-family: monospace; }}
+            QListWidget::item {{ padding: 4px 8px; border-radius: 3px; }}
+            QListWidget::item:selected {{ background: {tc.get("bg_active")}; }}
+            QListWidget::item:hover {{ background: {tc.get("bg_hover")}; }}
         """)
 
         layout = QVBoxLayout(self)

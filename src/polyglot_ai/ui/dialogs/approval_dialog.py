@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels.diff_viewer import DiffViewer
 
 
@@ -53,7 +54,7 @@ class ApprovalDialog(QDialog):
 
         # ── Header: tool name ──
         header = QLabel(f"Tool: <b>{tool_name}</b>")
-        header.setStyleSheet("font-size: 14px;")
+        header.setStyleSheet(f"font-size: {tc.FONT_LG}px;")
         layout.addWidget(header)
 
         # Parse arguments once for every branch.
@@ -71,12 +72,14 @@ class ApprovalDialog(QDialog):
         btn_layout.addStretch()
 
         reject_btn = QPushButton("Reject")
-        reject_btn.setStyleSheet("background-color: #5a1d1d; padding: 8px 20px;")
+        reject_btn.setStyleSheet(f"background-color: {tc.get('border_feedback_neg')}; padding: 8px 20px;")
         reject_btn.clicked.connect(self._reject)
         btn_layout.addWidget(reject_btn)
 
         approve_btn = QPushButton("Approve")
-        approve_btn.setStyleSheet("background-color: #0e639c; padding: 8px 20px;")
+        approve_btn.setStyleSheet(
+            f"background-color: {tc.get('accent_primary')}; padding: 8px 20px;"
+        )
         approve_btn.clicked.connect(self._approve)
         btn_layout.addWidget(approve_btn)
 
@@ -111,7 +114,9 @@ class ApprovalDialog(QDialog):
 
     def _build_diff_body(self, args: dict, current_content: str | None) -> QWidget:
         path = args.get("path", "unknown")
-        wrap, layout = self._wrap_with_label(f"File: <code>{path}</code>", colour="#9cdcfe")
+        wrap, layout = self._wrap_with_label(
+            f"File: <code>{path}</code>", colour=tc.get("syn_identifier")
+        )
         diff_viewer = DiffViewer()
         old_content = current_content or "(new file)"
         new_content = args.get("content", args.get("patch", ""))
@@ -122,7 +127,9 @@ class ApprovalDialog(QDialog):
     def _build_shell_body(self, args: dict) -> QWidget:
         command = args.get("command", "")
         workdir = args.get("workdir", "project root")
-        wrap, layout = self._wrap_with_label(f"Command in <code>{workdir}</code>", colour="#9cdcfe")
+        wrap, layout = self._wrap_with_label(
+            f"Command in <code>{workdir}</code>", colour=tc.get("syn_identifier")
+        )
         layout.addWidget(self._mono_pane(command), 1)
         return wrap
 
@@ -134,7 +141,7 @@ class ApprovalDialog(QDialog):
         path = args.get("path", "unknown")
         wrap, layout = self._wrap_with_label(
             f"<b>Will permanently delete file:</b> <code>{path}</code>",
-            colour="#f48771",
+            colour=tc.get("accent_error"),
         )
         body = current_content if current_content is not None else "(file content unavailable)"
         editor = self._mono_pane(body)
@@ -146,7 +153,7 @@ class ApprovalDialog(QDialog):
         path = args.get("path", "unknown")
         wrap, layout = self._wrap_with_label(
             f"<b>Will create directory:</b> <code>{path}</code>",
-            colour="#4ec9b0",
+            colour=tc.get("accent_success_muted"),
         )
         editor = self._mono_pane(
             f"{path}\n\nThe directory (and any missing parent directories) will be created."
@@ -168,7 +175,7 @@ class ApprovalDialog(QDialog):
         )
         wrap, layout = self._wrap_with_label(
             f"<b>{warn}:</b> <code>{path}</code>",
-            colour="#f48771",
+            colour=tc.get("accent_error"),
         )
         # ``current_content`` is repurposed by the chat panel to carry
         # a directory listing for dir_delete (top N entries plus a
@@ -179,7 +186,7 @@ class ApprovalDialog(QDialog):
         return wrap
 
     def _build_generic_body(self, args: dict) -> QWidget:
-        wrap, layout = self._wrap_with_label("Tool arguments", colour="#9cdcfe")
+        wrap, layout = self._wrap_with_label("Tool arguments", colour=tc.get("syn_identifier"))
         layout.addWidget(self._mono_pane(json.dumps(args, indent=2)), 1)
         return wrap
 
@@ -204,7 +211,9 @@ class ApprovalDialog(QDialog):
         editor.setReadOnly(True)
         editor.setFont(QFont("Monospace", 11))
         editor.setStyleSheet(
-            "QPlainTextEdit { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; }"
+            f"QPlainTextEdit {{ background-color: {tc.get('bg_code_block')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; }}"
         )
         editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         editor.setPlainText(text)

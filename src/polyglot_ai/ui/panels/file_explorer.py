@@ -32,6 +32,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme
+from polyglot_ai.ui import theme_colors as tc
+
 logger = logging.getLogger(__name__)
 
 HIDDEN_DIRS = {
@@ -223,11 +226,11 @@ class FileIconDelegate(QStyledItemDelegate):
 
         # Draw selection/hover background (full width)
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#04395e"))
+            painter.fillRect(option.rect, QColor(tc.get("bg_active")))
             # Left accent bar for selected item
-            painter.fillRect(0, y, 2, h, QColor("#0078d4"))
+            painter.fillRect(0, y, 2, h, QColor(tc.get("accent_primary")))
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#2a2d2e"))
+            painter.fillRect(option.rect, QColor(tc.get("bg_hover_subtle")))
 
         # Draw indent guides (subtle vertical lines)
         indent = 16
@@ -237,7 +240,7 @@ class FileIconDelegate(QStyledItemDelegate):
             depth += 1
             parent = parent.parent()
 
-        guide_pen = QPen(QColor("#333333"))
+        guide_pen = QPen(QColor(tc.get("border_secondary")))
         guide_pen.setWidthF(1.0)
         painter.setPen(guide_pen)
         for d in range(depth):
@@ -257,7 +260,7 @@ class FileIconDelegate(QStyledItemDelegate):
             chevron_x = content_x
             chevron_y = y + h // 2
 
-            chevron_pen = QPen(QColor("#a0a0a0"))
+            chevron_pen = QPen(QColor(tc.get("text_secondary")))
             chevron_pen.setWidthF(1.2)
             chevron_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             chevron_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -292,13 +295,13 @@ class FileIconDelegate(QStyledItemDelegate):
         # Draw file name
         text_x = content_x + icon_size + 6
         if is_dir:
-            painter.setPen(QColor("#cccccc"))
+            painter.setPen(QColor(tc.get("text_primary")))
             font = painter.font()
             font.setPixelSize(13)
             font.setBold(True)
             painter.setFont(font)
         else:
-            painter.setPen(QColor("#cccccc"))
+            painter.setPen(QColor(tc.get("text_primary")))
             font = painter.font()
             font.setPixelSize(13)
             font.setBold(False)
@@ -402,7 +405,6 @@ class FileExplorer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setStyleSheet("background-color: #1e1e1e;")
         self._event_bus = None
 
         layout = QVBoxLayout(self)
@@ -410,25 +412,19 @@ class FileExplorer(QWidget):
         layout.setSpacing(0)
 
         # Header bar — like VS Code "EXPLORER" with action buttons
-        header_bar = QWidget()
-        header_bar.setObjectName("explorerHeader")
-        header_bar.setFixedHeight(32)
-        header_bar.setStyleSheet(
-            "#explorerHeader { background-color: #252526; border-bottom: 1px solid #333; }"
-        )
-        header_layout = QHBoxLayout(header_bar)
+        self._header_bar = QWidget()
+        self._header_bar.setObjectName("explorerHeader")
+        self._header_bar.setFixedHeight(32)
+        header_layout = QHBoxLayout(self._header_bar)
         header_layout.setContentsMargins(10, 0, 6, 0)
         header_layout.setSpacing(4)
 
         self._header = QLabel("EXPLORER")
-        self._header.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #bbbbbb; "
-            "letter-spacing: 0.5px; background: transparent;"
-        )
         header_layout.addWidget(self._header)
         header_layout.addStretch()
 
         # Action buttons in header
+        self._action_btns: list[QPushButton] = []
         for tooltip, icon_char in [
             ("New File", None),
             ("New Folder", None),
@@ -440,20 +436,8 @@ class FileExplorer(QWidget):
             btn.setFixedSize(24, 24)
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("""
-                #explorerActionBtn {
-                    background: transparent; border: none; color: #ffffff;
-                    font-size: 15px; border-radius: 3px; padding: 0px;
-                    font-weight: normal;
-                }
-                #explorerActionBtn:hover { background: #3e3e40; color: #ffffff; }
-            """)
             if icon_char:
                 btn.setText(icon_char)
-            elif tooltip == "New File":
-                btn.setIcon(self._draw_file_icon())
-            elif tooltip == "New Folder":
-                btn.setIcon(self._draw_folder_icon())
             if tooltip == "New File":
                 btn.clicked.connect(self._new_file_at_root)
             elif tooltip == "New Folder":
@@ -462,32 +446,25 @@ class FileExplorer(QWidget):
                 btn.clicked.connect(self._refresh)
             elif tooltip == "Collapse All":
                 btn.clicked.connect(self._collapse_all)
+            self._action_btns.append(btn)
             header_layout.addWidget(btn)
 
-        layout.addWidget(header_bar)
+        layout.addWidget(self._header_bar)
 
         # Project name section (collapsible, like VS Code)
         self._project_header = QWidget()
         self._project_header.setObjectName("projectHeader")
         self._project_header.setFixedHeight(24)
-        self._project_header.setStyleSheet(
-            "#projectHeader { background-color: #252526; border-bottom: 1px solid #333; }"
-        )
         self._project_header.hide()
         ph_layout = QHBoxLayout(self._project_header)
         ph_layout.setContentsMargins(6, 0, 6, 0)
         ph_layout.setSpacing(4)
 
         self._chevron = QLabel("▼")
-        self._chevron.setStyleSheet("font-size: 10px; color: #cccccc; background: transparent;")
         self._chevron.setFixedWidth(12)
         ph_layout.addWidget(self._chevron)
 
         self._project_name = QLabel("")
-        self._project_name.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #cccccc; "
-            "background: transparent; letter-spacing: 0.3px;"
-        )
         ph_layout.addWidget(self._project_name)
         ph_layout.addStretch()
 
@@ -510,80 +487,20 @@ class FileExplorer(QWidget):
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
         self._tree.doubleClicked.connect(self._on_double_click)
         self._tree.clicked.connect(self._on_single_click)
-        self._tree.setStyleSheet("""
-            QTreeView {
-                background-color: #1e1e1e;
-                border: none;
-                outline: none;
-                font-size: 13px;
-                show-decoration-selected: 1;
-            }
-            QTreeView::item {
-                padding: 0px;
-                height: 22px;
-                border: none;
-            }
-            QTreeView::item:selected {
-                background-color: #094771;
-            }
-            QTreeView::item:hover:!selected {
-                background-color: #2a2d2e;
-            }
-            QTreeView::branch {
-                background-color: #1e1e1e;
-            }
-            QTreeView::branch:has-siblings:!adjoins-item {
-                border-image: none;
-            }
-            QTreeView::branch:has-siblings:adjoins-item {
-                border-image: none;
-            }
-            QTreeView::branch:!has-children:!has-siblings:adjoins-item {
-                border-image: none;
-            }
-            QTreeView::branch:has-children:!has-siblings:closed,
-            QTreeView::branch:closed:has-children:has-siblings {
-                image: none;
-                border-image: none;
-            }
-            QTreeView::branch:open:has-children:!has-siblings,
-            QTreeView::branch:open:has-children:has-siblings {
-                image: none;
-                border-image: none;
-            }
-            QScrollBar:vertical {
-                width: 8px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                background: #424242;
-                border-radius: 4px;
-                min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #555;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
         layout.addWidget(self._tree)
 
         # Placeholder when no project is open
         self._placeholder = QWidget()
-        self._placeholder.setStyleSheet("background-color: #1e1e1e;")
         ph_main = QVBoxLayout(self._placeholder)
         ph_main.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        no_folder = QLabel("No project open")
-        no_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        no_folder.setStyleSheet("color: #808080; font-size: 13px; background: transparent;")
-        ph_main.addWidget(no_folder)
+        self._no_folder = QLabel("No project open")
+        self._no_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ph_main.addWidget(self._no_folder)
 
-        open_hint = QLabel("File → Open Project...")
-        open_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        open_hint.setStyleSheet("color: #606060; font-size: 12px; background: transparent;")
-        ph_main.addWidget(open_hint)
+        self._open_hint = QLabel("File → Open Project...")
+        self._open_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ph_main.addWidget(self._open_hint)
 
         layout.addWidget(self._placeholder)
 
@@ -604,6 +521,111 @@ class FileExplorer(QWidget):
         self._tree.setItemDelegateForColumn(0, self._delegate)
 
         self._project_root: Path | None = None
+
+        self._apply_theme_styles()
+        theme.connect_theme_changed(self._apply_theme_styles)
+
+    def _apply_theme_styles(self) -> None:
+        self.setStyleSheet(f"background-color: {tc.get('bg_base')};")
+        self._header_bar.setStyleSheet(
+            f"#explorerHeader {{ background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self._header.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_secondary')}; "
+            "letter-spacing: 0.5px; background: transparent;"
+        )
+        for btn in self._action_btns:
+            btn.setStyleSheet(f"""
+                #explorerActionBtn {{
+                    background: transparent; border: none; color: {tc.get("text_primary")};
+                    font-size: 15px; border-radius: 3px; padding: 0px;
+                    font-weight: normal;
+                }}
+                #explorerActionBtn:hover {{
+                    background: {tc.get("bg_hover")}; color: {tc.get("text_primary")};
+                }}
+            """)
+            if btn.toolTip() == "New File":
+                btn.setIcon(self._draw_file_icon())
+            elif btn.toolTip() == "New Folder":
+                btn.setIcon(self._draw_folder_icon())
+        self._project_header.setStyleSheet(
+            f"#projectHeader {{ background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self._chevron.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_primary')}; background: transparent;"
+        )
+        self._project_name.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_primary')}; "
+            "background: transparent; letter-spacing: 0.3px;"
+        )
+        self._tree.setStyleSheet(f"""
+            QTreeView {{
+                background-color: {tc.get("bg_base")};
+                border: none;
+                outline: none;
+                font-size: {tc.FONT_BASE}px;
+                show-decoration-selected: 1;
+            }}
+            QTreeView::item {{
+                padding: 0px;
+                height: 22px;
+                border: none;
+            }}
+            QTreeView::item:selected {{
+                background-color: {tc.get("bg_active")};
+            }}
+            QTreeView::item:hover:!selected {{
+                background-color: {tc.get("bg_hover_subtle")};
+            }}
+            QTreeView::branch {{
+                background-color: {tc.get("bg_base")};
+            }}
+            QTreeView::branch:has-siblings:!adjoins-item {{
+                border-image: none;
+            }}
+            QTreeView::branch:has-siblings:adjoins-item {{
+                border-image: none;
+            }}
+            QTreeView::branch:!has-children:!has-siblings:adjoins-item {{
+                border-image: none;
+            }}
+            QTreeView::branch:has-children:!has-siblings:closed,
+            QTreeView::branch:closed:has-children:has-siblings {{
+                image: none;
+                border-image: none;
+            }}
+            QTreeView::branch:open:has-children:!has-siblings,
+            QTreeView::branch:open:has-children:has-siblings {{
+                image: none;
+                border-image: none;
+            }}
+            QScrollBar:vertical {{
+                width: 8px;
+                background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {tc.get("scrollbar_thumb")};
+                border-radius: 4px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {tc.get("scrollbar_thumb_hover")};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+        self._placeholder.setStyleSheet(f"background-color: {tc.get('bg_base')};")
+        self._no_folder.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_BASE}px; "
+            "background: transparent;"
+        )
+        self._open_hint.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_MD}px; background: transparent;"
+        )
 
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
@@ -678,7 +700,7 @@ class FileExplorer(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         p = QPainter(pixmap)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -694,7 +716,7 @@ class FileExplorer(QWidget):
         p.drawLine(8, 1, 8, 4)
         p.drawLine(8, 4, 11, 4)
         # Plus sign
-        pen2 = QPen(QColor("#ffffff"))
+        pen2 = QPen(QColor(tc.get("text_primary")))
         pen2.setWidthF(1.5)
         pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen2)
@@ -713,7 +735,7 @@ class FileExplorer(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         p = QPainter(pixmap)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#ffffff"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -726,7 +748,7 @@ class FileExplorer(QWidget):
         p.drawLine(1, 3, 5, 3)
         p.drawLine(5, 3, 6, 5)
         # Plus sign
-        pen2 = QPen(QColor("#ffffff"))
+        pen2 = QPen(QColor(tc.get("text_primary")))
         pen2.setWidthF(1.5)
         pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen2)
@@ -763,25 +785,25 @@ class FileExplorer(QWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d30;
-                border: 1px solid #454545;
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {tc.get("bg_surface_overlay")};
+                border: 1px solid {tc.get("border_menu")};
                 padding: 4px 0;
-                color: #cccccc;
-                font-size: 12px;
-            }
-            QMenu::item {
+                color: {tc.get("text_primary")};
+                font-size: {tc.FONT_MD}px;
+            }}
+            QMenu::item {{
                 padding: 4px 28px 4px 12px;
-            }
-            QMenu::item:selected {
-                background-color: #094771;
-            }
-            QMenu::separator {
+            }}
+            QMenu::item:selected {{
+                background-color: {tc.get("bg_active")};
+            }}
+            QMenu::separator {{
                 height: 1px;
-                background: #454545;
+                background: {tc.get("border_menu")};
                 margin: 4px 8px;
-            }
+            }}
         """)
 
         if path.is_dir():
@@ -823,12 +845,12 @@ class FileExplorer(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         dialog.setFixedWidth(360)
-        dialog.setStyleSheet("""
-            QDialog {
-                background-color: #252526;
-                border: 1px solid #444;
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {tc.get("bg_surface")};
+                border: 1px solid {tc.get("border_menu")};
                 border-radius: 8px;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(dialog)
@@ -837,25 +859,29 @@ class FileExplorer(QWidget):
 
         # Title
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #e0e0e0;")
+        title_label.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         layout.addWidget(title_label)
 
         # Input label
         input_label = QLabel(label)
-        input_label.setStyleSheet("font-size: 13px; color: #bbbbbb;")
+        input_label.setStyleSheet(
+            f"font-size: {tc.FONT_BASE}px; color: {tc.get('text_secondary')};"
+        )
         layout.addWidget(input_label)
 
         # Input field
         input_field = QLineEdit()
         input_field.setPlaceholderText(placeholder or label.replace(":", "").strip())
         input_field.setText(default)
-        input_field.setStyleSheet("""
-            QLineEdit {
-                background-color: #1e1e1e; color: #e0e0e0;
-                border: 1px solid #555; border-radius: 6px;
-                padding: 8px 12px; font-size: 13px;
-            }
-            QLineEdit:focus { border-color: #0078d4; }
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {tc.get("bg_base")}; color: {tc.get("text_heading")};
+                border: 1px solid {tc.get("border_input")}; border-radius: 6px;
+                padding: 8px 12px; font-size: {tc.FONT_BASE}px;
+            }}
+            QLineEdit:focus {{ border-color: {tc.get("border_focus")}; }}
         """)
         input_field.selectAll()
         layout.addWidget(input_field)
@@ -868,12 +894,12 @@ class FileExplorer(QWidget):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("styledDialogBtn")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet("""
-            #styledDialogBtn {
-                background: transparent; color: #aaa; font-size: 13px;
-                padding: 6px 18px; border: 1px solid #555; border-radius: 6px;
-            }
-            #styledDialogBtn:hover { background: #333; color: #ddd; }
+        cancel_btn.setStyleSheet(f"""
+            #styledDialogBtn {{
+                background: transparent; color: {tc.get("text_secondary")}; font-size: {tc.FONT_BASE}px;
+                padding: 6px 18px; border: 1px solid {tc.get("border_input")}; border-radius: 6px;
+            }}
+            #styledDialogBtn:hover {{ background: {tc.get("bg_hover")}; color: {tc.get("text_primary")}; }}
         """)
         cancel_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(cancel_btn)
@@ -881,12 +907,12 @@ class FileExplorer(QWidget):
         ok_btn = QPushButton("Create" if "New" in title else "Rename")
         ok_btn.setObjectName("styledDialogOkBtn")
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        ok_btn.setStyleSheet("""
-            #styledDialogOkBtn {
-                background: #0078d4; color: white; font-size: 13px;
+        ok_btn.setStyleSheet(f"""
+            #styledDialogOkBtn {{
+                background: {tc.get("accent_primary")}; color: white; font-size: {tc.FONT_BASE}px;
                 font-weight: 600; padding: 6px 22px; border: none; border-radius: 6px;
-            }
-            #styledDialogOkBtn:hover { background: #1a8ae8; }
+            }}
+            #styledDialogOkBtn:hover {{ background: {tc.get("accent_primary_hover")}; }}
         """)
         ok_btn.clicked.connect(dialog.accept)
         btn_row.addWidget(ok_btn)
@@ -936,25 +962,25 @@ class FileExplorer(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("Delete")
         dialog.setFixedWidth(380)
-        dialog.setStyleSheet("QDialog { background-color: #252526; }")
+        dialog.setStyleSheet(f"QDialog {{ background-color: {tc.get('bg_surface')}; }}")
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
 
         title = QLabel("Delete")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #e0e0e0;")
+        title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {tc.get('text_heading')};")
         layout.addWidget(title)
 
         kind = "folder" if path.is_dir() else "file"
         msg = QLabel(f"Are you sure you want to delete the {kind}\n<b>{path.name}</b>?")
         msg.setWordWrap(True)
-        msg.setStyleSheet("font-size: 13px; color: #cccccc;")
+        msg.setStyleSheet(f"font-size: {tc.FONT_BASE}px; color: {tc.get('text_primary')};")
         layout.addWidget(msg)
 
         if path.is_dir():
             warn = QLabel("⚠ This will delete the folder and all its contents.")
-            warn.setStyleSheet("font-size: 12px; color: #e5a00d;")
+            warn.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('accent_warning')};")
             warn.setWordWrap(True)
             layout.addWidget(warn)
 
@@ -965,12 +991,12 @@ class FileExplorer(QWidget):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("styledDialogBtn")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet("""
-            #styledDialogBtn {
-                background: transparent; color: #aaa; font-size: 13px;
-                padding: 6px 18px; border: 1px solid #555; border-radius: 6px;
-            }
-            #styledDialogBtn:hover { background: #333; color: #ddd; }
+        cancel_btn.setStyleSheet(f"""
+            #styledDialogBtn {{
+                background: transparent; color: {tc.get("text_secondary")}; font-size: {tc.FONT_BASE}px;
+                padding: 6px 18px; border: 1px solid {tc.get("border_input")}; border-radius: 6px;
+            }}
+            #styledDialogBtn:hover {{ background: {tc.get("bg_hover")}; color: {tc.get("text_primary")}; }}
         """)
         cancel_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(cancel_btn)
@@ -978,12 +1004,12 @@ class FileExplorer(QWidget):
         delete_btn = QPushButton("Delete")
         delete_btn.setObjectName("styledDeleteBtn")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        delete_btn.setStyleSheet("""
-            #styledDeleteBtn {
-                background: #d32f2f; color: white; font-size: 13px;
+        delete_btn.setStyleSheet(f"""
+            #styledDeleteBtn {{
+                background: {tc.get("accent_danger")}; color: white; font-size: {tc.FONT_BASE}px;
                 font-weight: 600; padding: 6px 22px; border: none; border-radius: 6px;
-            }
-            #styledDeleteBtn:hover { background: #e53935; }
+            }}
+            #styledDeleteBtn:hover {{ background: {tc.get("accent_danger_hover")}; }}
         """)
         delete_btn.clicked.connect(dialog.accept)
         btn_row.addWidget(delete_btn)

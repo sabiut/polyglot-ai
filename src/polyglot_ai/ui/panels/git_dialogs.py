@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 def prompt_branch_name(parent: QWidget) -> str:
     """Show a custom-styled input dialog for a new branch name.
@@ -40,26 +42,32 @@ def prompt_branch_name(parent: QWidget) -> str:
     dlg.setWindowTitle("New branch")
     dlg.setModal(True)
     dlg.setMinimumWidth(360)
-    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+    dlg.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(18, 16, 18, 14)
     layout.setSpacing(10)
 
     lbl = QLabel("Branch name:")
-    lbl.setStyleSheet("color: #ccc; font-size: 12px; font-weight: 600; background: transparent;")
+    lbl.setStyleSheet(
+        f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+        "font-weight: 600; background: transparent;"
+    )
     layout.addWidget(lbl)
 
     field = QLineEdit("feat/")
     field.setStyleSheet(
-        "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-        "border-radius: 4px; padding: 7px 10px; font-size: 13px; }"
-        "QLineEdit:focus { border-color: #0e639c; }"
+        f"QLineEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+        f"border: 1px solid {tc.get('border_secondary')}; "
+        f"border-radius: 4px; padding: 7px 10px; font-size: {tc.FONT_BASE}px; }}"
+        f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
     )
     layout.addWidget(field)
 
     hint = QLabel("Will run `git checkout -b <name>` in the project root.")
-    hint.setStyleSheet("color: #777; font-size: 11px; background: transparent;")
+    hint.setStyleSheet(
+        f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
+    )
     layout.addWidget(hint)
 
     btn_row = QHBoxLayout()
@@ -69,9 +77,11 @@ def prompt_branch_name(parent: QWidget) -> str:
     cancel_btn = QPushButton("Cancel")
     cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     cancel_btn.setStyleSheet(
-        "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-        "border-radius: 4px; padding: 6px 14px; font-size: 12px; }"
-        "QPushButton:hover { background: #4a4a4a; }"
+        f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+        f"border: 1px solid {tc.get('border_input')}; "
+        f"border-radius: 4px; padding: 6px 14px; font-size: {tc.FONT_MD}px; }}"
+        f"QPushButton:hover {{ background: {tc.get('bg_hover')}; "
+        f"border-color: {tc.get('accent_primary')}; }}"
     )
     cancel_btn.clicked.connect(dlg.reject)
     btn_row.addWidget(cancel_btn)
@@ -80,10 +90,11 @@ def prompt_branch_name(parent: QWidget) -> str:
     create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     create_btn.setDefault(True)
     create_btn.setStyleSheet(
-        "QPushButton { background: #0e639c; color: white; border: none; "
-        "border-radius: 4px; padding: 6px 16px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background: #1a8ae8; }"
-        "QPushButton:disabled { background: #355; color: #888; }"
+        f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; border: none; "
+        f"border-radius: 4px; padding: 6px 16px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+        f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+        f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; "
+        f"color: {tc.get('text_tertiary')}; }}"
     )
     create_btn.clicked.connect(dlg.accept)
     btn_row.addWidget(create_btn)
@@ -143,29 +154,34 @@ def show_message(
     dlg.setWindowTitle(title)
     dlg.setModal(True)
     dlg.setMinimumWidth(380)
-    dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+    dlg.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(20, 18, 20, 14)
     layout.setSpacing(12)
 
     icon_map = {"info": "ℹ", "warn": "⚠", "error": "✕"}
-    colour_map = {"info": "#4ec9b0", "warn": "#e5a00d", "error": "#f48771"}
+    colour_map = {
+        "info": tc.get("accent_success_muted"),
+        "warn": tc.get("accent_warning"),
+        "error": tc.get("accent_error"),
+    }
     icon_char = icon_map.get(kind, "ℹ")
-    icon_colour = colour_map.get(kind, "#4ec9b0")
+    icon_colour = colour_map.get(kind, tc.get("accent_success_muted"))
 
     header = QHBoxLayout()
     header.setSpacing(10)
     icon_lbl = QLabel(icon_char)
     icon_lbl.setStyleSheet(
-        f"color: {icon_colour}; font-size: 20px; font-weight: bold; background: transparent;"
+        f"color: {icon_colour}; font-size: {tc.FONT_2XL}px; font-weight: bold; background: transparent;"
     )
     icon_lbl.setFixedWidth(28)
     header.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignTop)
 
     title_lbl = QLabel(title)
     title_lbl.setStyleSheet(
-        "color: #e0e0e0; font-size: 14px; font-weight: bold; background: transparent;"
+        f"color: {tc.get('text_heading')}; font-size: {tc.FONT_LG}px; "
+        "font-weight: bold; background: transparent;"
     )
     header.addWidget(title_lbl, stretch=1)
     layout.addLayout(header)
@@ -174,7 +190,8 @@ def show_message(
     body.setWordWrap(True)
     body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     body.setStyleSheet(
-        "color: #c0c0c0; font-size: 12px; background: transparent; padding-left: 38px;"
+        f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+        "background: transparent; padding-left: 38px;"
     )
     layout.addWidget(body)
 
@@ -184,9 +201,9 @@ def show_message(
     ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     ok_btn.setDefault(True)
     ok_btn.setStyleSheet(
-        "QPushButton { background: #0e639c; color: white; border: none; "
-        "border-radius: 4px; padding: 6px 22px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background: #1a8ae8; }"
+        f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; border: none; "
+        f"border-radius: 4px; padding: 6px 22px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+        f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
     )
     ok_btn.clicked.connect(dlg.accept)
     btn_row.addWidget(ok_btn)

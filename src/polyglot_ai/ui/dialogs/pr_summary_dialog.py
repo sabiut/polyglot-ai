@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.review.models import PRSummary
+from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class PRSummaryDialog(QDialog):
         self.setWindowTitle("PR description")
         self.setMinimumSize(720, 560)
         self.setModal(True)
-        self.setStyleSheet("QDialog { background: #1e1e1e; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 14)
@@ -90,23 +91,25 @@ class PRSummaryDialog(QDialog):
         # ── Title field ──
         title_lbl = QLabel("Title")
         title_lbl.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"font-weight: 600; background: transparent;"
         )
         layout.addWidget(title_lbl)
 
         self._title_edit = QLineEdit(result.title)
         self._title_edit.setStyleSheet(
-            "QLineEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-            "border-radius: 4px; padding: 8px 10px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #0e639c; }"
+            f"QLineEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; padding: 8px 10px; font-size: {tc.FONT_BASE}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         layout.addWidget(self._title_edit)
 
         # ── Body field ──
         body_lbl = QLabel("Body")
         body_lbl.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; "
-            "background: transparent; margin-top: 4px;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"background: transparent; margin-top: 4px;"
         )
         layout.addWidget(body_lbl)
 
@@ -114,10 +117,11 @@ class PRSummaryDialog(QDialog):
         self._body_edit.setPlainText(result.to_markdown(self._template))
         self._body_edit.setAcceptRichText(False)
         self._body_edit.setStyleSheet(
-            "QTextEdit { background: #252526; color: #e0e0e0; border: 1px solid #333; "
-            "border-radius: 4px; padding: 8px 10px; font-size: 12px; "
-            "font-family: 'JetBrains Mono', monospace; }"
-            "QTextEdit:focus { border-color: #0e639c; }"
+            f"QTextEdit {{ background: {tc.get('bg_surface')}; color: {tc.get('text_heading')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 4px; padding: 8px 10px; font-size: {tc.FONT_MD}px; "
+            f"font-family: 'JetBrains Mono', monospace; }}"
+            f"QTextEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
         layout.addWidget(self._body_edit, stretch=1)
 
@@ -126,13 +130,18 @@ class PRSummaryDialog(QDialog):
             f"{result.files_changed} files · +{result.additions}/-{result.deletions} · "
             f"{result.provider or '?'}/{result.model or '?'}"
         )
-        meta.setStyleSheet("color: #666; font-size: 11px; background: transparent;")
+        meta.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
         layout.addWidget(meta)
 
         # ── Status line ──
         self._status = QLabel("")
         self._status.setWordWrap(True)
-        self._status.setStyleSheet("color: #4ec9b0; font-size: 11px; background: transparent;")
+        self._status.setStyleSheet(
+            f"color: {tc.get('accent_success_muted')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent;"
+        )
         layout.addWidget(self._status)
 
         # ── Buttons ──
@@ -169,13 +178,17 @@ class PRSummaryDialog(QDialog):
     def _render_error(self, layout: QVBoxLayout) -> None:
         title = QLabel("🔴 Could not generate PR description")
         title.setStyleSheet(
-            "color: #f44747; font-size: 14px; font-weight: bold; background: transparent;"
+            f"color: {tc.get('accent_error')}; font-size: {tc.FONT_LG}px; "
+            f"font-weight: bold; background: transparent;"
         )
         layout.addWidget(title)
 
         msg = QLabel(self._result.error or "The AI did not return a valid response.")
         msg.setWordWrap(True)
-        msg.setStyleSheet("color: #e0d0d0; font-size: 12px; background: transparent;")
+        msg.setStyleSheet(
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
+            f"background: transparent;"
+        )
         layout.addWidget(msg)
 
         layout.addStretch()
@@ -194,16 +207,18 @@ class PRSummaryDialog(QDialog):
             btn.setToolTip(tooltip)
         if primary:
             btn.setStyleSheet(
-                "QPushButton { background: #0e639c; color: white; border: none; "
-                "border-radius: 4px; padding: 7px 16px; font-size: 12px; font-weight: 600; }"
-                "QPushButton:hover { background: #1a8ae8; }"
-                "QPushButton:disabled { background: #355; color: #888; }"
+                f"QPushButton {{ background: {tc.get('accent_primary')}; color: white; "
+                f"border: none; "
+                f"border-radius: 4px; padding: 7px 16px; font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+                f"QPushButton:disabled {{ background: {tc.get('bg_hover')}; color: {tc.get('text_tertiary')}; }}"
             )
         else:
             btn.setStyleSheet(
-                "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-                "border-radius: 4px; padding: 7px 14px; font-size: 12px; }"
-                "QPushButton:hover { background: #4a4a4a; }"
+                f"QPushButton {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('border_input')}; "
+                f"border-radius: 4px; padding: 7px 14px; font-size: {tc.FONT_MD}px; }}"
+                f"QPushButton:hover {{ background: {tc.get('border_input')}; }}"
             )
         return btn
 
@@ -324,6 +339,8 @@ class PRSummaryDialog(QDialog):
             logger.exception("pr_summary_dialog: pr_created listener raised")
 
     def _set_status(self, msg: str, ok: bool) -> None:
-        colour = "#4ec9b0" if ok else "#f48771"
+        colour = tc.get("accent_success_muted") if ok else tc.get("accent_error")
         self._status.setText(msg)
-        self._status.setStyleSheet(f"color: {colour}; font-size: 11px; background: transparent;")
+        self._status.setStyleSheet(
+            f"color: {colour}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )

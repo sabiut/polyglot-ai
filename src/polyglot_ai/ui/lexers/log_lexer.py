@@ -7,6 +7,8 @@ import re
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.Qsci import QsciLexerCustom, QsciScintilla
 
+from polyglot_ai.ui import theme_colors as tc
+
 
 class LogLexer(QsciLexerCustom):
     """Highlights log lines by severity level.
@@ -34,30 +36,32 @@ class LogLexer(QsciLexerCustom):
         mono = QFont("Monospace", 10)
         mono.setStyleHint(QFont.StyleHint.Monospace)
 
+        paper = QColor(tc.get("bg_base"))
+
         # 0: Default
-        self.setColor(QColor("#d4d4d4"), 0)
+        self.setColor(QColor(tc.get("text_primary")), 0)
         self.setFont(mono, 0)
-        self.setPaper(QColor("#1e1e1e"), 0)
+        self.setPaper(paper, 0)
 
         # 1: Error — red
-        self.setColor(QColor("#f44747"), 1)
+        self.setColor(QColor(tc.get("severity_critical")), 1)
         self.setFont(mono, 1)
-        self.setPaper(QColor("#1e1e1e"), 1)
+        self.setPaper(paper, 1)
 
         # 2: Warning — yellow
-        self.setColor(QColor("#cca700"), 2)
+        self.setColor(QColor(tc.get("severity_high")), 2)
         self.setFont(mono, 2)
-        self.setPaper(QColor("#1e1e1e"), 2)
+        self.setPaper(paper, 2)
 
         # 3: Info — cyan
-        self.setColor(QColor("#4ec9b0"), 3)
+        self.setColor(QColor(tc.get("severity_low")), 3)
         self.setFont(mono, 3)
-        self.setPaper(QColor("#1e1e1e"), 3)
+        self.setPaper(paper, 3)
 
         # 4: Debug — dim grey
-        self.setColor(QColor("#6a6a6a"), 4)
+        self.setColor(QColor(tc.get("text_disabled")), 4)
         self.setFont(mono, 4)
-        self.setPaper(QColor("#1e1e1e"), 4)
+        self.setPaper(paper, 4)
 
     def language(self) -> str:
         return "Log"

@@ -28,6 +28,8 @@ from PyQt6.Qsci import (
     QsciScintilla,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 logger = logging.getLogger(__name__)
 
 # Map file extensions to QScintilla lexer classes
@@ -82,22 +84,6 @@ LEXER_MAP: dict[str, type] = {
 # Log files use a custom lexer (added separately in _setup_lexer)
 _LOG_EXTENSIONS = frozenset({".log"})
 
-# Dark theme colors for the editor
-DARK_COLORS = {
-    "background": "#1e1e1e",
-    "foreground": "#d4d4d4",
-    "caret": "#aeafad",
-    "selection_bg": "#264f78",
-    "current_line": "#2a2d2e",
-    "margin_bg": "#252526",
-    "margin_fg": "#858585",
-    "fold_margin_bg": "#252526",
-    "matched_brace_bg": "#0d5640",
-    "matched_brace_fg": "#d4d4d4",
-    "unmatched_brace_bg": "#5a1d1d",
-    "edge_color": "#3c3c3c",
-}
-
 
 class EditorTab(QWidget):
     """A single code editor tab with QScintilla."""
@@ -146,8 +132,8 @@ class EditorTab(QWidget):
         # Line numbers (margin 0)
         editor.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
         editor.setMarginWidth(0, "00000")
-        editor.setMarginsForegroundColor(QColor(DARK_COLORS["margin_fg"]))
-        editor.setMarginsBackgroundColor(QColor(DARK_COLORS["margin_bg"]))
+        editor.setMarginsForegroundColor(QColor(tc.get("text_tertiary")))
+        editor.setMarginsBackgroundColor(QColor(tc.get("bg_surface")))
 
         # Coverage gutter (margin 1) — shows test-coverage hit/miss bars
         # when a coverage report has been applied via ``set_coverage``.
@@ -165,8 +151,8 @@ class EditorTab(QWidget):
         # Code folding (margin 2)
         editor.setFolding(QsciScintilla.FoldStyle.BoxedTreeFoldStyle)
         editor.setFoldMarginColors(
-            QColor(DARK_COLORS["fold_margin_bg"]),
-            QColor(DARK_COLORS["fold_margin_bg"]),
+            QColor(tc.get("bg_surface")),
+            QColor(tc.get("bg_surface")),
         )
 
         # Indentation
@@ -179,27 +165,27 @@ class EditorTab(QWidget):
 
         # Brace matching
         editor.setBraceMatching(QsciScintilla.BraceMatch.SloppyBraceMatch)
-        editor.setMatchedBraceForegroundColor(QColor(DARK_COLORS["matched_brace_fg"]))
-        editor.setMatchedBraceBackgroundColor(QColor(DARK_COLORS["matched_brace_bg"]))
-        editor.setUnmatchedBraceForegroundColor(QColor("#d4d4d4"))
-        editor.setUnmatchedBraceBackgroundColor(QColor(DARK_COLORS["unmatched_brace_bg"]))
+        editor.setMatchedBraceForegroundColor(QColor(tc.get("text_primary")))
+        editor.setMatchedBraceBackgroundColor(QColor(tc.get("bg_feedback_pos")))
+        editor.setUnmatchedBraceForegroundColor(QColor(tc.get("text_primary")))
+        editor.setUnmatchedBraceBackgroundColor(QColor(tc.get("bg_feedback_neg")))
 
         # Current line highlight
-        editor.setCaretForegroundColor(QColor(DARK_COLORS["caret"]))
+        editor.setCaretForegroundColor(QColor(tc.get("text_secondary")))
         editor.setCaretLineVisible(True)
-        editor.setCaretLineBackgroundColor(QColor(DARK_COLORS["current_line"]))
+        editor.setCaretLineBackgroundColor(QColor(tc.get("bg_hover_subtle")))
 
         # Selection
-        editor.setSelectionBackgroundColor(QColor(DARK_COLORS["selection_bg"]))
+        editor.setSelectionBackgroundColor(QColor(tc.get("bg_active")))
 
         # Edge column at 120
         editor.setEdgeMode(QsciScintilla.EdgeMode.EdgeLine)
         editor.setEdgeColumn(120)
-        editor.setEdgeColor(QColor(DARK_COLORS["edge_color"]))
+        editor.setEdgeColor(QColor(tc.get("border_primary")))
 
         # Background
-        editor.setPaper(QColor(DARK_COLORS["background"]))
-        editor.setColor(QColor(DARK_COLORS["foreground"]))
+        editor.setPaper(QColor(tc.get("bg_base")))
+        editor.setColor(QColor(tc.get("text_primary")))
 
         # Wrap
         editor.setWrapMode(QsciScintilla.WrapMode.WrapNone)
@@ -231,11 +217,11 @@ class EditorTab(QWidget):
         font = QFont("Monospace", 11)
         font.setStyleHint(QFont.StyleHint.Monospace)
         lexer.setDefaultFont(font)
-        lexer.setDefaultPaper(QColor(DARK_COLORS["background"]))
-        lexer.setDefaultColor(QColor(DARK_COLORS["foreground"]))
+        lexer.setDefaultPaper(QColor(tc.get("bg_base")))
+        lexer.setDefaultColor(QColor(tc.get("text_primary")))
 
         # Apply readable dark-theme colors to every token style
-        bg = QColor(DARK_COLORS["background"])
+        bg = QColor(tc.get("bg_base"))
         for style_id in range(128):
             lexer.setPaper(bg, style_id)
             lexer.setFont(font, style_id)
@@ -245,21 +231,21 @@ class EditorTab(QWidget):
 
     def _apply_token_colors(self, lexer, suffix: str) -> None:
         """Apply VS Code-inspired token colors to lexer styles."""
-        # Color palette — readable on #1e1e1e background
+        # Color palette — readable on the editor background
         colors = {
-            "keyword": "#569cd6",  # blue (softer than default)
-            "keyword2": "#c586c0",  # purple/magenta
-            "string": "#ce9178",  # warm orange/salmon
-            "string2": "#ce9178",
-            "number": "#b5cea8",  # light green
-            "comment": "#6a9955",  # green
-            "decorator": "#dcdcaa",  # yellow
-            "function": "#dcdcaa",  # yellow
-            "class_name": "#4ec9b0",  # teal
-            "operator": "#d4d4d4",  # white
-            "identifier": "#9cdcfe",  # light blue
-            "default": "#d4d4d4",  # white
-            "builtin": "#4ec9b0",  # teal
+            "keyword": tc.get("syn_keyword"),  # blue (softer than default)
+            "keyword2": tc.get("syn_keyword2"),  # purple/magenta
+            "string": tc.get("syn_string"),  # warm orange/salmon
+            "string2": tc.get("syn_string"),
+            "number": tc.get("syn_number"),  # light green
+            "comment": tc.get("syn_comment"),  # green
+            "decorator": tc.get("syn_decorator"),  # yellow
+            "function": tc.get("syn_decorator"),  # yellow
+            "class_name": tc.get("syn_builtin"),  # teal
+            "operator": tc.get("text_primary"),  # white
+            "identifier": tc.get("syn_identifier"),  # light blue
+            "default": tc.get("text_primary"),  # white
+            "builtin": tc.get("syn_builtin"),  # teal
         }
 
         if isinstance(lexer, QsciLexerPython):
@@ -358,8 +344,8 @@ class EditorTab(QWidget):
             lexer.setColor(QColor(color_hex), style_id)
 
         # Reapply margin colors after lexer set (lexer can override them)
-        self._editor.setMarginsBackgroundColor(QColor(DARK_COLORS["margin_bg"]))
-        self._editor.setMarginsForegroundColor(QColor(DARK_COLORS["margin_fg"]))
+        self._editor.setMarginsBackgroundColor(QColor(tc.get("bg_surface")))
+        self._editor.setMarginsForegroundColor(QColor(tc.get("text_tertiary")))
 
     def _on_modification_changed(self, modified: bool) -> None:
         self._is_modified = modified
@@ -440,9 +426,9 @@ class EditorTab(QWidget):
         # via setMarkerForegroundColor (used for the border) and
         # setMarkerBackgroundColor (used for the fill).
         for marker_id, fill in (
-            (self._MARKER_HIT, "#4caf50"),  # green — line was executed
-            (self._MARKER_MISS, "#d9534f"),  # red — line was not executed
-            (self._MARKER_PARTIAL, "#e0a23a"),  # amber — branch only partly covered
+            (self._MARKER_HIT, tc.get("accent_success")),  # green — line was executed
+            (self._MARKER_MISS, tc.get("accent_error")),  # red — line was not executed
+            (self._MARKER_PARTIAL, tc.get("accent_warning")),  # amber — branch only partly covered
         ):
             editor.markerDefine(QsciScintilla.MarkerSymbol.FullRectangle, marker_id)
             editor.setMarkerForegroundColor(QColor(fill), marker_id)

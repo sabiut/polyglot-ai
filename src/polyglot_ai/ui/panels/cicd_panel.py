@@ -29,18 +29,18 @@ from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
-# Status icons and colors
+# Status icons and color tokens (resolved via tc.get at render time)
 _STATUS_MAP = {
-    "success": ("✓", "#4ec9b0"),
-    "completed": ("✓", "#4ec9b0"),
-    "failure": ("✗", "#f44747"),
-    "cancelled": ("⊘", "#6a6a6a"),
-    "skipped": ("⊘", "#6a6a6a"),
-    "in_progress": ("⏳", "#cca700"),
-    "queued": ("⏳", "#cca700"),
-    "waiting": ("⏳", "#cca700"),
-    "requested": ("⏳", "#cca700"),
-    "pending": ("⏳", "#cca700"),
+    "success": ("✓", "accent_success_muted"),
+    "completed": ("✓", "accent_success_muted"),
+    "failure": ("✗", "accent_error"),
+    "cancelled": ("⊘", "text_disabled"),
+    "skipped": ("⊘", "text_disabled"),
+    "in_progress": ("⏳", "accent_warning"),
+    "queued": ("⏳", "accent_warning"),
+    "waiting": ("⏳", "accent_warning"),
+    "requested": ("⏳", "accent_warning"),
+    "pending": ("⏳", "accent_warning"),
 }
 
 
@@ -266,9 +266,9 @@ class CICDPanel(QWidget):
         self._logs_btn.setVisible(False)
         self._logs_btn.setStyleSheet(
             f"#cicdLogsBtn {{ background: {tc.get('accent_error')}; "
-            f"color: #ffffff; border: none; border-radius: 3px; padding: 0 8px; "
+            f"color: {tc.get('text_on_accent')}; border: none; border-radius: 3px; padding: 0 8px; "
             f"font-size: {tc.FONT_XS}px; font-weight: 600; }}"
-            f"#cicdLogsBtn:hover {{ background: #d43f3f; }}"
+            f"#cicdLogsBtn:hover {{ background: {tc.get('accent_error_hover')}; }}"
         )
         self._logs_btn.clicked.connect(self._fetch_failed_logs)
         jh_layout.addWidget(self._logs_btn)
@@ -433,12 +433,12 @@ class CICDPanel(QWidget):
         self._runs_table.setRowCount(len(rows))
         for row_idx, run in enumerate(rows):
             status = run.get("conclusion") or run.get("status", "unknown")
-            icon, color = _STATUS_MAP.get(status, ("?", tc.get("text_muted")))
+            icon, color_token = _STATUS_MAP.get(status, ("?", "text_muted"))
 
             # Status icon
             status_item = QTableWidgetItem(icon)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            status_item.setForeground(self._make_color(color))
+            status_item.setForeground(self._make_color(tc.get(color_token)))
             self._runs_table.setItem(row_idx, 0, status_item)
 
             # Workflow name
@@ -527,9 +527,10 @@ class CICDPanel(QWidget):
 
         menu = QMenu(self)
         menu.setStyleSheet(
-            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_menu')}; }}"
             "QMenu::item { padding: 5px 18px; }"
-            "QMenu::item:selected { background: #094771; }"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
         view_action = menu.addAction("View jobs / logs")
         debug_action = None
@@ -633,11 +634,11 @@ class CICDPanel(QWidget):
         self._jobs_table.setRowCount(len(jobs))
         for row, job in enumerate(jobs):
             status = job.get("conclusion") or job.get("status", "unknown")
-            icon, color = _STATUS_MAP.get(status, ("?", tc.get("text_muted")))
+            icon, color_token = _STATUS_MAP.get(status, ("?", "text_muted"))
 
             status_item = QTableWidgetItem(icon)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            status_item.setForeground(self._make_color(color))
+            status_item.setForeground(self._make_color(tc.get(color_token)))
             self._jobs_table.setItem(row, 0, status_item)
 
             self._jobs_table.setItem(row, 1, QTableWidgetItem(job.get("name", "")))
@@ -1063,10 +1064,10 @@ class _CICDLogDialog(QWidget):
         self._cancel_btn.setFixedHeight(24)
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cancel_btn.setStyleSheet(
-            f"QPushButton {{ background: {tc.get('accent_error')}; color: #fff; "
+            f"QPushButton {{ background: {tc.get('accent_error')}; color: {tc.get('text_on_accent')}; "
             f"border: none; border-radius: 3px; padding: 0 10px; "
             f"font-size: {tc.FONT_XS}px; font-weight: 600; margin-left: 8px; }}"
-            "QPushButton:hover { background: #d43f3f; }"
+            f"QPushButton:hover {{ background: {tc.get('accent_error_hover')}; }}"
         )
         self._cancel_btn.clicked.connect(self._cancel_loading)
         h_layout.addWidget(self._cancel_btn)

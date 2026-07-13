@@ -48,6 +48,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.ui.panels.chat_panel import ChatPanel
 
@@ -86,7 +88,7 @@ def _chevron_icon_path() -> str:
     pm.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pm)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#aaaaaa"))
+    pen = QPen(QColor(tc.get("text_secondary")))
     pen.setWidthF(1.6)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -113,20 +115,23 @@ def _input_css() -> str:
     """
     chevron = _chevron_icon_path().replace("\\", "/")
     return (
-        "QLineEdit, QComboBox { background: #1e1e1e; color: #ddd; "
-        "border: 1px solid #444; border-radius: 3px; padding: 5px 8px; "
-        "font-size: 12px; }"
-        "QLineEdit:focus, QComboBox:focus { border-color: #0e639c; }"
+        f"QLineEdit, QComboBox {{ background: {tc.get('bg_base')}; "
+        f"color: {tc.get('text_primary')}; "
+        f"border: 1px solid {tc.get('border_input')}; border-radius: 3px; padding: 5px 8px; "
+        f"font-size: {tc.FONT_MD}px; }}"
+        f"QLineEdit:focus, QComboBox:focus {{ border-color: {tc.get('accent_primary')}; }}"
         "QComboBox::drop-down { subcontrol-origin: padding; "
         "subcontrol-position: center right; width: 22px; "
-        "border-left: 1px solid #3a3a3a; }"
+        f"border-left: 1px solid {tc.get('border_card')}; }}"
         "QComboBox::down-arrow { "
         f"image: url({chevron}); "
         "width: 10px; height: 7px; margin-right: 6px; }"
         "QComboBox::down-arrow:on { top: 1px; }"
-        "QComboBox QAbstractItemView { background: #252526; color: #ddd; "
-        "border: 1px solid #444; selection-background-color: #094771; "
-        "selection-color: #ffffff; outline: 0; }"
+        f"QComboBox QAbstractItemView {{ background: {tc.get('bg_surface')}; "
+        f"color: {tc.get('text_primary')}; "
+        f"border: 1px solid {tc.get('border_menu')}; "
+        f"selection-background-color: {tc.get('bg_active')}; "
+        f"selection-color: {tc.get('text_on_accent')}; outline: 0; }}"
     )
 
 
@@ -143,47 +148,47 @@ def _button_box_css() -> str:
     return (
         # All buttons: secondary look by default (Cancel + non-defaults)
         "QDialogButtonBox > QPushButton { "
-        "  background: #3c3c3c; "
-        "  color: #d8d8d8; "
-        "  border: 1px solid #4a4a4a; "
+        f"  background: {tc.get('bg_surface_raised')}; "
+        f"  color: {tc.get('text_primary')}; "
+        f"  border: 1px solid {tc.get('border_input')}; "
         "  border-radius: 4px; "
         "  padding: 7px 20px; "
-        "  font-size: 12px; "
+        f"  font-size: {tc.FONT_MD}px; "
         "  font-weight: 500; "
         "  min-width: 86px; "
         "}"
         "QDialogButtonBox > QPushButton:hover { "
-        "  background: #4a4a4a; "
-        "  border-color: #5a5a5a; "
-        "  color: #ffffff; "
+        f"  background: {tc.get('bg_hover')}; "
+        f"  border-color: {tc.get('border_input')}; "
+        f"  color: {tc.get('text_heading')}; "
         "}"
         "QDialogButtonBox > QPushButton:pressed { "
-        "  background: #2d2d2d; "
+        f"  background: {tc.get('bg_surface')}; "
         "}"
         "QDialogButtonBox > QPushButton:focus { "
         "  outline: none; "
-        "  border-color: #0e639c; "
+        f"  border-color: {tc.get('accent_primary')}; "
         "}"
         # Primary action — the default button. Qt sets the ``default``
         # property on whichever button has ``setDefault(True)``, which
         # for QDialogButtonBox.Ok happens automatically.
         'QDialogButtonBox > QPushButton[default="true"] { '
-        "  background: #0e639c; "
-        "  color: #ffffff; "
-        "  border-color: #0e639c; "
+        f"  background: {tc.get('accent_primary')}; "
+        f"  color: {tc.get('text_on_accent')}; "
+        f"  border-color: {tc.get('accent_primary')}; "
         "  font-weight: 600; "
         "}"
         'QDialogButtonBox > QPushButton[default="true"]:hover { '
-        "  background: #1177bb; "
-        "  border-color: #1a8ae8; "
+        f"  background: {tc.get('accent_primary_hover')}; "
+        f"  border-color: {tc.get('accent_primary_hover')}; "
         "}"
         'QDialogButtonBox > QPushButton[default="true"]:pressed { '
-        "  background: #094771; "
+        f"  background: {tc.get('accent_primary_pressed')}; "
         "}"
         'QDialogButtonBox > QPushButton[default="true"]:disabled { '
-        "  background: #2c4156; "
-        "  color: #8aa8c0; "
-        "  border-color: #2c4156; "
+        f"  background: {tc.get('bg_hover')}; "
+        f"  color: {tc.get('text_disabled')}; "
+        f"  border-color: {tc.get('bg_hover')}; "
         "}"
     )
 
@@ -254,13 +259,13 @@ class _PlannerDialog(QDialog):
         self.setModal(True)
         # A touch taller now that we've added the credentials row.
         self.resize(540, 330)
-        self.setStyleSheet("QDialog { background: #252526; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_surface')}; }}")
 
         form = QFormLayout(self)
         form.setContentsMargins(16, 14, 16, 12)
         form.setSpacing(10)
 
-        label_css = "QLabel { color: #ccc; font-size: 12px; background: transparent; }"
+        label_css = f"QLabel {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent; }}"
         input_css = _input_css()
 
         self.url = QLineEdit()
@@ -310,7 +315,7 @@ class _PlannerDialog(QDialog):
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(
-            "color: #888; font-size: 10px; padding: 2px 2px 6px 2px; background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; padding: 2px 2px 6px 2px; background: transparent;"
         )
         form.addRow(hint)
 
@@ -342,13 +347,13 @@ class _GeneratorDialog(QDialog):
         self.setWindowTitle("🎭 Generate Playwright tests")
         self.setModal(True)
         self.resize(520, 240)
-        self.setStyleSheet("QDialog { background: #252526; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_surface')}; }}")
 
         form = QFormLayout(self)
         form.setContentsMargins(16, 14, 16, 12)
         form.setSpacing(10)
 
-        label_css = "QLabel { color: #ccc; font-size: 12px; background: transparent; }"
+        label_css = f"QLabel {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent; }}"
         input_css = _input_css()
 
         self.plan = QComboBox()
@@ -410,13 +415,13 @@ class _HealerDialog(QDialog):
         self.setWindowTitle("🎭 Heal a failing test")
         self.setModal(True)
         self.resize(540, 290)
-        self.setStyleSheet("QDialog { background: #252526; }")
+        self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_surface')}; }}")
 
         form = QFormLayout(self)
         form.setContentsMargins(16, 14, 16, 12)
         form.setSpacing(10)
 
-        label_css = "QLabel { color: #ccc; font-size: 12px; background: transparent; }"
+        label_css = f"QLabel {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent; }}"
         input_css = _input_css()
 
         self.test = QComboBox()
@@ -511,7 +516,7 @@ class WebTestsView(QWidget):
         # input dialogs and dispatch the matching ``/workflow`` command
         # to chat. Disabled until a project is open.
         action_row = QFrame()
-        action_row.setStyleSheet("background: #1f1f1f; border-bottom: 1px solid #333;")
+        action_row.setStyleSheet(f"background: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_secondary')};")
         ar = QHBoxLayout(action_row)
         ar.setContentsMargins(10, 8, 10, 8)
         ar.setSpacing(6)
@@ -561,7 +566,7 @@ class WebTestsView(QWidget):
         self._hint.setWordWrap(True)
         self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint.setStyleSheet(
-            "color: #777; font-size: 11px; padding: 8px 12px; background: transparent;"
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; padding: 8px 12px; background: transparent;"
         )
         layout.addWidget(self._hint)
 
@@ -576,18 +581,20 @@ class WebTestsView(QWidget):
         if small:
             btn.setFixedHeight(26)
             btn.setStyleSheet(
-                "QPushButton { background: transparent; color: #aaa; border: none; "
-                "padding: 0 8px; font-size: 13px; }"
+                f"QPushButton {{ background: transparent; color: {tc.get('text_secondary')}; border: none; "
+                f"padding: 0 8px; font-size: {tc.FONT_BASE}px; }}"
                 "QPushButton:hover { background: rgba(255,255,255,0.08); border-radius: 3px; }"
-                "QPushButton:disabled { color: #555; }"
+                f"QPushButton:disabled {{ color: {tc.get('text_disabled')}; }}"
             )
         else:
             btn.setFixedHeight(28)
             btn.setStyleSheet(
-                "QPushButton { background: #2d2d30; color: #ddd; border: 1px solid #3f3f46; "
-                "border-radius: 3px; padding: 4px 10px; font-size: 11px; font-weight: 600; }"
-                "QPushButton:hover { background: #094771; border-color: #0e639c; }"
-                "QPushButton:disabled { background: #2a2a2a; color: #555; border-color: #333; }"
+                f"QPushButton {{ background: {tc.get('bg_surface_overlay')}; color: {tc.get('text_primary')}; "
+                f"border: 1px solid {tc.get('border_input')}; "
+                f"border-radius: 3px; padding: 4px 10px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {tc.get('bg_active')}; border-color: {tc.get('accent_primary')}; }}"
+                f"QPushButton:disabled {{ background: {tc.get('bg_card')}; color: {tc.get('text_disabled')}; "
+                f"border-color: {tc.get('border_secondary')}; }}"
             )
         return btn
 
@@ -595,23 +602,23 @@ class WebTestsView(QWidget):
         lbl = QLabel(text)
         lbl.setFixedHeight(22)
         lbl.setStyleSheet(
-            "QLabel { color: #888; font-size: 10px; font-weight: 600; "
+            f"QLabel {{ color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; font-weight: 600; "
             "letter-spacing: 0.5px; padding: 4px 10px; "
-            "background: #232323; border-top: 1px solid #2a2a2a; "
-            "border-bottom: 1px solid #2a2a2a; }"
+            f"background: {tc.get('bg_surface')}; border-top: 1px solid {tc.get('bg_card')}; "
+            f"border-bottom: 1px solid {tc.get('bg_card')}; }}"
         )
         return lbl
 
     def _make_list_widget(self) -> QListWidget:
         lw = QListWidget()
         lw.setStyleSheet(
-            "QListWidget { background: #1e1e1e; color: #ddd; border: none; "
-            "outline: none; font-size: 12px; }"
+            f"QListWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; border: none; "
+            f"outline: none; font-size: {tc.FONT_MD}px; }}"
             "QListWidget::item { padding: 0; }"
-            "QListWidget::item:selected { background: #094771; }"
-            "QListWidget::item:hover { background: #2a2d2e; }"
+            f"QListWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
+            f"QListWidget::item:hover {{ background: {tc.get('bg_hover_subtle')}; }}"
             "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; border-radius: 4px; }}"
         )
         return lw
 

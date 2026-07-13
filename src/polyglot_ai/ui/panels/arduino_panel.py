@@ -910,7 +910,7 @@ class ArduinoPanel(QWidget):
         bg = tc.get("accent_success") if present else tc.get("accent_danger")
         return (
             f"QLabel {{ background: {bg}; "
-            f"color: #fff; border-radius: 9px; "
+            f"color: {tc.get('text_on_accent')}; border-radius: 9px; "
             f"padding: 2px 10px; font-size: {tc.FONT_XS}px; "
             f"font-weight: 600; }}"
         )
@@ -1075,7 +1075,7 @@ class ArduinoPanel(QWidget):
             f"border-radius: 6px; padding: 4px 12px; "
             f"font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"QPushButton:hover {{ background: {tc.get('accent_danger')}; "
-            "color: #fff; }"
+            f"color: {tc.get('text_on_accent')}; }}"
             f"QPushButton:disabled {{ background: {tc.get('bg_surface_raised')}; "
             f"color: {tc.get('text_muted')}; "
             f"border-color: {tc.get('border_secondary')}; }}"
@@ -1793,10 +1793,10 @@ class ArduinoPanel(QWidget):
         return (
             "QPushButton { "
             f"background: {tc.get('accent_danger')}; "
-            "color: #fff; border: none; border-radius: 10px; "
+            f"color: {tc.get('text_on_accent')}; border: none; border-radius: 10px; "
             f"font-size: {tc.FONT_XL}px; font-weight: 700; "
             "}"
-            "QPushButton:hover { background: #d43f3f; }"
+            f"QPushButton:hover {{ background: {tc.get('accent_danger_hover')}; }}"
             "QPushButton:pressed { padding-top: 2px; }"
         )
 
@@ -1855,7 +1855,7 @@ class ArduinoPanel(QWidget):
             yes_btn.setText("Erase")
             yes_btn.setStyleSheet(
                 f"QPushButton {{ background: {tc.get('accent_danger')}; "
-                "color: #fff; border: none; border-radius: 4px; "
+                f"color: {tc.get('text_on_accent')}; border: none; border-radius: 4px; "
                 "padding: 4px 14px; font-weight: 600; }}"
             )
 

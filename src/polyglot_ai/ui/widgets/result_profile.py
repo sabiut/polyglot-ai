@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +118,7 @@ class ResultProfileWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setStyleSheet("background: #1e1e1e;")
+        self.setStyleSheet(f"background: {tc.get('bg_base')};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -126,15 +128,17 @@ class ResultProfileWidget(QWidget):
         header = QLabel("PROFILE")
         header.setFixedHeight(28)
         header.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; "
-            "letter-spacing: 0.5px; padding: 6px 12px; "
-            "background: #252526; border-bottom: 1px solid #333;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; font-weight: 600; "
+            f"letter-spacing: 0.5px; padding: 6px 12px; "
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
         )
         layout.addWidget(header)
 
         self._summary = QLabel("No results yet")
         self._summary.setStyleSheet(
-            "color: #aaa; font-size: 11px; padding: 8px 12px; background: transparent;"
+            f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_SM}px; "
+            f"padding: 8px 12px; background: transparent;"
         )
         layout.addWidget(self._summary)
 
@@ -142,12 +146,13 @@ class ResultProfileWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #1e1e1e; }"
-            "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
+            f"QScrollArea {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QScrollBar:vertical {{ width: 8px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ "
+            f"background: {tc.get('scrollbar_thumb')}; border-radius: 4px; }}"
         )
         self._content = QWidget()
-        self._content.setStyleSheet("background: #1e1e1e;")
+        self._content.setStyleSheet(f"background: {tc.get('bg_base')};")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(8, 4, 8, 8)
         self._content_layout.setSpacing(6)
@@ -189,7 +194,8 @@ class ResultProfileWidget(QWidget):
     def _make_card(self, stats: ColumnStats) -> QWidget:
         card = QWidget()
         card.setStyleSheet(
-            "QWidget { background: #252526; border: 1px solid #333; border-radius: 4px; }"
+            f"QWidget {{ background: {tc.get('bg_surface')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 4px; }}"
         )
         v = QVBoxLayout(card)
         v.setContentsMargins(10, 8, 10, 8)
@@ -199,15 +205,16 @@ class ResultProfileWidget(QWidget):
         header_row = QHBoxLayout()
         name_lbl = QLabel(stats.name)
         name_lbl.setStyleSheet(
-            "color: #e0e0e0; font-size: 12px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_MD}px; "
+            f"font-weight: 600; background: transparent;"
         )
         header_row.addWidget(name_lbl)
         header_row.addStretch()
         badge = QLabel("123" if stats.is_numeric else "abc")
-        badge_colour = "#9cdcfe" if stats.is_numeric else "#dcdcaa"
+        badge_colour = tc.get("syn_identifier" if stats.is_numeric else "syn_decorator")
         badge.setStyleSheet(
-            f"color: {badge_colour}; font-size: 10px; font-weight: 600; "
-            "background: #1e1e1e; border-radius: 3px; padding: 1px 6px;"
+            f"color: {badge_colour}; font-size: {tc.FONT_XS}px; font-weight: 600; "
+            f"background: {tc.get('bg_base')}; border-radius: 3px; padding: 1px 6px;"
         )
         header_row.addWidget(badge)
         v.addLayout(header_row)
@@ -218,7 +225,10 @@ class ResultProfileWidget(QWidget):
             f"{stats.nulls:,} null ({stats.null_pct:.1f}%)"
         )
         top = QLabel(top_line)
-        top.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+        top.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"background: transparent;"
+        )
         v.addWidget(top)
 
         # Numeric stats
@@ -230,8 +240,9 @@ class ResultProfileWidget(QWidget):
             )
             num = QLabel(num_line)
             num.setStyleSheet(
-                "color: #9cdcfe; font-size: 11px; background: transparent; "
-                "font-family: 'JetBrains Mono', monospace;"
+                f"color: {tc.get('syn_identifier')}; font-size: {tc.FONT_SM}px; "
+                f"background: transparent; "
+                f"font-family: 'JetBrains Mono', monospace;"
             )
             v.addWidget(num)
 
@@ -239,7 +250,8 @@ class ResultProfileWidget(QWidget):
         if not stats.is_numeric and stats.top_values:
             top_label = QLabel("top values")
             top_label.setStyleSheet(
-                "color: #777; font-size: 10px; background: transparent; margin-top: 2px;"
+                f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
+                f"background: transparent; margin-top: 2px;"
             )
             v.addWidget(top_label)
             for value, count in stats.top_values:
@@ -248,7 +260,10 @@ class ResultProfileWidget(QWidget):
                     vstr = vstr[:37] + "…"
                 pct = (count / stats.total * 100) if stats.total else 0
                 row_lbl = QLabel(f"  {vstr}  —  {count:,} ({pct:.1f}%)")
-                row_lbl.setStyleSheet("color: #c0c0c0; font-size: 11px; background: transparent;")
+                row_lbl.setStyleSheet(
+                    f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; "
+                    f"background: transparent;"
+                )
                 v.addWidget(row_lbl)
 
         return card

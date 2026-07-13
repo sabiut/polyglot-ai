@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.async_utils import safe_task
+from polyglot_ai.ui import theme
+from polyglot_ai.ui import theme_colors as tc
 
 
 class MCPSidebar(QWidget):
@@ -36,24 +38,16 @@ class MCPSidebar(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setFixedHeight(34)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
-        header_layout = QHBoxLayout(header)
+        self._header = QWidget()
+        self._header.setFixedHeight(34)
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(12, 0, 6, 0)
         header_layout.setSpacing(2)
 
-        title = QLabel("MCP SERVERS")
-        title.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #888; "
-            "letter-spacing: 0.5px; background: transparent;"
-        )
-        header_layout.addWidget(title)
+        self._title = QLabel("MCP SERVERS")
+        header_layout.addWidget(self._title)
 
         self._summary_label = QLabel("")
-        self._summary_label.setStyleSheet(
-            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
-        )
         header_layout.addWidget(self._summary_label)
         header_layout.addStretch()
 
@@ -68,32 +62,21 @@ class MCPSidebar(QWidget):
         manage_btn = self._icon_btn(self._draw_plus_icon(), "Manage MCP Servers")
         manage_btn.clicked.connect(self._open_mcp_settings)
         header_layout.addWidget(manage_btn)
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         # Search box
-        search_wrap = QWidget()
-        search_wrap.setStyleSheet("background: #1e1e1e; border-bottom: 1px solid #2a2a2a;")
-        sl = QHBoxLayout(search_wrap)
+        self._search_wrap = QWidget()
+        sl = QHBoxLayout(self._search_wrap)
         sl.setContentsMargins(8, 6, 8, 6)
         self._search = QLineEdit()
         self._search.setPlaceholderText("Filter servers or tools…")
-        self._search.setStyleSheet(
-            "QLineEdit { background: #2a2a2a; color: #ddd; border: 1px solid #333; "
-            "border-radius: 3px; padding: 4px 6px; font-size: 11px; }"
-            "QLineEdit:focus { border-color: #0e639c; }"
-        )
         self._search.textChanged.connect(self._on_filter_changed)
         sl.addWidget(self._search)
-        layout.addWidget(search_wrap)
+        layout.addWidget(self._search_wrap)
 
         # Scroll area for server list
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #1e1e1e; }"
-            "QScrollBar:vertical { width: 6px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 3px; }"
-        )
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
@@ -105,15 +88,49 @@ class MCPSidebar(QWidget):
         self._empty_label = QLabel(
             "No MCP servers configured.\n\nClick + to add servers from\nthe MCP marketplace."
         )
-        self._empty_label.setStyleSheet(
-            "color: #666; font-size: 12px; padding: 20px; background: transparent;"
-        )
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)
         self._content_layout.addWidget(self._empty_label)
 
-        scroll.setWidget(self._content)
-        layout.addWidget(scroll)
+        self._scroll.setWidget(self._content)
+        layout.addWidget(self._scroll)
+
+        self._apply_theme_styles()
+        theme.connect_theme_changed(self._apply_theme_styles)
+
+    def _apply_theme_styles(self) -> None:
+        self._header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        self._title.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
+            "letter-spacing: 0.5px; background: transparent;"
+        )
+        self._summary_label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; "
+            "background: transparent; margin-left: 6px;"
+        )
+        self._search_wrap.setStyleSheet(
+            f"background: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_subtle')};"
+        )
+        self._search.setStyleSheet(
+            f"QLineEdit {{ background: {tc.get('bg_card')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; "
+            f"border-radius: 3px; padding: 4px 6px; font-size: {tc.FONT_SM}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
+        )
+        self._scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QScrollBar:vertical {{ width: 6px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; "
+            f"border-radius: 3px; }}"
+        )
+        self._empty_label.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_MD}px; "
+            "padding: 20px; background: transparent;"
+        )
+        self.refresh()
 
     def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
         btn = QPushButton()
@@ -133,7 +150,7 @@ class MCPSidebar(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(2.0)
         p.setPen(pen)
         p.drawLine(8, 3, 8, 13)
@@ -146,7 +163,7 @@ class MCPSidebar(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         # Circular arc (arrow around ~300°)
@@ -167,7 +184,7 @@ class MCPSidebar(QWidget):
         from PyQt6.QtGui import QPolygon
         from PyQt6.QtCore import QPoint
 
-        p.setBrush(QColor("#cccccc"))
+        p.setBrush(QColor(tc.get("text_primary")))
         p.setPen(Qt.PenStyle.NoPen)
         bolt = QPolygon(
             [
@@ -282,7 +299,8 @@ class MCPSidebar(QWidget):
         item = QWidget()
         item.setFixedHeight(32)
         item.setStyleSheet(
-            "QWidget { background: transparent; }QWidget:hover { background: #2a2d2e; }"
+            f"QWidget {{ background: transparent; }}"
+            f"QWidget:hover {{ background: {tc.get('bg_hover_subtle')}; }}"
         )
         layout = QHBoxLayout(item)
         layout.setContentsMargins(8, 0, 6, 0)
@@ -292,7 +310,8 @@ class MCPSidebar(QWidget):
         caret = QLabel("▾" if expanded else "▸")
         caret.setFixedWidth(12)
         caret.setStyleSheet(
-            f"color: {'#aaa' if connected else '#555'}; font-size: 9px; background: transparent;"
+            f"color: {tc.get('text_secondary') if connected else tc.get('text_disabled')}; "
+            "font-size: 9px; background: transparent;"
         )
         caret.setCursor(Qt.CursorShape.PointingHandCursor)
         caret.mousePressEvent = lambda e, n=name: self._toggle_expand(n)  # type: ignore
@@ -303,7 +322,8 @@ class MCPSidebar(QWidget):
         dot.setFixedWidth(12)
         dot.setToolTip("Connected" if connected else "Not connected")
         dot.setStyleSheet(
-            f"color: {'#4ec9b0' if connected else '#666'}; font-size: 10px; background: transparent;"
+            f"color: {tc.get('accent_success_muted') if connected else tc.get('text_muted')}; "
+            f"font-size: {tc.FONT_XS}px; background: transparent;"
         )
         layout.addWidget(dot)
 
@@ -312,7 +332,8 @@ class MCPSidebar(QWidget):
         name_label.setCursor(Qt.CursorShape.PointingHandCursor)
         name_label.setToolTip(f"{name}\nClick to {'collapse' if expanded else 'expand'} tool list")
         name_label.setStyleSheet(
-            f"font-size: 12px; color: {'#ddd' if connected else '#888'}; "
+            f"font-size: {tc.FONT_MD}px; "
+            f"color: {tc.get('text_primary') if connected else tc.get('text_tertiary')}; "
             f"background: transparent; font-weight: {'600' if connected else 'normal'};"
         )
         name_label.mousePressEvent = lambda e, n=name: self._toggle_expand(n)  # type: ignore
@@ -325,8 +346,8 @@ class MCPSidebar(QWidget):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setToolTip(f"{tool_count} tools available")
             badge.setStyleSheet(
-                "background: #094771; color: #9cdcfe; font-size: 10px; "
-                "border-radius: 3px; font-weight: 600;"
+                f"background: {tc.get('bg_active')}; color: {tc.get('syn_identifier')}; "
+                f"font-size: {tc.FONT_XS}px; border-radius: 3px; font-weight: 600;"
             )
             layout.addWidget(badge)
 
@@ -335,13 +356,13 @@ class MCPSidebar(QWidget):
         action_btn.setFixedSize(22, 20)
         action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         action_btn.setToolTip("Disconnect" if connected else "Connect")
-        color = "#f48771" if connected else "#4ec9b0"
+        color = tc.get("accent_error") if connected else tc.get("accent_success_muted")
         action_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {color}; border: none;
-                font-size: 12px; font-weight: bold; border-radius: 3px;
+                font-size: {tc.FONT_MD}px; font-weight: bold; border-radius: 3px;
             }}
-            QPushButton:hover {{ background: #333; }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
         """)
         action_btn.clicked.connect(lambda _, n=name: self._toggle_server(n))
         layout.addWidget(action_btn)
@@ -354,7 +375,8 @@ class MCPSidebar(QWidget):
         item.setFixedHeight(22)
         item.setToolTip(description or name)
         item.setStyleSheet(
-            "QWidget { background: transparent; }QWidget:hover { background: #2a2d2e; }"
+            f"QWidget {{ background: transparent; }}"
+            f"QWidget:hover {{ background: {tc.get('bg_hover_subtle')}; }}"
         )
         layout = QHBoxLayout(item)
         layout.setContentsMargins(38, 0, 8, 0)
@@ -362,11 +384,15 @@ class MCPSidebar(QWidget):
 
         icon = QLabel("⚡")
         icon.setFixedWidth(14)
-        icon.setStyleSheet("font-size: 9px; color: #e5a00d; background: transparent;")
+        icon.setStyleSheet(
+            f"font-size: 9px; color: {tc.get('accent_warning')}; background: transparent;"
+        )
         layout.addWidget(icon)
 
         label = QLabel(name)
-        label.setStyleSheet("font-size: 11px; color: #999; background: transparent;")
+        label.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_secondary')}; background: transparent;"
+        )
         layout.addWidget(label, stretch=1)
 
         return item

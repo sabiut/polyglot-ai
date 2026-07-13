@@ -31,6 +31,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.ui import theme_colors as tc
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +68,7 @@ class ResultChartWidget(QWidget):
         self._rows: list[tuple] = []
         self._suspend_signals = False
 
-        self.setStyleSheet("background: #1e1e1e;")
+        self.setStyleSheet(f"background: {tc.get('bg_base')};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -75,7 +77,10 @@ class ResultChartWidget(QWidget):
         # Header / control bar
         bar = QWidget()
         bar.setFixedHeight(34)
-        bar.setStyleSheet("background: #252526; border-bottom: 1px solid #333;")
+        bar.setStyleSheet(
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(10, 0, 10, 0)
         bl.setSpacing(8)
@@ -104,8 +109,8 @@ class ResultChartWidget(QWidget):
         # The chart view itself
         self._view = QChartView()
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self._view.setBackgroundBrush(QColor("#181818"))
-        self._view.setStyleSheet("background: #181818; border: none;")
+        self._view.setBackgroundBrush(QColor(tc.get("bg_terminal")))
+        self._view.setStyleSheet(f"background: {tc.get('bg_terminal')}; border: none;")
         layout.addWidget(self._view, stretch=1)
 
         # Empty placeholder
@@ -114,7 +119,8 @@ class ResultChartWidget(QWidget):
         )
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._placeholder.setStyleSheet(
-            "color: #777; font-size: 12px; padding: 30px; background: #181818;"
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_MD}px; "
+            f"padding: 30px; background: {tc.get('bg_terminal')};"
         )
         layout.addWidget(self._placeholder)
         self._view.hide()
@@ -123,7 +129,8 @@ class ResultChartWidget(QWidget):
     def _mk_label(text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
+            f"font-weight: 600; background: transparent;"
         )
         return lbl
 
@@ -189,10 +196,10 @@ class ResultChartWidget(QWidget):
 
     def _build_chart(self, kind: str, x_idx: int, y_idx: int) -> QChart:
         chart = QChart()
-        chart.setBackgroundBrush(QColor("#181818"))
-        chart.setBackgroundPen(QColor("#181818"))
-        chart.setTitleBrush(QColor("#e0e0e0"))
-        chart.legend().setLabelColor(QColor("#cccccc"))
+        chart.setBackgroundBrush(QColor(tc.get("bg_terminal")))
+        chart.setBackgroundPen(QColor(tc.get("bg_terminal")))
+        chart.setTitleBrush(QColor(tc.get("text_heading")))
+        chart.legend().setLabelColor(QColor(tc.get("text_primary")))
 
         x_name = self._columns[x_idx]
         y_name = self._columns[y_idx]
@@ -228,7 +235,7 @@ class ResultChartWidget(QWidget):
     ) -> None:
         bar_set = QBarSet(y_name)
         bar_set.setColor(QColor("#4ec9b0"))
-        bar_set.setLabelColor(QColor("#e0e0e0"))
+        bar_set.setLabelColor(QColor(tc.get("text_heading")))
         for v in y_floats:
             bar_set.append(v if v is not None else 0.0)
         series = QBarSeries()
@@ -237,14 +244,14 @@ class ResultChartWidget(QWidget):
 
         axis_x = QBarCategoryAxis()
         axis_x.append([str(v) for v in x_values])
-        axis_x.setLabelsColor(QColor("#aaa"))
-        axis_x.setGridLineColor(QColor("#2a2a2a"))
+        axis_x.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_x.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_x)
 
         axis_y = QValueAxis()
-        axis_y.setLabelsColor(QColor("#aaa"))
-        axis_y.setGridLineColor(QColor("#2a2a2a"))
+        axis_y.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_y.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         series.attachAxis(axis_y)
 
@@ -321,14 +328,14 @@ class ResultChartWidget(QWidget):
 
         axis_x = QBarCategoryAxis()
         axis_x.append([f"{lo + i * width:.2g}" for i in range(bin_count)])
-        axis_x.setLabelsColor(QColor("#aaa"))
-        axis_x.setGridLineColor(QColor("#2a2a2a"))
+        axis_x.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_x.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_x)
 
         axis_y = QValueAxis()
-        axis_y.setLabelsColor(QColor("#aaa"))
-        axis_y.setGridLineColor(QColor("#2a2a2a"))
+        axis_y.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_y.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         series.attachAxis(axis_y)
 
@@ -336,16 +343,16 @@ class ResultChartWidget(QWidget):
     def _attach_xy_axes(chart: QChart, series: Any, x_name: str, y_name: str) -> None:
         axis_x = QValueAxis()
         axis_x.setTitleText(x_name)
-        axis_x.setTitleBrush(QColor("#aaa"))
-        axis_x.setLabelsColor(QColor("#aaa"))
-        axis_x.setGridLineColor(QColor("#2a2a2a"))
+        axis_x.setTitleBrush(QColor(tc.get("text_secondary")))
+        axis_x.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_x.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_x)
 
         axis_y = QValueAxis()
         axis_y.setTitleText(y_name)
-        axis_y.setTitleBrush(QColor("#aaa"))
-        axis_y.setLabelsColor(QColor("#aaa"))
-        axis_y.setGridLineColor(QColor("#2a2a2a"))
+        axis_y.setTitleBrush(QColor(tc.get("text_secondary")))
+        axis_y.setLabelsColor(QColor(tc.get("text_secondary")))
+        axis_y.setGridLineColor(QColor(tc.get("border_subtle")))
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         series.attachAxis(axis_y)

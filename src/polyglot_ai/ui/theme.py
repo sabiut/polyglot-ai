@@ -20,6 +20,24 @@ def instance() -> ThemeManager | None:
     return _instance
 
 
+def connect_theme_changed(slot) -> bool:
+    """Connect *slot* to the theme_changed signal, if a manager exists.
+
+    Long-lived widgets that bake token colors into inline stylesheets
+    should re-apply them via this hook, otherwise a runtime theme
+    toggle leaves them styled for the previous theme. Qt disconnects
+    the slot automatically when the widget is destroyed.
+
+    Returns True if connected (False in headless/test contexts where
+    no ThemeManager was created).
+    """
+    mgr = instance()
+    if mgr is None:
+        return False
+    mgr.theme_changed.connect(slot)
+    return True
+
+
 class ThemeManager(QObject):
     """Generate QSS from color tokens and apply dark/light themes."""
 
@@ -154,7 +172,7 @@ QTabBar::tab {{
 }}
 QTabBar::tab:selected {{
     background-color: {g("bg_base")};
-    color: {g("text_on_accent")};
+    color: {g("text_heading")};
     border-bottom: 2px solid {g("accent_primary")};
 }}
 QTabBar::tab:hover:!selected {{

@@ -39,6 +39,7 @@ from polyglot_ai.core.test_collector import (
     collect_tests,
     run_tests,
 )
+from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels.web_tests_view import WebTestsView
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -103,14 +104,16 @@ class TestPanel(QWidget):
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
         self._tabs.setStyleSheet(
-            "QTabWidget::pane { border: none; background: #1e1e1e; }"
-            "QTabBar::tab { background: #252526; color: #888; "
+            f"QTabWidget::pane {{ border: none; background: {tc.get('bg_base')}; }}"
+            f"QTabBar::tab {{ background: {tc.get('bg_surface')}; "
+            f"color: {tc.get('text_tertiary')}; "
             "padding: 6px 14px; border: none; "
             "border-bottom: 2px solid transparent; "
-            "font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }"
-            "QTabBar::tab:selected { color: #ddd; "
-            "border-bottom-color: #0e639c; background: #1e1e1e; }"
-            "QTabBar::tab:hover:!selected { color: #c0c0c0; background: #2a2a2a; }"
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; letter-spacing: 0.3px; }}"
+            f"QTabBar::tab:selected {{ color: {tc.get('text_heading')}; "
+            f"border-bottom-color: {tc.get('accent_primary')}; background: {tc.get('bg_base')}; }}"
+            f"QTabBar::tab:hover:!selected {{ color: {tc.get('text_primary')}; "
+            f"background: {tc.get('bg_hover_subtle')}; }}"
         )
         outer.addWidget(self._tabs)
 
@@ -123,21 +126,25 @@ class TestPanel(QWidget):
         # Header
         header = QWidget()
         header.setFixedHeight(34)
-        header.setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;")
+        header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         h = QHBoxLayout(header)
         h.setContentsMargins(12, 0, 6, 0)
         h.setSpacing(2)
 
         title = QLabel("TESTS")
         title.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #888; "
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
             "letter-spacing: 0.5px; background: transparent;"
         )
         h.addWidget(title)
 
         self._summary_label = QLabel("")
         self._summary_label.setStyleSheet(
-            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; "
+            "background: transparent; margin-left: 6px;"
         )
         h.addWidget(self._summary_label)
         h.addStretch()
@@ -153,7 +160,8 @@ class TestPanel(QWidget):
             "Requires pytest-cov in the project's venv."
         )
         self._coverage_check.setStyleSheet(
-            "QCheckBox { color: #c8c8c8; font-size: 11px; background: transparent; }"
+            f"QCheckBox {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; "
+            "background: transparent; }"
             "QCheckBox::indicator { width: 12px; height: 12px; }"
         )
         h.addWidget(self._coverage_check)
@@ -162,7 +170,8 @@ class TestPanel(QWidget):
         # Hidden by default; ``_apply_coverage`` populates and reveals it.
         self._coverage_label = QLabel("")
         self._coverage_label.setStyleSheet(
-            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; "
+            "background: transparent; margin-left: 6px;"
         )
         self._coverage_label.setToolTip("Last coverage run summary")
         self._coverage_label.hide()
@@ -196,8 +205,8 @@ class TestPanel(QWidget):
         # the boundary to give either side more room.
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setStyleSheet(
-            "QSplitter::handle { background: #1e1e1e; height: 1px; }"
-            "QSplitter::handle:hover { background: #0e639c; }"
+            f"QSplitter::handle {{ background: {tc.get('bg_base')}; height: 1px; }}"
+            f"QSplitter::handle:hover {{ background: {tc.get('accent_primary')}; }}"
         )
 
         # Tree
@@ -207,11 +216,11 @@ class TestPanel(QWidget):
         self._tree.setRootIsDecorated(True)
         self._tree.setAnimated(True)
         self._tree.setStyleSheet(
-            "QTreeWidget { background: #1e1e1e; color: #ddd; border: none; "
-            "outline: none; font-size: 12px; }"
+            f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
+            f"border: none; outline: none; font-size: {tc.FONT_MD}px; }}"
             "QTreeWidget::item { padding: 4px 4px; }"
-            "QTreeWidget::item:selected { background: #094771; }"
-            "QTreeWidget::item:hover { background: #2a2d2e; }"
+            f"QTreeWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
+            f"QTreeWidget::item:hover {{ background: {tc.get('bg_hover_subtle')}; }}"
             "QTreeWidget::branch { background: transparent; }"
             "QTreeWidget::branch:has-children:!has-siblings:closed,"
             "QTreeWidget::branch:closed:has-children:has-siblings {"
@@ -219,7 +228,8 @@ class TestPanel(QWidget):
             " image: none;"
             "}"
             "QScrollBar:vertical { width: 8px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #444; border-radius: 4px; }"
+            f"QScrollBar::handle:vertical {{ background: {tc.get('scrollbar_thumb')}; "
+            "border-radius: 4px; }"
         )
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._show_tree_menu)
@@ -229,20 +239,26 @@ class TestPanel(QWidget):
         # Output area — header bar with title + pop-out + clear, then
         # a monospace text area below.
         output_wrap = QWidget()
-        output_wrap.setStyleSheet("background: #181818; border-top: 1px solid #333;")
+        output_wrap.setStyleSheet(
+            f"background: {tc.get('bg_terminal')}; "
+            f"border-top: 1px solid {tc.get('border_secondary')};"
+        )
         ow_layout = QVBoxLayout(output_wrap)
         ow_layout.setContentsMargins(0, 0, 0, 0)
         ow_layout.setSpacing(0)
 
         out_header = QWidget()
         out_header.setFixedHeight(26)
-        out_header.setStyleSheet("background: #1f1f1f; border-bottom: 1px solid #2a2a2a;")
+        out_header.setStyleSheet(
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_subtle')};"
+        )
         oh = QHBoxLayout(out_header)
         oh.setContentsMargins(10, 0, 6, 0)
         oh.setSpacing(4)
         out_title = QLabel("OUTPUT")
         out_title.setStyleSheet(
-            "font-size: 10px; font-weight: 600; color: #888; "
+            f"font-size: {tc.FONT_XS}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
             "letter-spacing: 0.5px; background: transparent;"
         )
         oh.addWidget(out_title)
@@ -259,13 +275,14 @@ class TestPanel(QWidget):
         self._output.setReadOnly(True)
         self._output.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self._output.setStyleSheet(
-            "QTextEdit { background: #181818; color: #d0d0d0; border: none; "
+            f"QTextEdit {{ background: {tc.get('bg_terminal')}; "
+            f"color: {tc.get('text_primary')}; border: none; "
             "font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace; "
-            "font-size: 11px; padding: 6px 8px; }"
+            f"font-size: {tc.FONT_SM}px; padding: 6px 8px; }}"
             "QScrollBar:vertical { width: 8px; background: transparent; }"
             "QScrollBar:horizontal { height: 8px; background: transparent; }"
             "QScrollBar::handle:vertical, QScrollBar::handle:horizontal { "
-            "background: #444; border-radius: 4px; }"
+            f"background: {tc.get('scrollbar_thumb')}; border-radius: 4px; }}"
         )
         self._output.setPlaceholderText("Test output will appear here…")
         ow_layout.addWidget(self._output)
@@ -282,7 +299,7 @@ class TestPanel(QWidget):
         # collection error (the AI can do something useful with it),
         # and hidden in the "no tests yet" / "no project open" cases.
         self._empty = QWidget()
-        self._empty.setStyleSheet("background: #1e1e1e;")
+        self._empty.setStyleSheet(f"background: {tc.get('bg_base')};")
         empty_layout = QVBoxLayout(self._empty)
         empty_layout.setContentsMargins(20, 20, 20, 20)
         empty_layout.setSpacing(12)
@@ -296,7 +313,7 @@ class TestPanel(QWidget):
         self._empty_label.setWordWrap(True)
         self._empty_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._empty_label.setStyleSheet(
-            "color: #c0c0c0; font-size: 12px; "
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
             "font-family: 'JetBrains Mono', monospace; "
             "background: transparent;"
         )
@@ -305,9 +322,11 @@ class TestPanel(QWidget):
         self._empty_fix_btn = QPushButton("✨ Fix with AI")
         self._empty_fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._empty_fix_btn.setStyleSheet(
-            "QPushButton { background: #0e639c; color: white; border: none; "
-            "border-radius: 4px; padding: 8px 16px; font-size: 12px; font-weight: 600; }"
-            "QPushButton:hover { background: #1a8ae8; }"
+            f"QPushButton {{ background: {tc.get('accent_primary')}; "
+            f"color: {tc.get('text_on_accent')}; border: none; "
+            f"border-radius: 4px; padding: 8px 16px; "
+            f"font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
         self._empty_fix_btn.clicked.connect(self._on_fix_collection_error)
         self._empty_fix_btn.hide()
@@ -345,7 +364,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         # Horizontal shaft
@@ -425,7 +444,8 @@ class TestPanel(QWidget):
             return
         self._summary_label.setText("Discovering…")
         self._summary_label.setStyleSheet(
-            "font-size: 10px; color: #e5a00d; background: transparent; margin-left: 6px;"
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_warning')}; "
+            "background: transparent; margin-left: 6px;"
         )
         safe_task(self._do_collect(), name="test_collect")
 
@@ -450,14 +470,15 @@ class TestPanel(QWidget):
             error_text = result.error or "Test discovery failed."
             self._empty_label.setText(error_text)
             self._empty_label.setStyleSheet(
-                "color: #f48771; font-size: 11px; "
+                f"color: {tc.get('accent_error')}; font-size: {tc.FONT_SM}px; "
                 "font-family: 'JetBrains Mono', monospace; background: transparent;"
             )
             self._last_collect_error = error_text
             self._empty_fix_btn.show()
             self._summary_label.setText("Failed")
             self._summary_label.setStyleSheet(
-                "font-size: 10px; color: #f48771; background: transparent; margin-left: 6px;"
+                f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_error')}; "
+                "background: transparent; margin-left: 6px;"
             )
             return
 
@@ -468,14 +489,15 @@ class TestPanel(QWidget):
                 "No tests found.\n\npytest discovered no tests in this project."
             )
             self._empty_label.setStyleSheet(
-                "color: #c0c0c0; font-size: 12px; "
+                f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
                 "font-family: 'JetBrains Mono', monospace; background: transparent;"
             )
             self._empty_fix_btn.hide()
             self._last_collect_error = ""
             self._summary_label.setText("0 tests")
             self._summary_label.setStyleSheet(
-                "font-size: 10px; color: #888; background: transparent; margin-left: 6px;"
+                f"font-size: {tc.FONT_XS}px; color: {tc.get('text_tertiary')}; "
+                "background: transparent; margin-left: 6px;"
             )
             return
 
@@ -491,7 +513,8 @@ class TestPanel(QWidget):
 
         self._summary_label.setText(f"{total} tests")
         self._summary_label.setStyleSheet(
-            "font-size: 10px; color: #4ec9b0; background: transparent; margin-left: 6px;"
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; "
+            "background: transparent; margin-left: 6px;"
         )
 
     def _count_tests(self, node: TestNode) -> int:
@@ -523,16 +546,16 @@ class TestPanel(QWidget):
         # so the panel works whether the caller normalises the status or
         # passes it through verbatim from the regex match.
         colours = {
-            "passed": "#4ec9b0",
-            "pass": "#4ec9b0",
-            "failed": "#f48771",
-            "fail": "#f48771",
-            "error": "#f48771",
-            "skipped": "#888888",
-            "skip": "#888888",
-            "xfail": "#888888",
-            "xpass": "#4ec9b0",
-            "running": "#e5a00d",
+            "passed": tc.get("accent_success_muted"),
+            "pass": tc.get("accent_success_muted"),
+            "failed": tc.get("accent_error"),
+            "fail": tc.get("accent_error"),
+            "error": tc.get("accent_error"),
+            "skipped": tc.get("text_tertiary"),
+            "skip": tc.get("text_tertiary"),
+            "xfail": tc.get("text_tertiary"),
+            "xpass": tc.get("accent_success_muted"),
+            "running": tc.get("accent_warning"),
         }
         if status in colours:
             return self._draw_dot_icon(colours[status])
@@ -541,7 +564,7 @@ class TestPanel(QWidget):
             return self._draw_file_icon()
         if kind == "class":
             return self._draw_class_icon()
-        return self._draw_dot_icon("#555555")
+        return self._draw_dot_icon(tc.get("plan_skipped"))
 
     @staticmethod
     def _draw_dot_icon(colour: str) -> QIcon:
@@ -561,7 +584,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#888"))
+        pen = QPen(QColor(tc.get("text_tertiary")))
         pen.setWidthF(1.2)
         p.setPen(pen)
         p.drawRect(3, 1, 8, 11)
@@ -577,7 +600,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#aaa"))
+        pen = QPen(QColor(tc.get("text_secondary")))
         pen.setWidthF(1.2)
         p.setPen(pen)
         # Stylised C
@@ -606,7 +629,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor("#4ec9b0"))
+        p.setBrush(QColor(tc.get("accent_success_muted")))
         p.setPen(Qt.PenStyle.NoPen)
         from PyQt6.QtGui import QPolygonF
         from PyQt6.QtCore import QPointF
@@ -622,7 +645,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#e5a00d"))
+        pen = QPen(QColor(tc.get("accent_warning")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         p.drawArc(QRectF(3, 3, 10, 10), 30 * 16, 300 * 16)
@@ -638,7 +661,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.5)
         p.setPen(pen)
         # Box (window) outline
@@ -657,7 +680,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.5)
         p.setPen(pen)
         # Lid
@@ -681,7 +704,7 @@ class TestPanel(QWidget):
         pm.fill(QColor(0, 0, 0, 0))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#cccccc"))
+        pen = QPen(QColor(tc.get("text_primary")))
         pen.setWidthF(1.6)
         p.setPen(pen)
         p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
@@ -864,7 +887,7 @@ class TestPanel(QWidget):
         dlg.setWindowTitle("Test output — Polyglot AI")
         dlg.setModal(False)  # non-modal so the user can keep working
         dlg.resize(900, 600)
-        dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+        dlg.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
 
         v = QVBoxLayout(dlg)
         v.setContentsMargins(12, 10, 12, 10)
@@ -873,16 +896,18 @@ class TestPanel(QWidget):
         header = QHBoxLayout()
         title = QLabel("Test output")
         title.setStyleSheet(
-            "color: #ddd; font-size: 13px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_BASE}px; "
+            "font-weight: 600; background: transparent;"
         )
         header.addWidget(title)
         header.addStretch()
         copy_btn = QPushButton("Copy all")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.setStyleSheet(
-            "QPushButton { background: #3c3c3c; color: #ddd; border: 1px solid #555; "
-            "border-radius: 4px; padding: 5px 12px; font-size: 11px; }"
-            "QPushButton:hover { background: #4a4a4a; }"
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('text_primary')}; border: 1px solid {tc.get('border_input')}; "
+            f"border-radius: 4px; padding: 5px 12px; font-size: {tc.FONT_SM}px; }}"
+            f"QPushButton:hover {{ background: {tc.get('bg_hover')}; }}"
         )
         copy_btn.clicked.connect(lambda: self._copy_popout_to_clipboard())
         header.addWidget(copy_btn)
@@ -897,14 +922,15 @@ class TestPanel(QWidget):
         text.setReadOnly(True)
         text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         text.setStyleSheet(
-            "QTextEdit { background: #181818; color: #d0d0d0; border: 1px solid #333; "
+            f"QTextEdit {{ background: {tc.get('bg_terminal')}; "
+            f"color: {tc.get('text_primary')}; border: 1px solid {tc.get('border_secondary')}; "
             "border-radius: 4px; "
             "font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace; "
-            "font-size: 12px; padding: 8px 10px; }"
+            f"font-size: {tc.FONT_MD}px; padding: 8px 10px; }}"
             "QScrollBar:vertical { width: 10px; background: transparent; }"
             "QScrollBar:horizontal { height: 10px; background: transparent; }"
             "QScrollBar::handle:vertical, QScrollBar::handle:horizontal { "
-            "background: #444; border-radius: 5px; }"
+            f"background: {tc.get('scrollbar_thumb')}; border-radius: 5px; }}"
         )
         # Pre-populate with what's already in the inline output.
         text.setPlainText(self._output.toPlainText())
@@ -982,8 +1008,9 @@ class TestPanel(QWidget):
             return
         menu = QMenu(self)
         menu.setStyleSheet(
-            "QMenu { background: #252526; color: #ddd; border: 1px solid #444; }"
-            "QMenu::item:selected { background: #094771; }"
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_menu')}; }}"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
         run_action = menu.addAction(f"Run {node.kind}")
         open_action = menu.addAction("Open in editor")
