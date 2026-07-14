@@ -40,9 +40,7 @@ class AboutDialog(QDialog):
         layout.addWidget(desc)
 
         license_label = QLabel("License: LGPL-3.0-or-later")
-        license_label.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_disabled')};"
-        )
+        license_label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('text_disabled')};")
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(license_label)
 

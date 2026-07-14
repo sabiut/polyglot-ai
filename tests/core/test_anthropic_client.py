@@ -245,16 +245,28 @@ def _sig_delta(index, sig):
 class TestThinkingSupport:
     @pytest.mark.parametrize(
         "model",
-        ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
-         "claude-sonnet-5", "claude-sonnet-4-6"],
+        [
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+        ],
     )
     def test_supported_models(self, model):
         assert _supports_thinking(model) is True
 
     @pytest.mark.parametrize(
         "model",
-        ["claude-opus-4-5", "claude-opus-4-1", "claude-opus-4-0",
-         "claude-sonnet-4-5", "claude-sonnet-4-0", "o4-mini", "gpt-5.6-sol"],
+        [
+            "claude-opus-4-5",
+            "claude-opus-4-1",
+            "claude-opus-4-0",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-0",
+            "o4-mini",
+            "gpt-5.6-sol",
+        ],
     )
     def test_unsupported_models(self, model):
         assert _supports_thinking(model) is False
@@ -268,10 +280,13 @@ class TestThinkingSupport:
 @pytest.mark.asyncio
 async def test_thinking_enabled_in_kwargs_for_reasoning_model():
     client, _ = _make_client([_text_start(0), _text_delta(0, "hi")])
-    _ = [c async for c in client.stream_chat(
-        messages=[{"role": "user", "content": "x"}],
-        model="claude-opus-4-8",
-    )]
+    _ = [
+        c
+        async for c in client.stream_chat(
+            messages=[{"role": "user", "content": "x"}],
+            model="claude-opus-4-8",
+        )
+    ]
     kwargs = client._client.messages.last_kwargs
     assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     # Thinking models reject temperature — it must be omitted.
@@ -281,11 +296,14 @@ async def test_thinking_enabled_in_kwargs_for_reasoning_model():
 @pytest.mark.asyncio
 async def test_thinking_not_enabled_for_old_model():
     client, _ = _make_client([_text_start(0), _text_delta(0, "hi")])
-    _ = [c async for c in client.stream_chat(
-        messages=[{"role": "user", "content": "x"}],
-        model="claude-opus-4-5",
-        temperature=0.5,
-    )]
+    _ = [
+        c
+        async for c in client.stream_chat(
+            messages=[{"role": "user", "content": "x"}],
+            model="claude-opus-4-5",
+            temperature=0.5,
+        )
+    ]
     kwargs = client._client.messages.last_kwargs
     assert "thinking" not in kwargs
     assert kwargs.get("temperature") == 0.5
@@ -301,14 +319,18 @@ async def test_thinking_delta_becomes_reasoning():
         _text_delta(1, "Answer"),
     ]
     client, _ = _make_client(events)
-    out = [c async for c in client.stream_chat(
-        messages=[{"role": "user", "content": "x"}],
-        model="claude-opus-4-8",
-    )]
+    out = [
+        c
+        async for c in client.stream_chat(
+            messages=[{"role": "user", "content": "x"}],
+            model="claude-opus-4-8",
+        )
+    ]
     reasoning = [c.delta_reasoning for c in out if c.delta_reasoning]
     content = [c.delta_content for c in out if c.delta_content]
     assert reasoning == ["Let me think"]
     assert content == ["Answer"]
+
 
 @pytest.mark.asyncio
 async def test_thinking_strip_and_retry_on_thinking_400():
@@ -353,10 +375,13 @@ async def test_thinking_strip_and_retry_on_thinking_400():
     AIProvider.__init__(client, bus)
     client._client = SimpleNamespace(messages=_RetryMessages())
 
-    out = [c async for c in client.stream_chat(
-        messages=[{"role": "user", "content": "x"}],
-        model="claude-opus-4-8",
-    )]
+    out = [
+        c
+        async for c in client.stream_chat(
+            messages=[{"role": "user", "content": "x"}],
+            model="claude-opus-4-8",
+        )
+    ]
     assert calls["n"] == 2, "should have retried once"
     assert "thinking" not in client._client.messages.last_kwargs
     assert [c.delta_content for c in out if c.delta_content] == ["ok"]

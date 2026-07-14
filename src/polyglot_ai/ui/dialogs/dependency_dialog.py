@@ -244,8 +244,7 @@ class DependencyDialog(QDialog):
         purpose = QLabel(f"    {dep.purpose}")
         purpose.setWordWrap(True)
         purpose.setStyleSheet(
-            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; background: transparent;"
         )
         rl.addWidget(purpose)
 
@@ -360,8 +359,7 @@ class DependencyDialog(QDialog):
 
         self._progress_label = QLabel("Preparing…")
         self._progress_label.setStyleSheet(
-            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_MD}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_MD}px; background: transparent;"
         )
         v.addWidget(self._progress_label)
 

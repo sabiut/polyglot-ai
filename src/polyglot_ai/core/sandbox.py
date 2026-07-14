@@ -224,9 +224,7 @@ class Sandbox:
                     try:
                         (self._root / cpath).resolve().relative_to(self._root)
                     except (ValueError, OSError):
-                        return False, (
-                            "git -C may only target paths inside the project root."
-                        )
+                        return False, ("git -C may only target paths inside the project root.")
                 # Skip this option's value token when it takes one as a
                 # separate argument (not the ``--opt=value`` glued form).
                 if opt_name in _VALUE_OPTS and "=" not in tok:

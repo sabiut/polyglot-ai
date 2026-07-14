@@ -410,9 +410,7 @@ class TaskDetailDialog(QDialog):
             "No checklist yet. Let the AI break this task into ordered "
             "steps so you can track progress and scope."
         )
-        blurb.setStyleSheet(
-            f"color: #d8e8f5; font-size: {tc.FONT_MD}px; background: transparent;"
-        )
+        blurb.setStyleSheet(f"color: #d8e8f5; font-size: {tc.FONT_MD}px; background: transparent;")
         blurb.setWordWrap(True)
         v.addWidget(blurb)
 
@@ -570,15 +568,13 @@ class TaskDetailDialog(QDialog):
         body.setSpacing(6)
         text_lbl = QLabel(note.text or note.kind)
         text_lbl.setStyleSheet(
-            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
-            "background: transparent;"
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent;"
         )
         text_lbl.setWordWrap(True)
         body.addWidget(text_lbl, stretch=1)
         time_lbl = QLabel(_relative_time(note.timestamp))
         time_lbl.setStyleSheet(
-            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
-            "background: transparent;"
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; background: transparent;"
         )
         body.addWidget(time_lbl)
         h.addLayout(body, stretch=1)

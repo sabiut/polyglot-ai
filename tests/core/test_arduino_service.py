@@ -74,9 +74,7 @@ class TestKidFriendlyMessaging:
         # well-known bin dirs (~/.local/bin, /usr/local/bin), so on a
         # machine with arduino-cli genuinely installed the mock would
         # be bypassed and the test would exercise the wrong branch.
-        monkeypatch.setattr(
-            "polyglot_ai.core.arduino.service.find_executable", lambda name: None
-        )
+        monkeypatch.setattr("polyglot_ai.core.arduino.service.find_executable", lambda name: None)
         svc = ArduinoService()
         from polyglot_ai.core.arduino import boards as _b
 

@@ -973,7 +973,9 @@ class SettingsDialog(QDialog):
             return
 
         self._claude_oauth_btn.setEnabled(False)
-        self.claude_oauth_status_changed.emit("Logging in via terminal...", tc.get("text_secondary"))
+        self.claude_oauth_status_changed.emit(
+            "Logging in via terminal...", tc.get("text_secondary")
+        )
 
         import threading
 
@@ -990,7 +992,9 @@ class SettingsDialog(QDialog):
                         "Login completed but no token found", tc.get("accent_warning")
                     )
             else:
-                self.claude_oauth_status_changed.emit("Login failed or cancelled", tc.get("accent_error"))
+                self.claude_oauth_status_changed.emit(
+                    "Login failed or cancelled", tc.get("accent_error")
+                )
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1051,10 +1055,14 @@ class SettingsDialog(QDialog):
                 ok, msg = await client.test_connection()
                 if ok:
                     label.setText("✓ OK")
-                    label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_success_muted')};")
+                    label.setStyleSheet(
+                        f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_success_muted')};"
+                    )
                 else:
                     label.setText(f"✗ {msg[:40]}")
-                    label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};")
+                    label.setStyleSheet(
+                        f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};"
+                    )
             except Exception as e:
                 label.setText(f"✗ {str(e)[:40]}")
                 label.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_error')};")

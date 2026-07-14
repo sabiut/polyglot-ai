@@ -736,8 +736,7 @@ class _TaskCard(QWidget):
         meta_parts.append(_relative_time(task.updated_at))
         meta_lbl = QLabel("  ·  ".join(meta_parts))
         meta_lbl.setStyleSheet(
-            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; background: transparent;"
         )
         layout.addWidget(meta_lbl)
 

@@ -101,7 +101,9 @@ class ChatMessage(QWidget):
                     f"border-left: 3px solid {tc.get('accent_primary')}; }}"
                 )
             else:
-                bubble.setStyleSheet(f"QWidget {{ background-color: {tc.get('bg_user_bubble')}; border-radius: 18px; }}")
+                bubble.setStyleSheet(
+                    f"QWidget {{ background-color: {tc.get('bg_user_bubble')}; border-radius: 18px; }}"
+                )
             bubble_layout = QVBoxLayout(bubble)
             bubble_layout.setContentsMargins(14, 10, 14, 10)
             bubble_layout.setSpacing(0)
@@ -719,7 +721,9 @@ class ChatMessage(QWidget):
 
             # Decorators
             if "decorators" in patterns:
-                line = re.sub(patterns["decorators"], lambda m: stash(m, tc.get("syn_decorator")), line)
+                line = re.sub(
+                    patterns["decorators"], lambda m: stash(m, tc.get("syn_decorator")), line
+                )
 
             # Flags (bash)
             if "flags" in patterns:
@@ -800,10 +804,18 @@ class ChatMessage(QWidget):
         )
 
         # Bold — bright white for emphasis
-        text = re.sub(r"\*\*(.+?)\*\*", rf'<b style="color:{tc.get("text_heading")}; font-weight:600;">\1</b>', text)
+        text = re.sub(
+            r"\*\*(.+?)\*\*",
+            rf'<b style="color:{tc.get("text_heading")}; font-weight:600;">\1</b>',
+            text,
+        )
 
         # Italic
-        text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", rf'<i style="color:{tc.get("text_primary")};">\1</i>', text)
+        text = re.sub(
+            r"(?<!\*)\*([^*]+?)\*(?!\*)",
+            rf'<i style="color:{tc.get("text_primary")};">\1</i>',
+            text,
+        )
 
         # Links — underline on hover feel
         text = re.sub(

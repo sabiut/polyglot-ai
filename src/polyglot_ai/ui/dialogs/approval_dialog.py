@@ -72,7 +72,9 @@ class ApprovalDialog(QDialog):
         btn_layout.addStretch()
 
         reject_btn = QPushButton("Reject")
-        reject_btn.setStyleSheet(f"background-color: {tc.get('border_feedback_neg')}; padding: 8px 20px;")
+        reject_btn.setStyleSheet(
+            f"background-color: {tc.get('border_feedback_neg')}; padding: 8px 20px;"
+        )
         reject_btn.clicked.connect(self._reject)
         btn_layout.addWidget(reject_btn)
 

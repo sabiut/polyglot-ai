@@ -226,10 +226,13 @@ async def test_tool_call_emits_finish_reason():
 async def test_plain_text_has_no_tool_finish_reason():
     chunks = [_text_chunk("just talking")]
     client, _ = _make_client(chunks)
-    out = [c async for c in client.stream_chat(
-        messages=[{"role": "user", "content": "hi"}],
-        model="gemini-3.1-pro-preview",
-    )]
+    out = [
+        c
+        async for c in client.stream_chat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gemini-3.1-pro-preview",
+        )
+    ]
     assert all(c.finish_reason != "tool_calls" for c in out)
 
 
@@ -245,15 +248,22 @@ async def test_tool_history_converted_to_function_parts():
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": "c1", "type": "function",
-                 "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "18C sunny"},
     ]
-    out = [c async for c in client.stream_chat(
-        messages=history, model="gemini-3.1-pro-preview",
-    )]
+    out = [
+        c
+        async for c in client.stream_chat(
+            messages=history,
+            model="gemini-3.1-pro-preview",
+        )
+    ]
     assert out  # completed without error
 
     sent = client._client.aio.models.last_kwargs["contents"]

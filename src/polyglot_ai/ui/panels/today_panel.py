@@ -808,8 +808,7 @@ class _AttentionRow(QWidget):
         text = QLabel(item.text)
         text.setWordWrap(True)
         text.setStyleSheet(
-            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; background: transparent;"
         )
         if item.tooltip:
             text.setToolTip(item.tooltip)

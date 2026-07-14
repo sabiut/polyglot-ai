@@ -16,8 +16,13 @@ from polyglot_ai.core import dependency_check as dc
 from polyglot_ai.core.dependency_check import Dependency, _bucket_deps
 
 
-def _dep(key: str, *, requires_root: bool = True, requires_command: str = "",
-         provides_commands: tuple[str, ...] = ()) -> Dependency:
+def _dep(
+    key: str,
+    *,
+    requires_root: bool = True,
+    requires_command: str = "",
+    provides_commands: tuple[str, ...] = (),
+) -> Dependency:
     return Dependency(
         key=key,
         name=key,

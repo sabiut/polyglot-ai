@@ -210,6 +210,7 @@ async def test_exec_command_user_approved_bypasses_allowlist(sandbox):
 
 # ── Git global-option hardening (config-injection / sandbox escape) ──
 
+
 @pytest.mark.parametrize(
     "cmd",
     [

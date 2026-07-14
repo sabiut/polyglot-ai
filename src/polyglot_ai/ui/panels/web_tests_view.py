@@ -516,7 +516,9 @@ class WebTestsView(QWidget):
         # input dialogs and dispatch the matching ``/workflow`` command
         # to chat. Disabled until a project is open.
         action_row = QFrame()
-        action_row.setStyleSheet(f"background: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_secondary')};")
+        action_row.setStyleSheet(
+            f"background: {tc.get('bg_base')}; border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
         ar = QHBoxLayout(action_row)
         ar.setContentsMargins(10, 8, 10, 8)
         ar.setSpacing(6)

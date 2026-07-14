@@ -186,8 +186,7 @@ class PRSummaryDialog(QDialog):
         msg = QLabel(self._result.error or "The AI did not return a valid response.")
         msg.setWordWrap(True)
         msg.setStyleSheet(
-            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_primary')}; font-size: {tc.FONT_MD}px; background: transparent;"
         )
         layout.addWidget(msg)
 

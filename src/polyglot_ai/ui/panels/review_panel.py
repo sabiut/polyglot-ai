@@ -119,13 +119,13 @@ class ReviewPanel(QWidget):
         self._run_btn = QPushButton("▶ Run Review")
         self._run_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')};
+                background-color: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
                 font-weight: 600;
                 padding: 5px 14px; border: none; border-radius: 5px; font-size: {tc.FONT_MD}px;
             }}
-            QPushButton:hover {{ background-color: {tc.get('accent_primary_hover')}; }}
+            QPushButton:hover {{ background-color: {tc.get("accent_primary_hover")}; }}
             QPushButton:disabled {{
-                background-color: {tc.get('bg_hover')}; color: {tc.get('text_muted')};
+                background-color: {tc.get("bg_hover")}; color: {tc.get("text_muted")};
             }}
         """)
         self._run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -136,17 +136,17 @@ class ReviewPanel(QWidget):
         self._copy_btn = QPushButton("📋 Copy")
         self._copy_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {tc.get('bg_surface_raised')}; color: {tc.get('text_primary')};
+                background-color: {tc.get("bg_surface_raised")}; color: {tc.get("text_primary")};
                 font-weight: 600;
-                padding: 5px 12px; border: 1px solid {tc.get('border_input')};
+                padding: 5px 12px; border: 1px solid {tc.get("border_input")};
                 border-radius: 5px; font-size: {tc.FONT_MD}px;
             }}
             QPushButton:hover {{
-                background-color: {tc.get('bg_hover')}; color: {tc.get('text_heading')};
+                background-color: {tc.get("bg_hover")}; color: {tc.get("text_heading")};
             }}
             QPushButton:disabled {{
-                background-color: {tc.get('bg_card')}; color: {tc.get('text_disabled')};
-                border-color: {tc.get('border_secondary')};
+                background-color: {tc.get("bg_card")}; color: {tc.get("text_disabled")};
+                border-color: {tc.get("border_secondary")};
             }}
         """)
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -160,12 +160,12 @@ class ReviewPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(f"""
-            QScrollArea {{ border: none; background-color: {tc.get('bg_base')}; }}
+            QScrollArea {{ border: none; background-color: {tc.get("bg_base")}; }}
             QScrollBar:vertical {{
-                background: {tc.get('scrollbar_track')}; width: 8px; margin: 0;
+                background: {tc.get("scrollbar_track")}; width: 8px; margin: 0;
             }}
             QScrollBar::handle:vertical {{
-                background: {tc.get('scrollbar_thumb')}; min-height: 30px; border-radius: 4px;
+                background: {tc.get("scrollbar_thumb")}; min-height: 30px; border-radius: 4px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
@@ -181,7 +181,7 @@ class ReviewPanel(QWidget):
         welcome_card = QWidget()
         welcome_card.setStyleSheet(f"""
             QWidget {{
-                background-color: {tc.get('bg_surface')}; border: 1px solid {tc.get('border_secondary')};
+                background-color: {tc.get("bg_surface")}; border: 1px solid {tc.get("border_secondary")};
                 border-radius: 8px;
             }}
         """)
@@ -466,9 +466,7 @@ class ReviewPanel(QWidget):
 
         # ── Summary card ──
         summary_card = QWidget()
-        border = (
-            tc.get("accent_error") if result.status == "failed" else tc.get("border_secondary")
-        )
+        border = tc.get("accent_error") if result.status == "failed" else tc.get("border_secondary")
         summary_card.setStyleSheet(
             "QWidget {"
             f" background-color: {tc.get('bg_surface')};"
@@ -491,9 +489,7 @@ class ReviewPanel(QWidget):
                 self._stat_badge(f"{result.critical_count} critical", tc.get("severity_critical"))
             )
         if result.high_count:
-            stats.addWidget(
-                self._stat_badge(f"{result.high_count} high", tc.get("severity_high"))
-            )
+            stats.addWidget(self._stat_badge(f"{result.high_count} high", tc.get("severity_high")))
 
         stats.addStretch()
         if result.model:
@@ -594,8 +590,8 @@ class ReviewPanel(QWidget):
         severity_color = tc.get(_SEVERITY_TOKENS.get(finding.severity.value, "severity_info"))
         card.setStyleSheet(f"""
             QWidget {{
-                background-color: {tc.get('bg_surface')};
-                border: 1px solid {tc.get('border_secondary')};
+                background-color: {tc.get("bg_surface")};
+                border: 1px solid {tc.get("border_secondary")};
                 border-left: 3px solid {severity_color};
                 border-radius: 6px;
             }}

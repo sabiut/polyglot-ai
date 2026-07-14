@@ -226,8 +226,7 @@ class ResultProfileWidget(QWidget):
         )
         top = QLabel(top_line)
         top.setStyleSheet(
-            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; "
-            f"background: transparent;"
+            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_SM}px; background: transparent;"
         )
         v.addWidget(top)
 

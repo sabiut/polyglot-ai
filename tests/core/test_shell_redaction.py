@@ -43,9 +43,7 @@ async def test_shell_exec_redacts_bare_key_in_output():
 
 @pytest.mark.asyncio
 async def test_shell_exec_redacts_bearer_token():
-    sandbox = _StubSandbox(
-        "Authorization: Bearer ghp_1234567890abcdefABCDEF1234567890abcdef"
-    )
+    sandbox = _StubSandbox("Authorization: Bearer ghp_1234567890abcdefABCDEF1234567890abcdef")
     result = await shell_exec(sandbox, {"command": "cat headers.txt"})
     assert "ghp_1234567890abcdefABCDEF1234567890abcdef" not in result
 
