@@ -59,6 +59,25 @@ def make_lock_icon() -> QIcon:
     return QIcon(pm)
 
 
+def make_history_icon() -> QIcon:
+    """White clock icon for the chat-history sidebar toggle."""
+    pm = QPixmap(14, 14)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(tc.get("text_heading")))
+    pen.setWidthF(1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(QColor(0, 0, 0, 0))
+    p.drawEllipse(QRectF(1, 1, 12, 12))
+    # Clock hands pointing to ~10 past noon
+    p.drawLine(7, 7, 7, 3)
+    p.drawLine(7, 7, 10, 8)
+    p.end()
+    return QIcon(pm)
+
+
 def make_plus_icon() -> QIcon:
     """White plus icon for the new-conversation button."""
     pm = QPixmap(14, 14)

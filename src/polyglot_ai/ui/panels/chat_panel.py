@@ -301,6 +301,21 @@ class ChatPanel(QWidget):
         header_layout.addWidget(self._header_label)
         header_layout.addStretch()
 
+        # Chat-history sidebar toggle. Hidden by default so the panel
+        # opens straight into the conversation — the sidebar (search,
+        # category filters, conversation list) slides in only when
+        # asked for, checked state doubles as the open/closed indicator.
+        self._history_btn = QPushButton()
+        self._history_btn.setFixedHeight(26)
+        self._history_btn.setFixedWidth(30)
+        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._history_btn.setToolTip("Show chat history")
+        self._history_btn.setIcon(chat_icons.make_history_icon())
+        self._history_btn.setCheckable(True)
+        self._history_btn.toggled.connect(self._toggle_history_sidebar)
+        header_layout.addWidget(self._history_btn)
+        header_layout.addSpacing(6)
+
         # Bootstrap-mode toggle. When enabled, shell_exec is auto-
         # approved for 15 minutes so `npm install` / `pip install` /
         # `go mod tidy` / etc. during project scaffolding don't need a
@@ -337,10 +352,13 @@ class ChatPanel(QWidget):
         layout.addLayout(header_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._chat_splitter = splitter
 
         # ── Conversation sidebar ──
         sidebar = QWidget()
+        self._history_sidebar = sidebar
         sidebar.setMaximumWidth(240)
+        sidebar.setVisible(False)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
@@ -572,13 +590,19 @@ class ChatPanel(QWidget):
         wrapper_layout.addWidget(self._input_card)
         msg_layout.addWidget(input_wrapper)
         splitter.addWidget(msg_container)
-        # Default sizes: show the conversation sidebar (220px) alongside
-        # the main chat area. Users can still collapse by dragging the
-        # handle; their last-used sizes are restored from session on
-        # next launch.
-        splitter.setSizes([220, 780])
+        # The sidebar starts hidden (see self._history_btn) — give the
+        # message area the full width until the user asks for history.
+        splitter.setSizes([0, 1000])
 
         layout.addWidget(splitter)
+
+    def _toggle_history_sidebar(self, checked: bool) -> None:
+        """Show/hide the conversation sidebar behind the history button."""
+        self._history_sidebar.setVisible(checked)
+        if checked:
+            self._chat_splitter.setSizes([220, 780])
+            self._search_input.setFocus()
+        self._history_btn.setToolTip("Hide chat history" if checked else "Show chat history")
 
     def _chrome_button_style(self) -> str:
         return (
@@ -595,6 +619,11 @@ class ChatPanel(QWidget):
             f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_secondary')}; letter-spacing: 1px;"
         )
         self._new_chat_btn.setStyleSheet(self._chrome_button_style())
+        self._history_btn.setStyleSheet(
+            self._chrome_button_style()
+            + f"QPushButton:checked {{ background: {tc.get('accent_primary')}; "
+            f"border-color: {tc.get('accent_primary')}; }}"
+        )
         self._refresh_bootstrap_label()
         self._search_input.setStyleSheet(f"""
             QLineEdit {{
