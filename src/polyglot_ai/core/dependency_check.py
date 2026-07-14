@@ -707,6 +707,33 @@ def parse_progress_marker(line: str) -> InstallProgress | None:
 _INSTALLER_TIMEOUT = 600  # 10 minutes
 
 
+def _noninteractive(cmd: str) -> str:
+    """Rewrite a package-manager install command to skip its Y/n prompt.
+
+    ``install_hint()`` strings (e.g. ``"sudo apt install ffmpeg"``) are
+    written for a human to paste into a terminal, so they're plain
+    interactive commands. The automated pkexec pass below runs with
+    ``stdin=subprocess.DEVNULL`` — with no auto-confirm flag, apt/dnf/
+    pacman/zypper read EOF at their confirmation prompt and abort
+    immediately, every time, regardless of what the user clicks. Only
+    the string handed to that automated pass goes through this
+    rewrite; the interactive form still shows in the dialog's per-dep
+    hints and "Copy all commands" so a manual run behaves normally.
+    """
+    if " apt-get install" in cmd:
+        return cmd.replace("apt-get install", "apt-get install -y", 1)
+    if " apt install" in cmd:
+        return cmd.replace("apt install", "apt install -y", 1)
+    if " dnf install" in cmd:
+        return cmd.replace("dnf install", "dnf install -y", 1)
+    if " pacman -S" in cmd:
+        return cmd.replace("pacman -S", "pacman -S --noconfirm", 1)
+    if " zypper install" in cmd:
+        return cmd.replace("zypper install", "zypper install -y", 1)
+    # `apk add` has no confirmation prompt to begin with.
+    return cmd
+
+
 def _build_chained_command(
     deps: list[Dependency],
     distro: Distro,
@@ -726,7 +753,7 @@ def _build_chained_command(
     """
     pieces: list[str] = []
     for i, dep in enumerate(deps, start=start_idx):
-        hint = dep.install_hint(distro)
+        hint = _noninteractive(dep.install_hint(distro))
         marker = f"@@PROGRESS@@ {i}/{total} {dep.key}"
         pieces.append(f"echo '{marker}'; echo '==> Installing {dep.name}'; {hint}")
     chained = " ; ".join(pieces)

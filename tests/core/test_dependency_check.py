@@ -108,3 +108,43 @@ def test_codex_catalog_entry_declares_npm_requirement() -> None:
     by_key = {d.key: d for d in dc.DEPENDENCIES}
     assert by_key["codex"].requires_command == "npm"
     assert "npm" in by_key["node"].provides_commands
+
+
+class TestNoninteractive:
+    """The automated pkexec pass runs with stdin=DEVNULL — without an
+    auto-confirm flag, apt/dnf/pacman/zypper read EOF at their Y/n
+    prompt and abort every single run, regardless of what the user
+    clicks. ``_noninteractive`` must inject the right flag per package
+    manager so the automated install can actually complete.
+    """
+
+    @pytest.mark.parametrize(
+        "cmd,expected",
+        [
+            ("sudo apt install ffmpeg", "sudo apt install -y ffmpeg"),
+            ("sudo apt-get install ffmpeg", "sudo apt-get install -y ffmpeg"),
+            ("sudo dnf install ffmpeg", "sudo dnf install -y ffmpeg"),
+            ("sudo pacman -S ffmpeg", "sudo pacman -S --noconfirm ffmpeg"),
+            ("sudo zypper install ffmpeg", "sudo zypper install -y ffmpeg"),
+            ("sudo apk add ffmpeg", "sudo apk add ffmpeg"),  # already non-interactive
+            ("", ""),
+        ],
+    )
+    def test_injects_autoconfirm_flag(self, cmd, expected) -> None:
+        assert dc._noninteractive(cmd) == expected
+
+    def test_build_chained_command_uses_noninteractive_form(self) -> None:
+        ffmpeg = {d.key: d for d in dc.DEPENDENCIES}["ffmpeg"]
+        chained = dc._build_chained_command(
+            [ffmpeg], "debian", start_idx=1, total=1, emit_done=True
+        )
+        assert "apt install -y ffmpeg" in chained
+        assert "apt install ffmpeg" not in chained  # would hang/abort under DEVNULL stdin
+
+    def test_install_hint_stays_interactive_for_manual_copy_paste(self) -> None:
+        """The dialog's per-dep hint / 'Copy all commands' text must NOT
+        gain -y — a user pasting it into a real terminal should see the
+        normal interactive confirmation, not a silently-forced install.
+        """
+        ffmpeg = {d.key: d for d in dc.DEPENDENCIES}["ffmpeg"]
+        assert ffmpeg.install_hint("debian") == "sudo apt install ffmpeg"
