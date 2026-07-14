@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 
-from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)

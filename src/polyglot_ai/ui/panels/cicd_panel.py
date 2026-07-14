@@ -455,7 +455,7 @@ class CICDPanel(QWidget):
             # Conclusion
             conclusion = run.get("conclusion") or run.get("status", "")
             conc_item = QTableWidgetItem(conclusion)
-            conc_item.setForeground(self._make_color(color))
+            conc_item.setForeground(self._make_color(tc.get(color_token)))
             self._runs_table.setItem(row_idx, 4, conc_item)
 
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
