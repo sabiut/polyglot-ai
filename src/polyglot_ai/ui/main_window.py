@@ -26,6 +26,7 @@ from polyglot_ai.ui.panels.k8s_panel import K8sPanel
 from polyglot_ai.ui.panels.editor_panel import EditorPanel
 from polyglot_ai.ui.panels.file_explorer import FileExplorer
 from polyglot_ai.ui.panels.mcp_sidebar import MCPSidebar
+from polyglot_ai.ui.panels import nav_icons
 from polyglot_ai.ui.panels.plan_panel import PlanPanel
 from polyglot_ai.ui.panels.review_panel import ReviewPanel
 from polyglot_ai.ui.panels.usage_panel import UsagePanel
@@ -188,12 +189,12 @@ class MainWindow(QMainWindow):
         self._plan_panel = PlanPanel()
         self._usage_panel = UsagePanel()
 
-        self._right_tabs.addTab(self._chat_panel, "💬 Chat")
-        self._right_tabs.addTab(self._plan_panel, "📋 Plan")
-        self._right_tabs.addTab(self._changeset_panel, "📝 Changes")
-        self._right_tabs.addTab(self._review_panel, "🔍 Review")
-        self._right_tabs.addTab(self._usage_panel, "📊 Usage")
-        self._right_tabs.addTab(self._cicd_panel, "🔄 CI/CD")
+        self._right_tabs.addTab(self._chat_panel, nav_icons.make_chat_icon(), "Chat")
+        self._right_tabs.addTab(self._plan_panel, nav_icons.make_plan_icon(), "Plan")
+        self._right_tabs.addTab(self._changeset_panel, nav_icons.make_changes_icon(), "Changes")
+        self._right_tabs.addTab(self._review_panel, nav_icons.make_review_icon(), "Review")
+        self._right_tabs.addTab(self._usage_panel, nav_icons.make_usage_icon(), "Usage")
+        self._right_tabs.addTab(self._cicd_panel, nav_icons.make_cicd_icon(), "CI/CD")
 
         # ── Main layout: ActivityBar | Sidebar | Center | RightTabs ──
         central = QWidget()

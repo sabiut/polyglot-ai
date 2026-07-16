@@ -31,6 +31,7 @@ from polyglot_ai.core.keyring_store import KeyringStore
 from polyglot_ai.core.settings import SettingsManager
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.dialogs.mcp_config_dialog import MCPConfigDialog
+from polyglot_ai.ui.panels import nav_icons
 
 logger = logging.getLogger(__name__)
 
@@ -190,14 +191,14 @@ class SettingsDialog(QDialog):
         self._nav_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         sections = [
-            ("🔑  Accounts",),
-            ("✏️  Editor",),
-            ("🤖  AI",),
-            ("💻  Terminal",),
-            ("🔌  MCP Servers",),
+            ("Accounts", nav_icons.make_accounts_icon()),
+            ("Editor", nav_icons.make_editor_icon()),
+            ("AI", nav_icons.make_ai_icon()),
+            ("Terminal", nav_icons.make_terminal_icon()),
+            ("MCP Servers", nav_icons.make_mcp_icon()),
         ]
-        for (label,) in sections:
-            item = QListWidgetItem(label)
+        for label, icon in sections:
+            item = QListWidgetItem(icon, label)
             item.setSizeHint(item.sizeHint().__class__(190, 40))
             self._nav_list.addItem(item)
 
