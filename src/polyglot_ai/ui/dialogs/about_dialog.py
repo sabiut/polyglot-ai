@@ -13,13 +13,14 @@ class AboutDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"About {APP_NAME}")
-        self.setFixedSize(400, 300)
+        self.setMinimumSize(400, 300)
+        self.resize(400, 300)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         title = QLabel(APP_NAME)
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        title.setStyleSheet(f"font-size: {tc.FONT_3XL}px; font-weight: bold; color: {tc.get('text_heading')};")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 

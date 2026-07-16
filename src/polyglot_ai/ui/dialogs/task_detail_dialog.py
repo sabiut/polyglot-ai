@@ -144,7 +144,7 @@ class TaskDetailDialog(QDialog):
 
         title_lbl = QLabel(self._task.title)
         title_lbl.setStyleSheet(
-            f"color: {tc.get('text_heading')}; font-size: 17px; font-weight: 700; "
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_XL}px; font-weight: 700; "
             "background: transparent;"
         )
         title_lbl.setWordWrap(True)

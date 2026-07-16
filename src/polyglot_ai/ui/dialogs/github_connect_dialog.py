@@ -33,7 +33,8 @@ class GitHubConnectDialog(QDialog):
         super().__init__(parent)
         self._token = ""
         self.setWindowTitle("Connect GitHub")
-        self.setFixedSize(440, 560)
+        self.setMinimumSize(440, 560)
+        self.resize(440, 560)
         self.setStyleSheet(f"QDialog {{ background-color: {tc.get('bg_base')}; }}")
 
         # Request dark title bar on GNOME/KDE via Qt palette hints.
@@ -91,7 +92,7 @@ class GitHubConnectDialog(QDialog):
         title = QLabel("Connect GitHub")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {tc.get('text_heading')}; "
+            f"font-size: {tc.FONT_XL}px; font-weight: bold; color: {tc.get('text_heading')}; "
             f"background: transparent;"
         )
         layout.addWidget(title)

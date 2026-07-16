@@ -45,7 +45,8 @@ class OnboardingDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Welcome to Polyglot AI")
-        self.setFixedSize(520, 480)
+        self.setMinimumSize(520, 480)
+        self.resize(520, 480)
         self.setStyleSheet(f"QDialog {{ background-color: {tc.get('bg_base')}; }}")
 
         self._api_key = ""

@@ -197,7 +197,7 @@ class _ReadOnlyCodeView(QPlainTextEdit):
     """A monospace, read-only code preview for the loaded entry file.
 
     Read-only by design: the panel hands editing off to the main
-    editor panel via "Open in editor" so we don't end up with a
+    editor panel via "Open in Editor" so we don't end up with a
     second source of truth.
     """
 
@@ -651,7 +651,7 @@ class ArduinoPanel(QWidget):
         # Action row
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        open_btn = QPushButton("Open in editor")
+        open_btn = QPushButton("Open in Editor")
         open_btn.setStyleSheet(self._secondary_button_qss())
         open_btn.clicked.connect(self._open_in_editor)
         actions.addWidget(open_btn)
@@ -1182,7 +1182,7 @@ class ArduinoPanel(QWidget):
             )
             self._show_code_btn.setChecked(True)
             self._append_status(
-                "Click 'Open in editor' above to start writing your code.",
+                "Click 'Open in Editor' above to start writing your code.",
                 kind="hint",
             )
             return

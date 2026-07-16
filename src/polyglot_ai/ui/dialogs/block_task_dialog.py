@@ -45,7 +45,7 @@ class BlockTaskDialog(QDialog):
 
         header = QLabel(f"Block <b>{task_title}</b>")
         header.setStyleSheet(
-            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_LG}px; font-weight: 600; background: transparent;"
+            f"color: {tc.get('text_heading')}; font-size: {tc.FONT_XL}px; font-weight: 600; background: transparent;"
         )
         header.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(header)
