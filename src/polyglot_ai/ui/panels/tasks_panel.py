@@ -17,8 +17,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -41,6 +41,8 @@ from polyglot_ai.core.task_manager import (
 from polyglot_ai.core.tasks import Task, TaskKind, TaskState
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
+from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 logger = logging.getLogger(__name__)
 
@@ -184,16 +186,18 @@ class TasksPanel(QWidget):
         h.addWidget(self._summary_label)
         h.addStretch()
 
-        new_btn = self._icon_btn(self._draw_plus_icon(), "New task")
+        new_btn = make_icon_button(shared_icons.draw_plus_icon(), "New task")
         new_btn.clicked.connect(self._on_new_task)
         h.addWidget(new_btn)
 
-        refresh_btn = self._icon_btn(self._draw_refresh_icon(), "Refresh task list")
+        refresh_btn = make_icon_button(shared_icons.draw_refresh_icon(), "Refresh task list")
         refresh_btn.clicked.connect(lambda: self._refresh_requested.emit())
         h.addWidget(refresh_btn)
 
         if not self._standalone:
-            expand_btn = self._icon_btn(self._draw_expand_icon(), "Open in a separate window")
+            expand_btn = make_icon_button(
+                shared_icons.draw_popout_icon(), "Open in a separate window"
+            )
             expand_btn.clicked.connect(self._on_expand)
             h.addWidget(expand_btn)
 
@@ -298,68 +302,6 @@ class TasksPanel(QWidget):
         if self._task_manager is not None:
             self._refresh_requested.emit()
 
-    # ── Header icon helpers ─────────────────────────────────────────
-
-    def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
-        btn = QPushButton()
-        btn.setObjectName("tasksHdrBtn")
-        btn.setIcon(icon)
-        btn.setFixedSize(22, 22)
-        btn.setToolTip(tooltip)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            "#tasksHdrBtn { background: transparent; border: none; }"
-            "#tasksHdrBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
-        )
-        return btn
-
-    @staticmethod
-    def _draw_plus_icon() -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(2.0)
-        p.setPen(pen)
-        p.drawLine(8, 3, 8, 13)
-        p.drawLine(3, 8, 13, 8)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _draw_refresh_icon() -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
-        p.drawLine(12, 2, 12, 6)
-        p.drawLine(12, 6, 8, 6)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _draw_expand_icon() -> QIcon:
-        """Box-with-arrow glyph for the open-in-window button."""
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        # Small window outline (bottom-left)
-        p.drawRect(2, 5, 9, 9)
-        # Diagonal arrow pointing up-right
-        p.drawLine(7, 9, 14, 2)
-        p.drawLine(9, 2, 14, 2)
-        p.drawLine(14, 2, 14, 7)
-        p.end()
-        return QIcon(pm)
 
     def _on_expand(self) -> None:
         """Open the Tasks view in a standalone, larger window.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.async_utils import safe_task
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
+from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 
 class MCPSidebar(QWidget):
@@ -51,15 +53,17 @@ class MCPSidebar(QWidget):
         header_layout.addWidget(self._summary_label)
         header_layout.addStretch()
 
-        refresh_btn = self._icon_btn(self._draw_refresh_icon(), "Refresh connection status")
+        refresh_btn = make_icon_button(
+            shared_icons.draw_refresh_icon(), "Refresh connection status"
+        )
         refresh_btn.clicked.connect(self._on_refresh_clicked)
         header_layout.addWidget(refresh_btn)
 
-        reconnect_all_btn = self._icon_btn(self._draw_bolt_icon(), "Connect all servers")
+        reconnect_all_btn = make_icon_button(self._draw_bolt_icon(), "Connect all servers")
         reconnect_all_btn.clicked.connect(self._on_connect_all)
         header_layout.addWidget(reconnect_all_btn)
 
-        manage_btn = self._icon_btn(self._draw_plus_icon(), "Manage MCP Servers")
+        manage_btn = make_icon_button(shared_icons.draw_plus_icon(), "Manage MCP Servers")
         manage_btn.clicked.connect(self._open_mcp_settings)
         header_layout.addWidget(manage_btn)
         layout.addWidget(self._header)
@@ -131,50 +135,6 @@ class MCPSidebar(QWidget):
             "padding: 20px; background: transparent;"
         )
         self.refresh()
-
-    def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
-        btn = QPushButton()
-        btn.setObjectName("mcpIconBtn")
-        btn.setIcon(icon)
-        btn.setFixedSize(22, 22)
-        btn.setToolTip(tooltip)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            "#mcpIconBtn { background: transparent; border: none; }"
-            "#mcpIconBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
-        )
-        return btn
-
-    def _draw_plus_icon(self) -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(2.0)
-        p.setPen(pen)
-        p.drawLine(8, 3, 8, 13)
-        p.drawLine(3, 8, 13, 8)
-        p.end()
-        return QIcon(pm)
-
-    def _draw_refresh_icon(self) -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        # Circular arc (arrow around ~300°)
-        from PyQt6.QtCore import QRectF
-
-        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
-        # Arrow head at the opening (top-right)
-        p.drawLine(12, 2, 12, 6)
-        p.drawLine(12, 6, 8, 6)
-        p.end()
-        return QIcon(pm)
 
     def _draw_bolt_icon(self) -> QIcon:
         pm = QPixmap(16, 16)

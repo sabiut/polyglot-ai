@@ -40,7 +40,9 @@ from polyglot_ai.core.test_collector import (
     run_tests,
 )
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
 from polyglot_ai.ui.panels.web_tests_view import WebTestsView
+from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.core.coverage import CoverageReport
@@ -177,15 +179,15 @@ class TestPanel(QWidget):
         self._coverage_label.hide()
         h.addWidget(self._coverage_label)
 
-        run_btn = self._icon_btn(self._draw_play_icon(), "Run all tests")
+        run_btn = make_icon_button(self._draw_play_icon(), "Run all tests")
         run_btn.clicked.connect(self._on_run_all)
         h.addWidget(run_btn)
 
-        rerun_btn = self._icon_btn(self._draw_rerun_icon(), "Re-run failed tests")
+        rerun_btn = make_icon_button(self._draw_rerun_icon(), "Re-run failed tests")
         rerun_btn.clicked.connect(self._on_rerun_failed)
         h.addWidget(rerun_btn)
 
-        refresh_btn = self._icon_btn(self._draw_refresh_icon(), "Refresh test list")
+        refresh_btn = make_icon_button(shared_icons.draw_refresh_icon(), "Refresh test list")
         refresh_btn.clicked.connect(self.refresh)
         h.addWidget(refresh_btn)
 
@@ -193,7 +195,7 @@ class TestPanel(QWidget):
         # room. Cheap UX win: drag-the-handle works but isn't obvious,
         # and the default sidebar width (~280 px) is cramped for the
         # output pane. Click toggles between collapsed/expanded widths.
-        expand_btn = self._icon_btn(
+        expand_btn = make_icon_button(
             self._draw_expand_icon(), "Expand the test panel for easier viewing"
         )
         expand_btn.clicked.connect(self._on_expand_clicked)
@@ -263,10 +265,12 @@ class TestPanel(QWidget):
         )
         oh.addWidget(out_title)
         oh.addStretch()
-        popout_btn = self._icon_btn(self._draw_popout_icon(), "Open output in a separate window")
+        popout_btn = make_icon_button(
+            shared_icons.draw_popout_icon(), "Open output in a separate window"
+        )
         popout_btn.clicked.connect(self._on_popout_output)
         oh.addWidget(popout_btn)
-        clear_btn = self._icon_btn(self._draw_clear_icon(), "Clear output")
+        clear_btn = make_icon_button(self._draw_clear_icon(), "Clear output")
         clear_btn.clicked.connect(lambda: self._output.clear())
         oh.addWidget(clear_btn)
         ow_layout.addWidget(out_header)
@@ -608,21 +612,6 @@ class TestPanel(QWidget):
         p.end()
         return QIcon(pm)
 
-    # ── Header icon buttons ─────────────────────────────────────────
-
-    def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
-        btn = QPushButton()
-        btn.setObjectName("testHdrBtn")
-        btn.setIcon(icon)
-        btn.setFixedSize(22, 22)
-        btn.setToolTip(tooltip)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            "#testHdrBtn { background: transparent; border: none; }"
-            "#testHdrBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
-        )
-        return btn
-
     @staticmethod
     def _draw_play_icon() -> QIcon:
         pm = QPixmap(16, 16)
@@ -655,25 +644,6 @@ class TestPanel(QWidget):
         return QIcon(pm)
 
     @staticmethod
-    def _draw_popout_icon() -> QIcon:
-        """Box-with-arrow ↗ glyph for the pop-out output button."""
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        # Box (window) outline
-        p.drawRect(2, 5, 9, 9)
-        # Arrow pointing up-right
-        p.drawLine(7, 9, 14, 2)
-        p.drawLine(9, 2, 14, 2)
-        p.drawLine(14, 2, 14, 7)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
     def _draw_clear_icon() -> QIcon:
         """Trash / clear glyph for the clear-output button."""
         pm = QPixmap(16, 16)
@@ -695,21 +665,6 @@ class TestPanel(QWidget):
         # Vertical strokes
         p.drawLine(7, 7, 7, 12)
         p.drawLine(9, 7, 9, 12)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _draw_refresh_icon() -> QIcon:
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
-        p.drawLine(12, 2, 12, 6)
-        p.drawLine(12, 6, 8, 6)
         p.end()
         return QIcon(pm)
 

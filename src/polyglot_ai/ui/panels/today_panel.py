@@ -26,7 +26,6 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -40,6 +39,8 @@ from PyQt6.QtWidgets import (
 from polyglot_ai.core.task_manager import TaskManager
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
+from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 logger = logging.getLogger(__name__)
 
@@ -140,12 +141,14 @@ class TodayPanel(QWidget):
         h.addWidget(self._date_label)
         h.addStretch()
 
-        refresh_btn = self._icon_btn(self._draw_refresh_icon(), "Refresh dashboard")
+        refresh_btn = make_icon_button(shared_icons.draw_refresh_icon(), "Refresh dashboard")
         refresh_btn.clicked.connect(self._refresh_all)
         h.addWidget(refresh_btn)
 
         if not self._standalone:
-            expand_btn = self._icon_btn(self._draw_expand_icon(), "Open in a separate window")
+            expand_btn = make_icon_button(
+                shared_icons.draw_popout_icon(), "Open in a separate window"
+            )
             expand_btn.clicked.connect(self._on_expand)
             h.addWidget(expand_btn)
 
@@ -278,55 +281,6 @@ class TodayPanel(QWidget):
         lbl = QLabel(text.upper())
         self._section_labels.append(lbl)
         return lbl
-
-    def _icon_btn(self, icon: QIcon, tooltip: str) -> QPushButton:
-        btn = QPushButton()
-        btn.setObjectName("todayHdrBtn")
-        btn.setIcon(icon)
-        btn.setFixedSize(24, 24)
-        btn.setToolTip(tooltip)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            "#todayHdrBtn { background: transparent; border: none; }"
-            "#todayHdrBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
-        )
-        return btn
-
-    @staticmethod
-    def _draw_refresh_icon() -> QIcon:
-        from PyQt6.QtCore import QRectF
-
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.6)
-        p.setPen(pen)
-        p.drawArc(QRectF(3, 3, 10, 10), 60 * 16, 280 * 16)
-        p.drawLine(12, 2, 12, 6)
-        p.drawLine(12, 6, 8, 6)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _draw_expand_icon() -> QIcon:
-        """Box-with-arrow glyph for the open-in-window button."""
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        # Small window outline
-        p.drawRect(2, 5, 9, 9)
-        # Diagonal arrow pointing up-right
-        p.drawLine(7, 9, 14, 2)
-        p.drawLine(9, 2, 14, 2)
-        p.drawLine(14, 2, 14, 7)
-        p.end()
-        return QIcon(pm)
 
     def _on_expand(self) -> None:
         """Open the Today dashboard in a standalone, larger window.

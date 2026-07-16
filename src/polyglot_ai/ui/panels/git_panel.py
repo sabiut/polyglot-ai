@@ -14,7 +14,7 @@ from polyglot_ai.ui.panels.git_dialogs import (
     show_message,
     validate_branch_name,
 )
-from polyglot_ai.ui.panels.git_icons import draw_branch_icon, draw_refresh_icon
+from polyglot_ai.ui.panels.shared_icons import draw_branch_icon, draw_refresh_icon
 
 from PyQt6.QtWidgets import (
     QHBoxLayout,

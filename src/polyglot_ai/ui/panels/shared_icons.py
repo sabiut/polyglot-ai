@@ -1,8 +1,9 @@
-"""Tiny painted icons used by the git panel.
+"""Tiny painted icons shared across panel header toolbars.
 
-Extracted from ``git_panel.py``. Kept separate so the panel file
-focuses on the controller logic (refresh polling, branch commands,
-push flow) rather than pixmap paint code.
+Originally extracted from ``git_panel.py`` (hence ``draw_refresh_icon``
+and ``draw_branch_icon``); several other panels had each independently
+reimplemented the same refresh/plus/pop-out glyphs, so those live here
+too now — one definition per icon instead of one per panel.
 """
 
 from __future__ import annotations
@@ -48,5 +49,37 @@ def draw_branch_icon() -> QIcon:
     p.drawEllipse(3, 2, 4, 4)
     p.drawEllipse(3, 12, 4, 4)
     p.drawEllipse(9, 9, 4, 4)
+    p.end()
+    return QIcon(pm)
+
+
+def draw_plus_icon() -> QIcon:
+    """Plus glyph — 'new'/'add' affordance."""
+    pm = QPixmap(16, 16)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(tc.get("text_primary")))
+    pen.setWidthF(2.0)
+    p.setPen(pen)
+    p.drawLine(8, 3, 8, 13)
+    p.drawLine(3, 8, 13, 8)
+    p.end()
+    return QIcon(pm)
+
+
+def draw_popout_icon() -> QIcon:
+    """Box-with-arrow ↗ glyph — 'open in a separate window' affordance."""
+    pm = QPixmap(16, 16)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(tc.get("text_primary")))
+    pen.setWidthF(1.5)
+    p.setPen(pen)
+    p.drawRect(2, 5, 9, 9)
+    p.drawLine(7, 9, 14, 2)
+    p.drawLine(9, 2, 14, 2)
+    p.drawLine(14, 2, 14, 7)
     p.end()
     return QIcon(pm)
