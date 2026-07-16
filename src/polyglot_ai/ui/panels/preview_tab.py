@@ -104,6 +104,7 @@ class PreviewTab(QWidget):
         zoom_in.setObjectName("previewZoomIn")
         zoom_in.setFixedSize(28, 24)
         zoom_in.setStyleSheet(btn_style)
+        zoom_in.setToolTip("Zoom in")
         zoom_in.clicked.connect(lambda: self._zoom(1.25))
         tb_layout.addWidget(zoom_in)
 
@@ -111,6 +112,7 @@ class PreviewTab(QWidget):
         zoom_out.setObjectName("previewZoomOut")
         zoom_out.setFixedSize(28, 24)
         zoom_out.setStyleSheet(btn_style)
+        zoom_out.setToolTip("Zoom out")
         zoom_out.clicked.connect(lambda: self._zoom(0.8))
         tb_layout.addWidget(zoom_out)
 
@@ -118,6 +120,7 @@ class PreviewTab(QWidget):
         fit_btn.setObjectName("previewFit")
         fit_btn.setFixedSize(40, 24)
         fit_btn.setStyleSheet(btn_style)
+        fit_btn.setToolTip("Fit image to window")
         fit_btn.clicked.connect(self._fit_to_window)
         tb_layout.addWidget(fit_btn)
 

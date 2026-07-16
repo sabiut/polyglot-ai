@@ -133,6 +133,7 @@ class ChangesetPanel(QWidget):
             QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
             QPushButton:disabled {{ background-color: {tc.get("border_secondary")}; color: {tc.get("text_muted")}; }}
         """)
+        self._apply_all_btn.setToolTip("Write all pending changes to disk (originals backed up)")
         self._apply_all_btn.clicked.connect(self._apply_all)
         self._apply_all_btn.setEnabled(False)
         header_layout.addWidget(self._apply_all_btn)
@@ -147,6 +148,7 @@ class ChangesetPanel(QWidget):
             QPushButton:hover {{ background-color: {tc.get("bg_feedback_neg")}; }}
             QPushButton:disabled {{ background-color: transparent; color: {tc.get("border_card")}; border-color: {tc.get("border_secondary")}; }}
         """)
+        self._reject_all_btn.setToolTip("Discard all pending changes without touching your files")
         self._reject_all_btn.clicked.connect(self._reject_all)
         self._reject_all_btn.setEnabled(False)
         header_layout.addWidget(self._reject_all_btn)
@@ -216,6 +218,7 @@ class ChangesetPanel(QWidget):
             }}
             QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
         """)
+        self._apply_btn.setToolTip("Write this change to disk (backs up the original file)")
         self._apply_btn.clicked.connect(self._apply_selected)
         action_layout.addWidget(self._apply_btn)
 
@@ -227,6 +230,7 @@ class ChangesetPanel(QWidget):
             }}
             QPushButton:hover {{ background-color: {tc.get("bg_feedback_neg")}; }}
         """)
+        self._reject_btn.setToolTip("Discard this proposed change without modifying the file")
         self._reject_btn.clicked.connect(self._reject_selected)
         action_layout.addWidget(self._reject_btn)
 
@@ -238,6 +242,9 @@ class ChangesetPanel(QWidget):
             }}
             QPushButton:hover {{ background-color: {tc.get("bg_feedback_warn_hover")}; }}
         """)
+        self._rollback_btn.setToolTip(
+            "Restore the file to its state before this change was applied"
+        )
         self._rollback_btn.clicked.connect(self._rollback_selected)
         self._rollback_btn.setVisible(False)
         action_layout.addWidget(self._rollback_btn)

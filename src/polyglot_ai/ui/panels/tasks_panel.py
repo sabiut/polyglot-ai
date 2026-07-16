@@ -302,7 +302,6 @@ class TasksPanel(QWidget):
         if self._task_manager is not None:
             self._refresh_requested.emit()
 
-
     def _on_expand(self) -> None:
         """Open the Tasks view in a standalone, larger window.
 

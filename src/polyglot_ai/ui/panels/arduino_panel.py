@@ -418,6 +418,9 @@ class ArduinoPanel(QWidget):
             f"background: {tc.get('accent_primary')}; "
             f"border-color: {tc.get('accent_primary')}; }}"
         )
+        self._advanced_toggle.setToolTip(
+            "Board, port, and CIRCUITPY drive overrides, plus board reset"
+        )
         self._advanced_toggle.toggled.connect(self._on_advanced_toggled)
         h.addWidget(self._advanced_toggle, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -691,6 +694,7 @@ class ArduinoPanel(QWidget):
         refresh_btn = QPushButton("↻  Look again")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.setStyleSheet(self._secondary_button_qss())
+        refresh_btn.setToolTip("Rescan now — we also check automatically every few seconds")
         refresh_btn.clicked.connect(self._kick_detect)
         det_row.addWidget(refresh_btn)
         card.add_layout(det_row)
@@ -743,6 +747,7 @@ class ArduinoPanel(QWidget):
         self._ai_help_button = QPushButton("💬  Ask AI for help")
         self._ai_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ai_help_button.setMinimumHeight(38)
+        self._ai_help_button.setToolTip("Sends your code and any error details to the chat panel")
         self._ai_help_button.clicked.connect(self._on_ask_ai)
         self._ai_help_button.setStyleSheet(self._primary_button_qss())
         card.add_widget(self._ai_help_button)
@@ -1000,6 +1005,7 @@ class ArduinoPanel(QWidget):
         self._drive_label.setStyleSheet(f"color: {tc.get('text_muted')};")
         row.addWidget(self._drive_label, 1)
         pick = QPushButton("Pick…")
+        pick.setToolTip("Choose the mounted CIRCUITPY drive folder")
         pick.clicked.connect(self._pick_cp_drive)
         row.addWidget(pick)
         v.addLayout(row)
@@ -1080,6 +1086,7 @@ class ArduinoPanel(QWidget):
             f"color: {tc.get('text_muted')}; "
             f"border-color: {tc.get('border_secondary')}; }}"
         )
+        self._wipe_button.setToolTip("Erases your code from the board — firmware stays intact")
         self._wipe_button.clicked.connect(self._on_wipe_clicked)
         v.addWidget(self._wipe_button)
         return wrap

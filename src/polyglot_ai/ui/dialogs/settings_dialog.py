@@ -293,6 +293,7 @@ class SettingsDialog(QDialog):
         self._openai_oauth_btn = QPushButton("Sign in with ChatGPT")
         self._openai_oauth_btn.setStyleSheet(_BTN_SUCCESS)
         self._openai_oauth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._openai_oauth_btn.setToolTip("Opens a terminal — requires Node.js")
         self._openai_oauth_btn.clicked.connect(self._login_openai_oauth)
         row.addWidget(self._openai_oauth_btn)
 
@@ -338,6 +339,7 @@ class SettingsDialog(QDialog):
             f"QPushButton:hover {{ background: {tc.get('accent_claude_hover')}; }}"
         )
         self._claude_oauth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._claude_oauth_btn.setToolTip("Opens a terminal — requires the Claude Code CLI")
         self._claude_oauth_btn.clicked.connect(self._login_claude_oauth)
         claude_row.addWidget(self._claude_oauth_btn)
 
@@ -453,6 +455,7 @@ class SettingsDialog(QDialog):
                 f"QPushButton:hover {{ background: {tc.get('border_card')}; }}"
             )
             pname = provider["name"]
+            test_btn.setToolTip("Verify this key works without saving it")
             test_btn.clicked.connect(lambda checked, p=pname: self._test_provider(p))
             row.addWidget(test_btn)
 
@@ -690,6 +693,7 @@ class SettingsDialog(QDialog):
 
         add_btn = QPushButton("Add Server")
         add_btn.setStyleSheet(_BTN_PRIMARY)
+        add_btn.setToolTip("Add and connect this server immediately")
         add_btn.clicked.connect(self._add_custom_server)
         custom_layout.addRow("", add_btn)
 

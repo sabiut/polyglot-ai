@@ -20,7 +20,9 @@ class AboutDialog(QDialog):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         title = QLabel(APP_NAME)
-        title.setStyleSheet(f"font-size: {tc.FONT_3XL}px; font-weight: bold; color: {tc.get('text_heading')};")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_3XL}px; font-weight: bold; color: {tc.get('text_heading')};"
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 

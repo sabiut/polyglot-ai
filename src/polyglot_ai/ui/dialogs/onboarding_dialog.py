@@ -117,6 +117,7 @@ class OnboardingDialog(QDialog):
             f"QPushButton:hover {{ color: {tc.get('text_primary')}; text-decoration: underline; }}"
         )
         self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._skip_btn.setToolTip("Closes setup — reopen anytime from the Help menu")
         self._skip_btn.clicked.connect(self.accept)
         nav_layout.addWidget(self._skip_btn)
 
@@ -252,6 +253,7 @@ class OnboardingDialog(QDialog):
             f"font-weight: 600; border: none; border-radius: 10px; }}"
             f"QPushButton:hover {{ background: {tc.get('accent_success_hover')}; }}"
         )
+        chatgpt_btn.setToolTip("Opens a terminal — requires Node.js")
         chatgpt_btn.clicked.connect(self._login_chatgpt)
         layout.addWidget(chatgpt_btn)
 
@@ -272,6 +274,7 @@ class OnboardingDialog(QDialog):
             f"font-weight: 600; border: none; border-radius: 10px; }}"
             f"QPushButton:hover {{ background: {tc.get('accent_claude_hover')}; }}"
         )
+        claude_btn.setToolTip("Opens a terminal — requires the Claude Code CLI")
         claude_btn.clicked.connect(self._login_claude)
         layout.addWidget(claude_btn)
 

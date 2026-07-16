@@ -142,6 +142,7 @@ class InsertRowDialog(QDialog):
             f"font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"#insertConfirm:hover {{ background: {tc.get('accent_success_hover')}; }}"
         )
+        insert_btn.setToolTip("Runs the INSERT now — this writes to the database")
         insert_btn.clicked.connect(self.accept)
         f_layout.addWidget(insert_btn)
 
@@ -252,6 +253,7 @@ class EditCellDialog(QDialog):
             f"padding: 0 20px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"#editCellSave:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
+        save_btn.setToolTip("Runs the UPDATE now — this writes to the database")
         save_btn.clicked.connect(self.accept)
         ft_layout.addWidget(save_btn)
 
@@ -508,6 +510,7 @@ class AddConnectionDialog(QDialog):
             f"padding: 0 20px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"#dbDialogConnBtn:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
+        connect_btn.setToolTip("Saves the connection — passwords are stored in your system keyring")
         connect_btn.clicked.connect(self.accept)
         f_layout.addWidget(connect_btn)
 

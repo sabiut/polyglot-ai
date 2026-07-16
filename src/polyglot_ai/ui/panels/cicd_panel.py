@@ -270,6 +270,7 @@ class CICDPanel(QWidget):
             f"font-size: {tc.FONT_XS}px; font-weight: 600; }}"
             f"#cicdLogsBtn:hover {{ background: {tc.get('accent_error_hover')}; }}"
         )
+        self._logs_btn.setToolTip("View logs (only failed jobs are fetched, for speed)")
         self._logs_btn.clicked.connect(self._fetch_failed_logs)
         jh_layout.addWidget(self._logs_btn)
 

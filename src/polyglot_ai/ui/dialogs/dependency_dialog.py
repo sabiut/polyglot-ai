@@ -269,6 +269,7 @@ class DependencyDialog(QDialog):
             btn_row.setContentsMargins(16, 4, 0, 0)
             install_btn = QPushButton("Install uv now")
             install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            install_btn.setToolTip("Installs uv in your user account — no sudo needed")
             install_btn.setStyleSheet(
                 f"QPushButton {{ background: {tc.get('accent_success_muted')}; color: {tc.get('text_on_success_muted')}; "
                 f"border: none; "
