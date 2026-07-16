@@ -72,16 +72,29 @@ class ApprovalDialog(QDialog):
         btn_layout.addStretch()
 
         reject_btn = QPushButton("Reject")
-        reject_btn.setStyleSheet(
-            f"background-color: {tc.get('border_feedback_neg')}; padding: 8px 20px;"
-        )
+        reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        reject_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("accent_error")};
+                font-size: {tc.FONT_BASE}px; font-weight: 600;
+                padding: 8px 20px; border: 1px solid {tc.get("border_input")};
+                border-radius: {tc.RADIUS_MD}px;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_feedback_neg")}; }}
+        """)
         reject_btn.clicked.connect(self._reject)
         btn_layout.addWidget(reject_btn)
 
         approve_btn = QPushButton("Approve")
-        approve_btn.setStyleSheet(
-            f"background-color: {tc.get('accent_primary')}; padding: 8px 20px;"
-        )
+        approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        approve_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {tc.get("accent_primary")}; color: {tc.get("text_on_accent")};
+                font-size: {tc.FONT_BASE}px; font-weight: 600;
+                padding: 8px 20px; border: none; border-radius: {tc.RADIUS_MD}px;
+            }}
+            QPushButton:hover {{ background: {tc.get("accent_primary_hover")}; }}
+        """)
         approve_btn.clicked.connect(self._approve)
         btn_layout.addWidget(approve_btn)
 
