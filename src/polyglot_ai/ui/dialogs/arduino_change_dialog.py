@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -52,6 +53,7 @@ from polyglot_ai.core.arduino.starters import (
     starter_destination,
 )
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
 
 # Friendly labels for the language chip / detection result.
 _LANG_LABEL: dict[Language, str] = {
@@ -141,9 +143,9 @@ class ArduinoChangeDialog(QDialog):
         tabs.setSpacing(8)
         self._tab_group = QButtonGroup(self)
         self._tab_group.setExclusive(True)
-        self._tab_starter = self._tab_button("📦  Pick a starter")
-        self._tab_blank = self._tab_button("📄  Start blank")
-        self._tab_existing = self._tab_button("📂  Open existing")
+        self._tab_starter = self._tab_button("  Pick a starter", shared_icons.draw_package_icon())
+        self._tab_blank = self._tab_button("  Start blank", shared_icons.draw_blank_page_icon())
+        self._tab_existing = self._tab_button("  Open existing", shared_icons.draw_folder_icon())
         self._tab_group.addButton(self._tab_starter, 0)
         self._tab_group.addButton(self._tab_blank, 1)
         self._tab_group.addButton(self._tab_existing, 2)
@@ -216,8 +218,10 @@ class ArduinoChangeDialog(QDialog):
         self._bb.rejected.connect(self.reject)
         outer.addWidget(self._bb)
 
-    def _tab_button(self, label: str) -> QPushButton:
+    def _tab_button(self, label: str, icon: QIcon | None = None) -> QPushButton:
         btn = QPushButton(label)
+        if icon is not None:
+            btn.setIcon(icon)
         btn.setCheckable(True)
         btn.setMinimumHeight(40)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -379,7 +383,8 @@ class ArduinoChangeDialog(QDialog):
         v.addWidget(intro)
 
         pick_row = QHBoxLayout()
-        pick_btn = QPushButton("📁  Choose folder…")
+        pick_btn = QPushButton("  Choose folder…")
+        pick_btn.setIcon(shared_icons.draw_folder_icon())
         pick_btn.setMinimumHeight(36)
         pick_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         pick_btn.clicked.connect(self._pick_existing_folder)
@@ -432,7 +437,7 @@ class ArduinoChangeDialog(QDialog):
         self._chosen_existing = detected
         if detected is None:
             self._existing_result_label.setText(
-                "❌  No Arduino-shaped file in this folder.<br>"
+                "✗  No Arduino-shaped file in this folder.<br>"
                 "<span style='color:" + tc.get("text_muted") + ";'>"
                 "We're looking for <b>*.ino</b>, <b>code.py</b>, "
                 "or <b>main.py</b> directly in this folder or one "
@@ -443,7 +448,7 @@ class ArduinoChangeDialog(QDialog):
             )
         else:
             self._existing_result_label.setText(
-                f"✅  Found <b>{detected.entry_file.name}</b> "
+                f"✓  Found <b>{detected.entry_file.name}</b> "
                 f"({_LANG_LABEL[detected.language]}) in "
                 f"<b>{detected.project_dir}</b>"
             )
