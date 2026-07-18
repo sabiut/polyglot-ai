@@ -270,7 +270,7 @@ class TestPanel(QWidget):
         )
         popout_btn.clicked.connect(self._on_popout_output)
         oh.addWidget(popout_btn)
-        clear_btn = make_icon_button(self._draw_clear_icon(), "Clear output")
+        clear_btn = make_icon_button(shared_icons.draw_trash_icon(), "Clear output")
         clear_btn.clicked.connect(lambda: self._output.clear())
         oh.addWidget(clear_btn)
         ow_layout.addWidget(out_header)
@@ -640,31 +640,6 @@ class TestPanel(QWidget):
         p.drawArc(QRectF(3, 3, 10, 10), 30 * 16, 300 * 16)
         p.drawLine(13, 2, 13, 6)
         p.drawLine(13, 6, 9, 6)
-        p.end()
-        return QIcon(pm)
-
-    @staticmethod
-    def _draw_clear_icon() -> QIcon:
-        """Trash / clear glyph for the clear-output button."""
-        pm = QPixmap(16, 16)
-        pm.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.5)
-        p.setPen(pen)
-        # Lid
-        p.drawLine(3, 5, 13, 5)
-        p.drawLine(6, 5, 6, 3)
-        p.drawLine(6, 3, 10, 3)
-        p.drawLine(10, 3, 10, 5)
-        # Bin body
-        p.drawLine(4, 5, 5, 14)
-        p.drawLine(12, 5, 11, 14)
-        p.drawLine(5, 14, 11, 14)
-        # Vertical strokes
-        p.drawLine(7, 7, 7, 12)
-        p.drawLine(9, 7, 9, 12)
         p.end()
         return QIcon(pm)
 

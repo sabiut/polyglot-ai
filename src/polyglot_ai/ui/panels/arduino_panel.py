@@ -66,6 +66,7 @@ from polyglot_ai.core.arduino.service import (
 )
 from polyglot_ai.core.arduino.starters import copy_starter
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import nav_icons, shared_icons
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +446,7 @@ class ArduinoPanel(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(12)
 
-        msg = QLabel("📂  No project loaded yet.")
+        msg = QLabel("No project loaded yet.")
         msg.setStyleSheet(
             f"color: {tc.get('text_primary')}; "
             f"font-size: {tc.FONT_LG}px; "
@@ -492,17 +493,20 @@ class ArduinoPanel(QWidget):
         # description — they've already seen three, this opens the
         # rest. Without (catalog failed to load), the original
         # "Pick a starter" stays.
-        starter_btn = QPushButton("📦  More starters…" if top_starters else "📦  Pick a starter")
+        starter_btn = QPushButton("  More starters…" if top_starters else "  Pick a starter")
+        starter_btn.setIcon(shared_icons.draw_package_icon())
         starter_btn.setMinimumHeight(40)
         starter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         starter_btn.setStyleSheet(self._primary_button_qss())
         starter_btn.clicked.connect(lambda: self._open_change_dialog(initial_tab=0))
-        blank_btn = QPushButton("📄  Start blank")
+        blank_btn = QPushButton("  Start blank")
+        blank_btn.setIcon(shared_icons.draw_blank_page_icon())
         blank_btn.setMinimumHeight(40)
         blank_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         blank_btn.setStyleSheet(self._secondary_button_qss())
         blank_btn.clicked.connect(lambda: self._open_change_dialog(initial_tab=1))
-        existing_btn = QPushButton("📂  Open existing")
+        existing_btn = QPushButton("  Open existing")
+        existing_btn.setIcon(shared_icons.draw_folder_icon())
         existing_btn.setMinimumHeight(40)
         existing_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         existing_btn.setStyleSheet(self._secondary_button_qss())
@@ -732,7 +736,7 @@ class ArduinoPanel(QWidget):
         # the user can plan ahead.
         self._status_view.setPlaceholderText(
             "Pick a project → plug in your board → press Upload.\n"
-            "Progress and messages will show up here. ✨"
+            "Progress and messages will show up here."
         )
         card.add_widget(self._status_view)
 
@@ -744,7 +748,8 @@ class ArduinoPanel(QWidget):
         # was no path to it. Label flips between "Ask AI for help"
         # (pre-run / success) and "Explain this error" (after a
         # failure) via ``_refresh_ai_button``.
-        self._ai_help_button = QPushButton("💬  Ask AI for help")
+        self._ai_help_button = QPushButton("  Ask AI for help")
+        self._ai_help_button.setIcon(nav_icons.make_chat_icon())
         self._ai_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ai_help_button.setMinimumHeight(38)
         self._ai_help_button.setToolTip("Sends your code and any error details to the chat panel")
@@ -757,9 +762,9 @@ class ArduinoPanel(QWidget):
         """Pick the right label based on whether a fail was recent."""
         has_error = bool(self._service.last_error_detail)
         if has_error:
-            self._ai_help_button.setText("💬  Explain this error")
+            self._ai_help_button.setText("  Explain this error")
         else:
-            self._ai_help_button.setText("💬  Ask AI for help")
+            self._ai_help_button.setText("  Ask AI for help")
 
     # Step 4 — serial monitor --------------------------------------
 
@@ -1063,7 +1068,8 @@ class ArduinoPanel(QWidget):
         )
         v.addWidget(wipe_blurb)
 
-        self._wipe_button = QPushButton("🗑  Erase user code")
+        self._wipe_button = QPushButton("  Erase user code")
+        self._wipe_button.setIcon(shared_icons.draw_trash_icon())
         self._wipe_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wipe_button.setMinimumHeight(34)
         # NB: the closer for the ``:hover`` rule is a *plain*
@@ -1543,7 +1549,7 @@ class ArduinoPanel(QWidget):
             tc_state = self._service.detect_toolchains()
             if not tc_state.pyserial_ok and not tc_state.can_cpp:
                 self._detection_label.setText(
-                    "🔌  Plug in your board with the USB cable — "
+                    "Plug in your board with the USB cable — "
                     "we'll spot it automatically.<br>"
                     f"<span style='color:{tc.get('text_muted')}; "
                     f"font-size:{tc.FONT_SM}px;'>"
@@ -1552,7 +1558,7 @@ class ArduinoPanel(QWidget):
                 )
             else:
                 self._detection_label.setText(
-                    "🔌  Plug in your board with the USB cable — "
+                    "Plug in your board with the USB cable — "
                     "we'll spot it automatically.<br>"
                     f"<span style='color:{tc.get('text_muted')}; "
                     f"font-size:{tc.FONT_SM}px;'>"
@@ -1571,7 +1577,7 @@ class ArduinoPanel(QWidget):
             self._port = preferred.port
             display = preferred.board.display_name if preferred.board else "Unknown board"
             self._detection_label.setText(
-                f"✅  Found: <b>{display}</b>  "
+                f"✓  Found: <b>{display}</b>  "
                 f"<span style='color:{tc.get('text_muted')}; "
                 f"font-size:{tc.FONT_SM}px;'>on {preferred.port}</span>"
             )
@@ -1656,7 +1662,8 @@ class ArduinoPanel(QWidget):
             )
 
         # Inline button below the hint — one tap, kid-actionable.
-        copy_btn = QPushButton("📋  Copy the command")
+        copy_btn = QPushButton("  Copy the command")
+        copy_btn.setIcon(shared_icons.draw_copy_icon())
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.setMinimumHeight(32)
         copy_btn.setStyleSheet(self._secondary_button_qss())
@@ -2217,7 +2224,7 @@ class ArduinoPanel(QWidget):
             "progress": tc.get("text_primary"),
             "hint": tc.get("accent_primary"),
         }.get(kind, tc.get("text_primary"))
-        prefix = {"ok": "✅", "fail": "❌", "progress": "•", "hint": "→"}.get(kind, "•")
+        prefix = {"ok": "✓", "fail": "✗", "progress": "•", "hint": "→"}.get(kind, "•")
         self._status_view.append(f'<span style="color: {colour};">{prefix} {message}</span>')
 
     def _announce_next_step(self) -> None:
