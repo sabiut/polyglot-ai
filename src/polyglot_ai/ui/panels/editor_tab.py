@@ -376,6 +376,37 @@ class EditorTab(QWidget):
         editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsDocument)
         editor.setAutoCompletionThreshold(3)
 
+        # User-configurable bits (word wrap, line numbers). Settings are
+        # injected after construction, so this first pass applies the
+        # built-in defaults; ``set_ai_services`` re-applies from the
+        # real SettingsManager once it lands.
+        self._apply_editor_settings()
+
+    def _apply_editor_settings(self) -> None:
+        """Apply user-configurable editor settings to the QScintilla widget.
+
+        Reads ``editor.word_wrap`` and ``editor.show_line_numbers`` from
+        the injected SettingsManager, falling back to the app defaults
+        when ``self._settings`` hasn't been injected yet (it arrives via
+        ``set_ai_services`` after ``__init__``). Tabs that are already
+        open are not live-updated when settings change; new tabs pick up
+        the new values.
+        """
+        if self._settings is not None:
+            word_wrap = bool(self._settings.get("editor.word_wrap"))
+            show_line_numbers = bool(self._settings.get("editor.show_line_numbers"))
+        else:
+            word_wrap = False
+            show_line_numbers = True
+
+        self._editor.setWrapMode(
+            QsciScintilla.WrapMode.WrapWord if word_wrap else QsciScintilla.WrapMode.WrapNone
+        )
+        if show_line_numbers:
+            self._editor.setMarginWidth(0, "00000")
+        else:
+            self._editor.setMarginWidth(0, 0)
+
     def _setup_lexer(self, suffix: str) -> None:
         # Log files use a custom lexer with its own styling
         if suffix in _LOG_EXTENSIONS:
@@ -664,6 +695,9 @@ class EditorTab(QWidget):
     def set_ai_services(self, provider_manager, settings) -> None:
         self._provider_manager = provider_manager
         self._settings = settings
+        # Settings arrive after __init__ ran _setup_editor with defaults;
+        # re-apply the user's word-wrap / line-number preferences now.
+        self._apply_editor_settings()
 
     def _on_text_changed(self) -> None:
         """Restart completion timer on text change."""

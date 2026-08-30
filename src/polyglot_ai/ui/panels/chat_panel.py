@@ -367,10 +367,18 @@ class ChatPanel(QWidget):
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search conversations...")
         self._search_input.setFixedHeight(28)
-        self._search_input.textChanged.connect(
-            lambda q: conv_list_actions.filter_by_search(self._conv_list, q)
-        )
+        self._search_input.textChanged.connect(self._on_conversation_search)
         sidebar_layout.addWidget(self._search_input)
+
+        # Debounce for the message-content half of the search: titles
+        # filter instantly on each keystroke; the DB LIKE query over
+        # message bodies waits for a typing pause.
+        from PyQt6.QtCore import QTimer as _QTimer
+
+        self._conv_search_timer = _QTimer(self)
+        self._conv_search_timer.setSingleShot(True)
+        self._conv_search_timer.setInterval(300)
+        self._conv_search_timer.timeout.connect(self._start_conversation_content_search)
 
         # Category filter buttons
         self._cat_widget = QWidget()
@@ -2305,6 +2313,36 @@ class ChatPanel(QWidget):
 
         safe_task(self.populate_conversations(), name="populate_conversations")
 
+    def _on_conversation_search(self, query: str) -> None:
+        """Keystroke handler: instant title filter + debounced content search."""
+        conv_list_actions.filter_by_search(self._conv_list, query)
+        self._conv_search_timer.stop()
+        if query.strip():
+            self._conv_search_timer.start()
+
+    def _start_conversation_content_search(self) -> None:
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_conversation_content_search(), name="conversation_search")
+
+    async def _run_conversation_content_search(self) -> None:
+        """Widen the sidebar filter with message-content matches."""
+        query = self._search_input.text().strip()
+        if not query or not self._db:
+            return
+        try:
+            rows = await self._db.search_conversations(query)
+        except Exception:
+            logger.exception("conversation content search failed")
+            return
+        # The user may have kept typing while the query ran — results
+        # for a stale query would wrongly unhide rows.
+        if query != self._search_input.text().strip():
+            return
+        conv_list_actions.filter_by_search(
+            self._conv_list, query, content_match_ids={r["id"] for r in rows}
+        )
+
     async def populate_conversations(self) -> None:
         """Render the conversation sidebar with cleaned-up titles.
 
@@ -3061,11 +3099,50 @@ class ChatPanel(QWidget):
     # ─── Public API ─────────────────────────────────────────────────
 
     async def populate_models(self) -> None:
-        """Refresh model list from providers."""
+        """Rebuild the model dropdown from providers' live model lists.
+
+        The hardcoded defaults from ``_populate_default_models`` stay
+        in place when no provider is registered or every fetch fails
+        (offline launch, bad keys) — a usable dropdown beats an empty
+        one. On success the combo shows what the user's keys actually
+        grant instead of a static list that drifts with every model
+        release.
+        """
         if not self._provider_manager:
             return
-        # Keep current default models, add live ones if available
-        pass
+        try:
+            entries = await self._provider_manager.get_all_models()
+        except Exception:
+            logger.exception("live model fetch failed; keeping default model list")
+            return
+        if not entries:
+            return
+
+        current = self._model_combo.currentData()
+        self._model_combo.clear()
+        grouped: dict[str, list] = {}
+        for entry in entries:
+            grouped.setdefault(entry.provider_display, []).append(entry)
+        for provider_display, group in grouped.items():
+            self._model_combo.addHeader(f"── {provider_display} ──")
+            for entry in group:
+                caps = _MODEL_CAPS.get(entry.model_id, {})
+                self._model_combo.addItemWithDesc(
+                    entry.model_id, caps.get("desc", ""), entry.full_id
+                )
+        # Restore the previous selection; fall back to the global
+        # default, then to the first real (non-header) entry.
+        for target in (current, "openai:gpt-5.5"):
+            if not target:
+                continue
+            for i in range(self._model_combo.count()):
+                if self._model_combo.itemData(i) == target:
+                    self._model_combo.setCurrentIndex(i)
+                    return
+        for i in range(self._model_combo.count()):
+            if self._model_combo.itemData(i):
+                self._model_combo.setCurrentIndex(i)
+                return
 
     def set_provider_manager(self, pm: ProviderManager) -> None:
         self._provider_manager = pm

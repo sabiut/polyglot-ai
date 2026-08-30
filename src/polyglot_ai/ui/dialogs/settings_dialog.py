@@ -7,6 +7,7 @@ import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -115,6 +116,10 @@ _INPUT_STYLE = (
     f"  border-radius: 5px; padding: 6px 10px; font-size: {tc.FONT_BASE}px;"
     f"}}"
     f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
+)
+_CHECKBOX_STYLE = (
+    f"QCheckBox {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_BASE}px; }}"
+    f"QCheckBox::indicator {{ width: 14px; height: 14px; }}"
 )
 _SECTION_TITLE = f"font-size: {tc.FONT_XL}px; font-weight: bold; color: {tc.get('text_heading')}; margin-bottom: 2px;"
 _SECTION_DESC = f"font-size: {tc.FONT_MD}px; color: {tc.get('text_tertiary')}; margin-bottom: 12px;"
@@ -532,7 +537,37 @@ class SettingsDialog(QDialog):
         self._theme_combo.setCurrentText(self._settings.get("theme"))
         form.addRow("Theme:", self._theme_combo)
 
+        self._word_wrap = QCheckBox()
+        self._word_wrap.setStyleSheet(_CHECKBOX_STYLE)
+        self._word_wrap.setChecked(bool(self._settings.get("editor.word_wrap")))
+        self._word_wrap.setToolTip(
+            "Wrap long lines at the window edge instead of scrolling horizontally"
+        )
+        form.addRow("Word Wrap:", self._word_wrap)
+
+        self._show_line_numbers = QCheckBox()
+        self._show_line_numbers.setStyleSheet(_CHECKBOX_STYLE)
+        self._show_line_numbers.setChecked(bool(self._settings.get("editor.show_line_numbers")))
+        self._show_line_numbers.setToolTip("Show the line-number margin in the editor")
+        form.addRow("Line Numbers:", self._show_line_numbers)
+
+        self._ai_completions = QCheckBox()
+        self._ai_completions.setStyleSheet(_CHECKBOX_STYLE)
+        self._ai_completions.setChecked(bool(self._settings.get("editor.ai_completions")))
+        self._ai_completions.setToolTip(
+            "Suggest inline AI completions while you type (requires a configured provider)"
+        )
+        form.addRow("Inline AI Completions:", self._ai_completions)
+
         layout.addWidget(card)
+
+        note = QLabel("Editor changes apply to tabs opened after saving.")
+        note.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 6px;"
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
         layout.addStretch()
         return page
 
@@ -603,6 +638,36 @@ class SettingsDialog(QDialog):
         form.addRow("System Prompt:", self._system_prompt)
 
         layout.addWidget(card)
+
+        # ── Notifications ──
+        notif_card = QGroupBox("Notifications")
+        notif_card.setStyleSheet(_CARD_STYLE)
+        notif_form = QFormLayout(notif_card)
+        notif_form.setSpacing(12)
+        notif_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._notifications_enabled = QCheckBox("Enable notifications")
+        self._notifications_enabled.setStyleSheet(_CHECKBOX_STYLE)
+        self._notifications_enabled.setChecked(bool(self._settings.get("notifications.enabled")))
+        self._notifications_enabled.setToolTip(
+            "Show desktop notifications when the app is in the background"
+        )
+        notif_form.addRow("", self._notifications_enabled)
+
+        self._notify_long_response_secs = QSpinBox()
+        self._notify_long_response_secs.setRange(5, 600)
+        self._notify_long_response_secs.setSuffix(" s")
+        self._notify_long_response_secs.setValue(
+            int(self._settings.get("notifications.ai_long_response_seconds"))
+        )
+        self._notify_long_response_secs.setToolTip(
+            "AI responses that finish faster than this don't trigger a notification"
+        )
+        notif_form.addRow(
+            "Notify when a response takes longer than:", self._notify_long_response_secs
+        )
+
+        layout.addWidget(notif_card)
         layout.addStretch()
         return page
 
@@ -1117,6 +1182,9 @@ class SettingsDialog(QDialog):
         await self._settings.set("editor.font_family", self._font_family.currentText())
         await self._settings.set("editor.font_size", self._font_size.value())
         await self._settings.set("editor.tab_size", self._tab_size.value())
+        await self._settings.set("editor.word_wrap", self._word_wrap.isChecked())
+        await self._settings.set("editor.show_line_numbers", self._show_line_numbers.isChecked())
+        await self._settings.set("editor.ai_completions", self._ai_completions.isChecked())
         await self._settings.set("theme", self._theme_combo.currentText())
         await self._settings.set("ai.default_model", self._default_model.currentText())
         await self._settings.set("ai.temperature", self._temperature.value() / 10.0)
@@ -1124,5 +1192,9 @@ class SettingsDialog(QDialog):
         await self._settings.set("ai.system_prompt", self._system_prompt.toPlainText())
         await self._settings.set("terminal.shell", self._shell_path.text())
         await self._settings.set("terminal.font_size", self._term_font_size.value())
+        await self._settings.set("notifications.enabled", self._notifications_enabled.isChecked())
+        await self._settings.set(
+            "notifications.ai_long_response_seconds", self._notify_long_response_secs.value()
+        )
 
         logger.info("Settings saved")

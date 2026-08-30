@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -16,6 +18,9 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.core.review.models import ReviewFinding, ReviewResult
 from polyglot_ai.ui import theme_colors as tc
+
+if TYPE_CHECKING:
+    from polyglot_ai.ui.panels.editor_panel import EditorPanel
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,7 @@ class ReviewPanel(QWidget):
         super().__init__(parent)
         self._review_engine = None
         self._provider_manager = None
+        self._editor_panel: EditorPanel | None = None
         self._project_root: str = ""
         self._current_result: ReviewResult | None = None
         # Set later via set_event_bus() once init_task_manager has run.
@@ -237,6 +243,15 @@ class ReviewPanel(QWidget):
 
     def set_provider_manager(self, pm) -> None:
         self._provider_manager = pm
+
+    def set_editor_panel(self, editor_panel: EditorPanel) -> None:
+        """Wire the editor panel so finding locations are clickable.
+
+        Optional — without it the location text still renders, it just
+        doesn't navigate. Panel-internal tests therefore don't need a
+        real EditorPanel fixture.
+        """
+        self._editor_panel = editor_panel
 
     def set_project_root(self, path: str) -> None:
         self._project_root = path
@@ -622,13 +637,18 @@ class ReviewPanel(QWidget):
 
         top.addStretch()
 
-        file_label = QLabel(f"📄 {finding.file}:{finding.line}")
-        file_label.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; color: {tc.get('accent_info')}; "
-            "background: transparent; border: none;"
+        loc_text = f"{finding.file}:{finding.line}" if finding.line else finding.file
+        file_btn = QPushButton(loc_text)
+        file_btn.setFlat(True)
+        file_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        file_btn.setToolTip("Open in editor")
+        file_btn.setStyleSheet(
+            f"QPushButton {{ font-size: {tc.FONT_SM}px; color: {tc.get('text_link')}; "
+            "background: transparent; border: none; padding: 0; }"
+            "QPushButton:hover { text-decoration: underline; }"
         )
-        file_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        top.addWidget(file_label)
+        file_btn.clicked.connect(lambda _checked=False, f=finding: self._open_finding_location(f))
+        top.addWidget(file_btn)
 
         layout.addLayout(top)
 
@@ -663,6 +683,36 @@ class ReviewPanel(QWidget):
             layout.addWidget(suggestion)
 
         return card
+
+    def _open_finding_location(self, finding: ReviewFinding) -> None:
+        """Jump the editor to a finding's file:line.
+
+        Relative paths (the usual case — diffs are repo-relative) are
+        resolved against the project root. A missing file (deleted or
+        renamed since the review ran) is a status tooltip, never a
+        crash. ``line`` of 0/None opens the file without scrolling.
+        """
+        if self._editor_panel is None or not finding.file:
+            return
+        path = Path(finding.file)
+        if not path.is_absolute():
+            if not self._project_root:
+                return
+            path = Path(self._project_root) / path
+        if not path.is_file():
+            logger.warning("review_panel: finding file no longer exists: %s", path)
+            self._show_missing_file_tooltip(path)
+            return
+        try:
+            self._editor_panel.open_file_at(path, finding.line or None)
+        except Exception:
+            logger.exception("review_panel: failed to open %s in editor", path)
+
+    def _show_missing_file_tooltip(self, path: Path) -> None:
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtWidgets import QToolTip
+
+        QToolTip.showText(QCursor.pos(), f"File not found: {path}", self)
 
     # ── Copy results to clipboard ─────────────────────────────────
     def _format_results_as_text(self, result: ReviewResult) -> str:

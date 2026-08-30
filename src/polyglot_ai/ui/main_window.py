@@ -121,6 +121,9 @@ class MainWindow(QMainWindow):
         self._test_panel.set_editor_panel(self._editor_panel)
         self._chat_panel = ChatPanel()
         self._review_panel = ReviewPanel()
+        # Same editor wiring for the review panel: clicking a finding's
+        # file:line jumps the editor to that location.
+        self._review_panel.set_editor_panel(self._editor_panel)
         self._cicd_panel = CICDPanel()
         self._terminal_panel = TerminalPanel()
 

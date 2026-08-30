@@ -87,7 +87,7 @@ def show_context_menu(panel: "ChatPanel", position) -> None:
 
     menu.addSeparator()
 
-    export_act = menu.addAction("Export as text...")
+    export_act = menu.addAction("Export as Markdown...")
     export_act.triggered.connect(lambda: export(panel, conv_id))
 
     menu.addSeparator()
@@ -181,9 +181,9 @@ def pin(panel: "ChatPanel", conv_id: int) -> None:
 
 
 def export(panel: "ChatPanel", conv_id: int) -> None:
-    """Write the conversation's messages to a text file chosen via dialog."""
+    """Write the conversation to a Markdown file chosen via dialog."""
     path, _ = QFileDialog.getSaveFileName(
-        panel, "Export Conversation", "conversation.txt", "Text Files (*.txt)"
+        panel, "Export Conversation", "conversation.md", "Markdown (*.md);;Text Files (*.txt)"
     )
     if not path:
         return
@@ -191,13 +191,10 @@ def export(panel: "ChatPanel", conv_id: int) -> None:
     async def _do_export():
         if not panel._db:
             return
+        rows = await panel._db.fetchall("SELECT * FROM conversations WHERE id = ?", (conv_id,))
+        conv = rows[0] if rows else {}
         messages = await panel._db.get_messages(conv_id)
-        lines = []
-        for msg in messages:
-            role = msg.get("role", "?").upper()
-            content = msg.get("content", "")
-            lines.append(f"[{role}]\n{content}\n")
-        text = "\n".join(lines)
+        text = format_conversation_markdown(conv, messages)
         from polyglot_ai.core.async_utils import run_blocking
 
         await run_blocking(Path(path).write_text, text, "utf-8")
@@ -207,10 +204,70 @@ def export(panel: "ChatPanel", conv_id: int) -> None:
     safe_task(_do_export(), name="export_conversation")
 
 
-def filter_by_search(conv_list: QListWidget, query: str) -> None:
-    """Hide rows that don't match ``query`` (case-insensitive substring)."""
+def format_conversation_markdown(conv: dict, messages: list[dict]) -> str:
+    """Render a conversation as Markdown: title, metadata, messages.
+
+    Tool calls become fenced JSON blocks and tool results fenced text
+    blocks, so agentic turns stay readable instead of dumping raw
+    payloads mid-paragraph. Kept as a pure function for testability.
+    """
+    from datetime import datetime
+
+    lines = [f"# {conv.get('title') or 'Conversation'}", ""]
+    meta = [
+        ("Model", conv.get("model")),
+        ("Created", conv.get("created_at")),
+        ("Updated", conv.get("updated_at")),
+        ("Exported", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    ]
+    lines += [f"- **{k}:** {v}" for k, v in meta if v]
+    lines += ["", "---", ""]
+
+    for msg in messages:
+        role = msg.get("role", "?")
+        if role == "system":
+            continue  # boilerplate context, not part of the dialogue
+        heading = role.capitalize()
+        if role == "assistant" and msg.get("model"):
+            heading += f" ({msg['model']})"
+        lines.append(f"## {heading}")
+        lines.append("")
+        if role == "tool":
+            lines += ["```", (msg.get("content") or "").rstrip(), "```"]
+        elif msg.get("content"):
+            lines.append(msg["content"].rstrip())
+        for tc_entry in msg.get("tool_calls") or []:
+            fn = tc_entry.get("function", {}) if isinstance(tc_entry, dict) else {}
+            lines += [
+                "",
+                f"**Tool call: `{fn.get('name', '?')}`**",
+                "",
+                "```json",
+                fn.get("arguments", "{}"),
+                "```",
+            ]
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def filter_by_search(
+    conv_list: QListWidget,
+    query: str,
+    content_match_ids: set[int] | None = None,
+) -> None:
+    """Hide rows whose title doesn't match ``query``.
+
+    ``content_match_ids`` — conversation ids whose *message contents*
+    matched (from ``Database.search_conversations``) — keeps rows
+    visible even when the title alone doesn't match. The panel passes
+    it after the debounced async content search completes; the initial
+    keystroke filters on titles only, so typing stays instant.
+    """
     q = query.lower().strip()
+    ids = content_match_ids or set()
     for i in range(conv_list.count()):
         item = conv_list.item(i)
         if item:
-            item.setHidden(bool(q) and q not in item.text().lower())
+            title_hit = q in item.text().lower()
+            content_hit = item.data(Qt.ItemDataRole.UserRole) in ids
+            item.setHidden(bool(q) and not title_hit and not content_hit)

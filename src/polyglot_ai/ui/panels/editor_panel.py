@@ -160,6 +160,26 @@ class EditorPanel(QTabWidget):
 
         self._refresh_tab_map()
 
+    def open_file_at(self, path: Path, line: int | None = None) -> None:
+        """Open ``path`` and move the cursor to 1-based ``line``.
+
+        ``line`` of ``None`` (or anything < 1) opens the file without
+        scrolling — callers pass finding/test locations straight
+        through without having to special-case "no line info".
+        Non-code tabs (markdown/preview) just open normally.
+        """
+        self.open_file(path)
+        if line is None or line < 1:
+            return
+        tab = self.get_current_tab()
+        if not isinstance(tab, EditorTab):
+            return
+        editor = tab.editor
+        target = min(line - 1, max(editor.lines() - 1, 0))
+        editor.setCursorPosition(target, 0)
+        editor.ensureLineVisible(target)
+        editor.setFocus()
+
     def new_file(self) -> None:
         """Create a new untitled file tab."""
         self._remove_placeholder()

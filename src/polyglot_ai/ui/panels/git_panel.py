@@ -30,6 +30,11 @@ from PyQt6.QtWidgets import (
 
 logger = logging.getLogger(__name__)
 
+# Extra QListWidgetItem data role storing the single-letter git status
+# code ("M", "A", "D", "?" …) so the diff dialog knows whether the file
+# has a HEAD version to diff against.
+STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 class GitPanel(QWidget):
     """VS Code-style source control sidebar."""
@@ -194,6 +199,34 @@ class GitPanel(QWidget):
 
         commit_layout.addLayout(actions_row)
 
+        # Pull + Fetch row — sync FROM the remote (the counterpart of
+        # Push above). Both are secondary (outlined) actions.
+        sync_row = QHBoxLayout()
+        sync_row.setSpacing(6)
+
+        self._pull_btn = QPushButton("⇣  Pull")
+        self._pull_btn.setFixedHeight(28)
+        self._pull_btn.setToolTip(
+            "Pull the latest changes for the current branch from origin "
+            "(fetch + merge). Fails safely if the merge conflicts with "
+            "local changes."
+        )
+        self._pull_btn.setStyleSheet(self._secondary_button_style())
+        self._pull_btn.clicked.connect(self._on_pull)
+        sync_row.addWidget(self._pull_btn, stretch=1)
+
+        self._fetch_btn = QPushButton("⇵  Fetch")
+        self._fetch_btn.setFixedHeight(28)
+        self._fetch_btn.setToolTip(
+            "Fetch the latest refs from origin without touching your "
+            "working tree or current branch."
+        )
+        self._fetch_btn.setStyleSheet(self._secondary_button_style())
+        self._fetch_btn.clicked.connect(self._on_fetch)
+        sync_row.addWidget(self._fetch_btn, stretch=1)
+
+        commit_layout.addLayout(sync_row)
+
         # AI PR description generator — runs the branch diff through the
         # review engine with a dedicated prompt and shows the result in
         # a dialog with copy + `gh pr create` actions.
@@ -218,13 +251,11 @@ class GitPanel(QWidget):
         layout.addWidget(commit_widget)
 
         # Staged section
-        staged_label = QLabel("  STAGED CHANGES")
-        staged_label.setFixedHeight(24)
-        staged_label.setStyleSheet(
-            f"font-size: {tc.FONT_XS}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
-            f"background: {tc.get('bg_surface')}; letter-spacing: 0.5px; padding-left: {tc.SPACING_MD}px;"
+        self._unstage_all_btn = self._section_action_button(
+            "Unstage All", "Unstage every staged file (git reset)"
         )
-        layout.addWidget(staged_label)
+        self._unstage_all_btn.clicked.connect(self._on_unstage_all)
+        layout.addWidget(self._section_header("STAGED CHANGES", self._unstage_all_btn))
 
         self._staged_list = QListWidget()
         self._staged_list.setMaximumHeight(120)
@@ -233,22 +264,26 @@ class GitPanel(QWidget):
         self._staged_list.customContextMenuRequested.connect(
             lambda pos: self._show_file_menu(pos, staged=True)
         )
+        self._staged_list.itemDoubleClicked.connect(
+            lambda item: self._on_file_double_clicked(item, staged=True)
+        )
         layout.addWidget(self._staged_list)
 
         # Unstaged section
-        unstaged_label = QLabel("  CHANGES")
-        unstaged_label.setFixedHeight(24)
-        unstaged_label.setStyleSheet(
-            f"font-size: {tc.FONT_XS}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
-            f"background: {tc.get('bg_surface')}; letter-spacing: 0.5px; padding-left: {tc.SPACING_MD}px;"
+        self._stage_all_btn = self._section_action_button(
+            "Stage All", "Stage every change, including untracked files (git add -A)"
         )
-        layout.addWidget(unstaged_label)
+        self._stage_all_btn.clicked.connect(self._on_stage_all)
+        layout.addWidget(self._section_header("CHANGES", self._stage_all_btn))
 
         self._unstaged_list = QListWidget()
         self._unstaged_list.setStyleSheet(self._list_style())
         self._unstaged_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._unstaged_list.customContextMenuRequested.connect(
             lambda pos: self._show_file_menu(pos, staged=False)
+        )
+        self._unstaged_list.itemDoubleClicked.connect(
+            lambda item: self._on_file_double_clicked(item, staged=False)
         )
         layout.addWidget(self._unstaged_list)
 
@@ -264,6 +299,55 @@ class GitPanel(QWidget):
             QListWidget::item:selected {{ background: {tc.get("bg_active")}; }}
             QListWidget::item:hover:!selected {{ background: {tc.get("bg_hover_subtle")}; }}
         """
+
+    @staticmethod
+    def _secondary_button_style() -> str:
+        """Outlined secondary-action style — same rules as the Push button."""
+        return f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("text_primary")};
+                border: 1px solid {tc.get("border_card")}; border-radius: {tc.RADIUS_SM}px;
+                font-size: {tc.FONT_MD}px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; }}
+            QPushButton:disabled {{ color: {tc.get("text_disabled")}; }}
+        """
+
+    def _section_action_button(self, text: str, tooltip: str) -> QPushButton:
+        """Small flat text button that sits inside a section header row."""
+        btn = QPushButton(text)
+        btn.setFixedHeight(18)
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {tc.get("text_tertiary")};
+                border: none; border-radius: {tc.RADIUS_SM}px;
+                font-size: {tc.FONT_XS}px; font-weight: 600; padding: 0 6px;
+            }}
+            QPushButton:hover {{ background: {tc.get("bg_hover")}; color: {tc.get("text_primary")}; }}
+        """)
+        return btn
+
+    def _section_header(self, title: str, button: QPushButton) -> QWidget:
+        """Section header row: uppercase title on the left, action button
+        on the right. Replaces the old plain QLabel headers so bulk
+        stage/unstage actions live next to the lists they act on."""
+        row = QWidget()
+        row.setFixedHeight(24)
+        row.setStyleSheet(f"background: {tc.get('bg_surface')};")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(tc.SPACING_MD, 0, 6, 0)
+        row_layout.setSpacing(4)
+        label = QLabel(title)
+        label.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
+            "background: transparent; letter-spacing: 0.5px;"
+        )
+        row_layout.addWidget(label)
+        row_layout.addStretch()
+        row_layout.addWidget(button)
+        return row
 
     # ── Painted header icons ──
 
@@ -698,6 +782,246 @@ class GitPanel(QWidget):
         self._push_btn.setEnabled(True)
         self._push_btn.setText("⇡ Push branch")
 
+    # ── Pull / Fetch ──
+
+    def _on_pull(self) -> None:
+        """Pull the current branch from origin on a background task."""
+        if self._project_root is None:
+            show_message(self, "No project", "Open a project first.", kind="info")
+            return
+        self._pull_btn.setEnabled(False)
+        self._pull_btn.setText("⇣  Pulling…")
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_pull(), name="git_pull")
+
+    async def _run_pull(self) -> None:
+        try:
+            output = await self._run_git("pull")
+        except Exception as e:
+            # Expected failure modes: dirty worktree ("Your local changes
+            # would be overwritten"), merge conflicts, no upstream, no
+            # network. _run_git already folds git's stderr into the
+            # exception message, so just surface it — never crash.
+            logger.exception("git_panel: pull failed")
+            self._reset_pull_button()
+            show_message(self, "Pull failed", str(e), kind="error")
+            self._refresh()  # a conflicted merge changes the status lists
+            return
+        self._reset_pull_button()
+        self._refresh()
+        show_message(self, "Pull succeeded", self._summarize_pull(output), kind="info")
+
+    @staticmethod
+    def _summarize_pull(output: str) -> str:
+        """Condense `git pull` stdout to a one-line summary.
+
+        git prints e.g. " 3 files changed, 10 insertions(+)" as the
+        last non-empty line, or "Already up to date." when idle.
+        """
+        lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+        if not lines:
+            return "Pulled from origin."
+        if any("up to date" in ln.lower() for ln in lines):
+            return "Already up to date."
+        return f"Pulled: {lines[-1]}"
+
+    def _reset_pull_button(self) -> None:
+        self._pull_btn.setEnabled(True)
+        self._pull_btn.setText("⇣  Pull")
+
+    def _on_fetch(self) -> None:
+        """Fetch refs from origin on a background task (no merge)."""
+        if self._project_root is None:
+            show_message(self, "No project", "Open a project first.", kind="info")
+            return
+        self._fetch_btn.setEnabled(False)
+        self._fetch_btn.setText("⇵  Fetching…")
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_fetch(), name="git_fetch")
+
+    async def _run_fetch(self) -> None:
+        try:
+            await self._run_git("fetch", "origin")
+        except Exception as e:
+            logger.exception("git_panel: fetch failed")
+            self._reset_fetch_button()
+            show_message(self, "Fetch failed", str(e), kind="error")
+            return
+        self._reset_fetch_button()
+        self._refresh()
+        show_message(
+            self,
+            "Fetch complete",
+            "Fetched the latest refs from origin. Your working tree is unchanged.",
+            kind="info",
+        )
+
+    def _reset_fetch_button(self) -> None:
+        self._fetch_btn.setEnabled(True)
+        self._fetch_btn.setText("⇵  Fetch")
+
+    # ── Stage All / Unstage All ──
+
+    def _on_stage_all(self) -> None:
+        """Stage every change (`git add -A`) on a background task."""
+        if self._project_root is None:
+            return
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_stage_all(), name="git_stage_all")
+
+    async def _run_stage_all(self) -> None:
+        try:
+            await self._run_git("add", "-A")
+        except Exception as e:
+            logger.exception("git_panel: stage all failed")
+            show_message(self, "Stage all failed", str(e), kind="error")
+            return
+        self._refresh()
+
+    def _on_unstage_all(self) -> None:
+        """Unstage everything (`git reset`) on a background task."""
+        if self._project_root is None:
+            return
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._run_unstage_all(), name="git_unstage_all")
+
+    async def _run_unstage_all(self) -> None:
+        try:
+            await self._run_git("reset")
+        except Exception as e:
+            logger.exception("git_panel: unstage all failed")
+            show_message(self, "Unstage all failed", str(e), kind="error")
+            return
+        self._refresh()
+
+    # ── File diff dialog ──
+
+    def _on_file_double_clicked(self, item: QListWidgetItem, staged: bool) -> None:
+        """Open a side-by-side diff for the double-clicked file.
+
+        Single click keeps its default select-only behaviour; only a
+        double click opens the dialog.
+        """
+        if item is None or self._project_root is None:
+            return
+        filepath = item.data(Qt.ItemDataRole.UserRole)
+        if not filepath:
+            return
+        status = item.data(STATUS_ROLE) or ""
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self._open_diff_dialog(filepath, status, staged), name="git_view_diff")
+
+    async def _open_diff_dialog(self, filepath: str, status: str, staged: bool) -> None:
+        try:
+            old_content, new_content = await self._load_diff_contents(filepath, status, staged)
+        except Exception as e:
+            logger.exception("git_panel: could not load diff for %s", filepath)
+            show_message(self, "Diff failed", str(e), kind="error")
+            return
+        self._show_diff_dialog(filepath, old_content, new_content)
+
+    async def _load_diff_contents(
+        self, filepath: str, status: str, staged: bool
+    ) -> tuple[str, str]:
+        """Assemble (old, new) file contents for the diff viewer.
+
+        Old side: the HEAD version — empty for untracked ("?") and
+        newly added ("A") files, which have no committed ancestor.
+        New side: the index version (``git show :<path>``) for the
+        staged list, the working-tree file for the unstaged list.
+        Either side degrades to "" when git has nothing (e.g. a
+        deletion), and to a placeholder for binary content.
+        """
+        old_content = ""
+        if status not in ("?", "A"):
+            try:
+                old_content = await self._run_git("show", f"HEAD:{filepath}")
+            except Exception:
+                # No HEAD version (renames, first commit, etc.) — treat
+                # the file as new rather than failing the whole dialog.
+                logger.debug("git_panel: no HEAD version for %s", filepath, exc_info=True)
+                old_content = ""
+
+        if staged:
+            try:
+                new_content = await self._run_git("show", f":{filepath}")
+            except Exception:
+                # Staged deletion: nothing in the index for this path.
+                logger.debug("git_panel: no index version for %s", filepath, exc_info=True)
+                new_content = ""
+        else:
+            new_content = self._read_worktree_file(filepath)
+
+        return self._guard_binary(old_content), self._guard_binary(new_content)
+
+    def _read_worktree_file(self, filepath: str) -> str:
+        """Read a working-tree file as text; "" if missing, placeholder
+        for undecodable (binary) content."""
+        assert self._project_root is not None
+        full_path = self._project_root / filepath
+        try:
+            raw = full_path.read_bytes()
+        except OSError:
+            # Deleted from the worktree (status "D") or vanished since
+            # the last refresh.
+            return ""
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return "(binary file)"
+
+    @staticmethod
+    def _guard_binary(content: str) -> str:
+        """Replace binary-looking content with a placeholder so the
+        DiffViewer's QPlainTextEdit doesn't choke on NUL bytes."""
+        if "\x00" in content:
+            return "(binary file)"
+        return content
+
+    def _show_diff_dialog(self, filepath: str, old_content: str, new_content: str) -> None:
+        """Pop a resizable dialog with the DiffViewer filling it."""
+        from PyQt6.QtWidgets import QDialog
+
+        from polyglot_ai.ui.panels.diff_viewer import DiffViewer
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(filepath)
+        dlg.setModal(True)
+        dlg.setSizeGripEnabled(True)
+        dlg.resize(900, 600)
+        dlg.setStyleSheet(f"QDialog {{ background: {tc.get('bg_base')}; }}")
+
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setContentsMargins(10, 10, 10, 10)
+        dlg_layout.setSpacing(8)
+
+        viewer = DiffViewer(dlg)
+        viewer.set_diff(old_content, new_content)
+        dlg_layout.addWidget(viewer, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setDefault(True)
+        close_btn.setStyleSheet(
+            f"QPushButton {{ background: {tc.get('accent_primary')}; "
+            f"color: {tc.get('text_on_accent')}; border: none; "
+            f"border-radius: {tc.RADIUS_SM}px; padding: 6px 22px; "
+            f"font-size: {tc.FONT_MD}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+        )
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        dlg_layout.addLayout(btn_row)
+
+        dlg.exec()
+
     def _on_new_branch(self) -> None:
         """Prompt for a branch name and run `git checkout -b <name>`."""
         if self._project_root is None:
@@ -880,6 +1204,7 @@ class GitPanel(QWidget):
                     item = QListWidgetItem(f"  {index_status}  {filepath}")
                     item.setForeground(QColor(color.get(index_status, tc.get("text_primary"))))
                     item.setData(Qt.ItemDataRole.UserRole, filepath)
+                    item.setData(STATUS_ROLE, index_status)
                     self._staged_list.addItem(item)
 
                 if work_status in ("M", "D", "?"):
@@ -892,6 +1217,7 @@ class GitPanel(QWidget):
                     item = QListWidgetItem(f"  {label}  {filepath}")
                     item.setForeground(QColor(color.get(work_status, tc.get("text_primary"))))
                     item.setData(Qt.ItemDataRole.UserRole, filepath)
+                    item.setData(STATUS_ROLE, work_status)
                     self._unstaged_list.addItem(item)
         except Exception:
             logger.exception("git_panel: failed to populate refresh UI")
