@@ -21,6 +21,68 @@ DEFAULT_MODELS = [
 ]
 
 
+def _parse_data_url(url: str) -> tuple[str, str] | None:
+    """Split a ``data:<mime>;base64,<data>`` URL into (mime_type, b64).
+
+    Returns ``None`` for anything that isn't a well-formed base64 data
+    URL (plain http(s) URLs, missing mime type, missing payload, …) so
+    callers can drop the part gracefully instead of crashing the stream.
+    """
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    header, sep, data = url.partition(",")
+    if not sep or not data:
+        return None
+    meta = header[len("data:") :]
+    if not meta.endswith(";base64"):
+        return None
+    mime_type = meta[: -len(";base64")]
+    if not mime_type:
+        return None
+    return mime_type, data
+
+
+def _convert_content_parts(content: list) -> list[types.Part]:
+    """Convert an OpenAI-shaped content-part list into Gemini Parts.
+
+    ``Message.to_api_dict(include_images=True)`` produces
+    ``[{"type": "text", ...}, {"type": "image_url", ...}]``; text parts
+    become ``Part.from_text`` and base64 data-URL images become
+    ``Part.from_bytes``. Malformed or non-data image URLs are logged
+    and skipped rather than raising; if every part is dropped we fall
+    back to a single empty text part so the turn stays well-formed.
+    """
+    import base64
+    import binascii
+
+    parts: list[types.Part] = []
+    for part in content:
+        if not isinstance(part, dict):
+            logger.warning("Gemini: skipping non-dict content part: %r", type(part))
+            continue
+        ptype = part.get("type")
+        if ptype == "text":
+            parts.append(types.Part.from_text(text=part.get("text", "")))
+        elif ptype == "image_url":
+            url = (part.get("image_url") or {}).get("url", "")
+            parsed = _parse_data_url(url)
+            if parsed is None:
+                logger.warning("Gemini: dropping image part with non-data or malformed URL")
+                continue
+            mime_type, b64 = parsed
+            try:
+                raw = base64.b64decode(b64, validate=True)
+            except (binascii.Error, ValueError):
+                logger.warning("Gemini: dropping image part with undecodable base64 data")
+                continue
+            parts.append(types.Part.from_bytes(data=raw, mime_type=mime_type))
+        else:
+            logger.warning("Gemini: skipping unsupported content part type %r", ptype)
+    if not parts:
+        parts.append(types.Part.from_text(text=""))
+    return parts
+
+
 class GoogleClient(AIProvider):
     """Google (Gemini) provider with async streaming."""
 
@@ -143,10 +205,16 @@ class GoogleClient(AIProvider):
                     continue
 
                 gemini_role = "user" if role == "user" else "model"
+                if isinstance(content, list):
+                    # Multimodal turn (text + image parts) from
+                    # Message.to_api_dict(include_images=True).
+                    turn_parts = _convert_content_parts(content)
+                else:
+                    turn_parts = [types.Part.from_text(text=content or "")]
                 gemini_contents.append(
                     types.Content(
                         role=gemini_role,
-                        parts=[types.Part.from_text(text=content or "")],
+                        parts=turn_parts,
                     )
                 )
 

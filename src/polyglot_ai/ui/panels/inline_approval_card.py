@@ -79,7 +79,11 @@ class InlineApprovalCard(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        del current_content  # not used in the minimalist row design
+        # Kept for the Details… escalation — the rich ApprovalDialog
+        # renders a side-by-side diff / full command preview from it.
+        self._tool_name = tool_name
+        self._arguments = arguments
+        self._current_content = current_content
         self._decided_already = False
 
         try:
@@ -89,15 +93,25 @@ class InlineApprovalCard(QWidget):
 
         description = _describe(tool_name, args)
 
+        # Shell commands that the sandbox classifies as dangerous get
+        # a warning-coloured description so the risk is visible at a
+        # glance in the transcript.
+        self._dangerous = False
+        if tool_name == "shell_exec":
+            from polyglot_ai.core.sandbox import Sandbox
+
+            self._dangerous = Sandbox.is_dangerous_command(args.get("command") or "")
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 2, 2, 2)
         row.setSpacing(8)
 
+        label_colour = tc.get("accent_warning") if self._dangerous else tc.get("text_tertiary")
         self._label = QLabel(f"  {description}")
         self._label.setStyleSheet(
-            f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px; font-style: italic; "
+            f"color: {label_colour}; font-size: {tc.FONT_MD}px; font-style: italic; "
             "padding: 2px 0; background: transparent;"
         )
         self._label.setWordWrap(True)
@@ -111,6 +125,20 @@ class InlineApprovalCard(QWidget):
             "font-weight: 600; }}"
             "QPushButton:hover {{ background: {hover}; }}"
         )
+
+        self._details_btn = QPushButton("Details…")
+        self._details_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._details_btn.setToolTip("Preview the full change before deciding")
+        self._details_btn.setStyleSheet(
+            btn_style.format(
+                bg="transparent",
+                fg=tc.get("text_secondary"),
+                border=tc.get("border_input"),
+                hover=tc.get("bg_hover"),
+            )
+        )
+        self._details_btn.clicked.connect(self._show_details)
+        row.addWidget(self._details_btn)
 
         self._reject_btn = QPushButton("Reject")
         self._reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -141,6 +169,21 @@ class InlineApprovalCard(QWidget):
 
     # ── Decision plumbing ──────────────────────────────────────────
 
+    def _show_details(self) -> None:
+        """Escalate to the rich ApprovalDialog (diff / command preview).
+
+        The dialog's Approve/Reject buttons resolve this row too;
+        merely closing the preview leaves the row pending.
+        """
+        if self._decided_already:
+            return
+        from polyglot_ai.ui.dialogs.approval_dialog import ApprovalDialog
+
+        dlg = ApprovalDialog(self._tool_name, self._arguments, self._current_content, self.window())
+        dlg.exec()
+        if dlg.explicitly_decided:
+            self._finalise(dlg.approved)
+
     def _finalise(self, approved: bool) -> None:
         """Hide the buttons and append a status suffix to the label."""
         if self._decided_already:
@@ -148,6 +191,7 @@ class InlineApprovalCard(QWidget):
         self._decided_already = True
         self._approve_btn.hide()
         self._reject_btn.hide()
+        self._details_btn.hide()
         suffix_colour = tc.get("accent_success_muted") if approved else tc.get("accent_error")
         suffix = "Approved" if approved else "Rejected"
         # Re-render the label with the existing description plus a

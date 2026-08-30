@@ -262,12 +262,15 @@ class Sandbox:
 
         return True, "Allowed"
 
-    def is_dangerous_command(self, command: str) -> bool:
+    @staticmethod
+    def is_dangerous_command(command: str) -> bool:
         """Check if a command requires explicit user approval.
 
         Returns True for interpreters, package managers, build tools,
         and file-mutating commands. These are allowed by the sandbox
-        but must be approved by the user before execution.
+        but must be approved by the user before execution. Static so
+        UI code (approval card risk tinting) can call it without a
+        sandbox instance.
         """
         try:
             parts = shlex.split(command)

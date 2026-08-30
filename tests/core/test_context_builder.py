@@ -402,3 +402,67 @@ def test_panel_state_block_coexists_with_active_task():
     assert "ACTIVE TASK" in prompt
     assert "PANEL STATE" in prompt
     assert prompt.index("ACTIVE TASK") < prompt.index("PANEL STATE")
+
+
+# ── build_augmented_prompt (RAG) ─────────────────────────────────────
+#
+# This path was dead code until the chat panel started calling it
+# (gated on ai.auto_context); pin its contract now that it's live.
+
+
+class _StubIndexer:
+    def __init__(self, results, ready=True):
+        self._results = results
+        self.is_ready = ready
+
+    def query(self, text, top_k=5):
+        return self._results
+
+
+def _builder_with_files(tmp_path, files: dict[str, str]) -> ContextBuilder:
+    for rel, content in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    cb = ContextBuilder(project_root=tmp_path)
+    return cb
+
+
+def test_augmented_prompt_appends_relevant_files(tmp_path):
+    cb = _builder_with_files(tmp_path, {"app.py": "def main():\n    return 1\n"})
+    cb.set_indexer(_StubIndexer([("app.py", 0.9)]))
+    prompt = cb.build_augmented_prompt("how does main work?")
+    assert "RELEVANT FILES" in prompt
+    assert "--- app.py ---" in prompt
+    assert "def main():" in prompt
+
+
+def test_augmented_prompt_without_indexer_is_base_prompt(tmp_path):
+    cb = _builder_with_files(tmp_path, {"app.py": "x = 1\n"})
+    assert cb.build_augmented_prompt("query") == cb.build_system_prompt()
+
+
+def test_augmented_prompt_index_not_ready_is_base_prompt(tmp_path):
+    cb = _builder_with_files(tmp_path, {"app.py": "x = 1\n"})
+    cb.set_indexer(_StubIndexer([("app.py", 0.9)], ready=False))
+    assert cb.build_augmented_prompt("query") == cb.build_system_prompt()
+
+
+def test_augmented_prompt_skips_files_with_secrets(tmp_path):
+    cb = _builder_with_files(
+        tmp_path,
+        {"config.py": 'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLEKEY9"\n'},
+    )
+    cb.set_indexer(_StubIndexer([("config.py", 0.9)]))
+    prompt = cb.build_augmented_prompt("aws setup")
+    # The base prompt's project tree may list the file name; what must
+    # NOT appear is the RAG content block for it.
+    assert "--- config.py ---" not in prompt
+    assert "AKIAIOSFODNN7EXAMPLEKEY9" not in prompt
+
+
+def test_augmented_prompt_skips_missing_files(tmp_path):
+    cb = ContextBuilder(project_root=tmp_path)
+    cb.set_indexer(_StubIndexer([("gone.py", 0.9)]))
+    prompt = cb.build_augmented_prompt("query")
+    assert "--- gone.py ---" not in prompt

@@ -637,6 +637,15 @@ class SettingsDialog(QDialog):
         self._system_prompt.setText(self._settings.get("ai.system_prompt") or "")
         form.addRow("System Prompt:", self._system_prompt)
 
+        self._auto_context = QCheckBox("Attach relevant project files to each message")
+        self._auto_context.setStyleSheet(_CHECKBOX_STYLE)
+        self._auto_context.setChecked(bool(self._settings.get("ai.auto_context")))
+        self._auto_context.setToolTip(
+            "Searches the project index for files related to your message and "
+            "includes them in the AI's context. Uses more tokens per request."
+        )
+        form.addRow("Auto Context:", self._auto_context)
+
         layout.addWidget(card)
 
         # ── Notifications ──
@@ -1190,6 +1199,7 @@ class SettingsDialog(QDialog):
         await self._settings.set("ai.temperature", self._temperature.value() / 10.0)
         await self._settings.set("ai.max_tokens", self._max_tokens.value())
         await self._settings.set("ai.system_prompt", self._system_prompt.toPlainText())
+        await self._settings.set("ai.auto_context", self._auto_context.isChecked())
         await self._settings.set("terminal.shell", self._shell_path.text())
         await self._settings.set("terminal.font_size", self._term_font_size.value())
         await self._settings.set("notifications.enabled", self._notifications_enabled.isChecked())

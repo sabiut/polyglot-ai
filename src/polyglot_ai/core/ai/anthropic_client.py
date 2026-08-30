@@ -49,6 +49,73 @@ def _supports_thinking(model: str) -> bool:
     return False
 
 
+def _parse_data_url(url: str) -> tuple[str, str] | None:
+    """Split a ``data:<mime>;base64,<data>`` URL into (media_type, b64).
+
+    Returns ``None`` for anything that isn't a well-formed base64 data
+    URL (plain http(s) URLs, missing mime type, missing payload, …) so
+    callers can drop the part gracefully instead of crashing the stream.
+    """
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    header, sep, data = url.partition(",")
+    if not sep or not data:
+        return None
+    meta = header[len("data:") :]
+    if not meta.endswith(";base64"):
+        return None
+    media_type = meta[: -len(";base64")]
+    if not media_type:
+        return None
+    return media_type, data
+
+
+def _convert_user_content(content):
+    """Convert OpenAI-shaped user content to Anthropic content.
+
+    Plain strings (and anything else non-list) pass through untouched.
+    A list of OpenAI content parts — produced by
+    ``Message.to_api_dict(include_images=True)`` — is converted:
+
+    * ``{"type": "text", "text": ...}`` → same shape (Anthropic native)
+    * ``{"type": "image_url", "image_url": {"url": "data:..."}}`` →
+      ``{"type": "image", "source": {"type": "base64", ...}}``
+
+    Malformed or non-data image URLs are logged and skipped rather than
+    raising; if every part is dropped we fall back to an empty string.
+    """
+    if not isinstance(content, list):
+        return content
+    blocks: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            logger.warning("Anthropic: skipping non-dict content part: %r", type(part))
+            continue
+        ptype = part.get("type")
+        if ptype == "text":
+            blocks.append({"type": "text", "text": part.get("text", "")})
+        elif ptype == "image_url":
+            url = (part.get("image_url") or {}).get("url", "")
+            parsed = _parse_data_url(url)
+            if parsed is None:
+                logger.warning("Anthropic: dropping image part with non-data or malformed URL")
+                continue
+            media_type, data = parsed
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    },
+                }
+            )
+        else:
+            logger.warning("Anthropic: skipping unsupported content part type %r", ptype)
+    return blocks if blocks else ""
+
+
 def _is_thinking_error(error_text: str) -> bool:
     """Detect a 400 caused by extended-thinking constraints.
 
@@ -178,7 +245,7 @@ class AnthropicClient(AIProvider):
                     anthropic_messages.append(
                         {
                             "role": role,
-                            "content": msg.get("content", ""),
+                            "content": _convert_user_content(msg.get("content", "")),
                         }
                     )
 

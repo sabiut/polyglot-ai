@@ -47,6 +47,11 @@ class ApprovalDialog(QDialog):
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
         self._approved = False
+        # True only when the user clicked Approve or Reject — closing
+        # the dialog via Esc / the window X leaves it False, so a
+        # caller using this as a "Details" view can tell "actively
+        # rejected" apart from "just closed the preview".
+        self._explicitly_decided = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -238,12 +243,18 @@ class ApprovalDialog(QDialog):
 
     def _approve(self) -> None:
         self._approved = True
+        self._explicitly_decided = True
         self.accept()
 
     def _reject(self) -> None:
         self._approved = False
+        self._explicitly_decided = True
         self.reject()
 
     @property
     def approved(self) -> bool:
         return self._approved
+
+    @property
+    def explicitly_decided(self) -> bool:
+        return self._explicitly_decided

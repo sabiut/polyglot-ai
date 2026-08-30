@@ -118,12 +118,19 @@ class EditorTab(QWidget):
         self._settings = None
         self._completion_task: asyncio.Task | None = None
         self._completion_annotation_line: int | None = None
+        self._completion_text: str | None = None
 
         # Debounce timer for completions
         self._completion_timer = QTimer(self)
         self._completion_timer.setSingleShot(True)
         self._completion_timer.setInterval(400)
         self._completion_timer.timeout.connect(self._request_completion)
+
+        # QScintilla consumes Tab itself (indentation) before it would
+        # ever bubble up to keyPressEvent on this widget, so accepting
+        # a completion with Tab requires intercepting the key on the
+        # editor via an event filter (see eventFilter below).
+        self._editor.installEventFilter(self)
 
         self._setup_editor()
         if file_path:
@@ -793,6 +800,7 @@ class EditorTab(QWidget):
         if not preview:
             return
         self._completion_annotation_line = line
+        self._completion_text = text  # raw suggestion, inserted on Tab
         self._editor.annotate(
             line,
             f"  💡 {preview}  (Tab to accept)",
@@ -800,22 +808,73 @@ class EditorTab(QWidget):
         )
 
     def _clear_completion_annotation(self) -> None:
+        self._completion_text = None
         if self._completion_annotation_line is not None:
             self._editor.clearAnnotations(self._completion_annotation_line)
             self._completion_annotation_line = None
+
+    def _can_accept_completion(self) -> bool:
+        """A suggestion is acceptable when its annotation is visible and
+        the cursor is still on the annotated line."""
+        return (
+            self._completion_text is not None
+            and self._completion_annotation_line is not None
+            and self._editor.getCursorPosition()[0] == self._completion_annotation_line
+        )
+
+    def _accept_completion(self) -> None:
+        """Insert the pending suggestion at the cursor as one undo action.
+
+        The suggestion is inserted verbatim via ``insertAt`` — QScintilla
+        only auto-indents on *typed* newlines, so multi-line suggestions
+        keep exactly the indentation the model produced.
+        """
+        text = self._completion_text
+        if not text:
+            return
+        self._clear_completion_annotation()
+        line, col = self._editor.getCursorPosition()
+        self._editor.beginUndoAction()
+        try:
+            self._editor.insertAt(text, line, col)
+        finally:
+            self._editor.endUndoAction()
+        # Move the cursor to the end of the inserted text.
+        inserted_lines = text.split("\n")
+        if len(inserted_lines) == 1:
+            self._editor.setCursorPosition(line, col + len(text))
+        else:
+            self._editor.setCursorPosition(line + len(inserted_lines) - 1, len(inserted_lines[-1]))
+
+    def eventFilter(self, obj, event) -> bool:
+        """Accept (Tab) or dismiss (Esc) a pending completion.
+
+        Installed on the QScintilla editor because it consumes Tab for
+        indentation before the key would ever reach ``keyPressEvent``
+        on this widget.
+        """
+        from PyQt6.QtCore import QEvent, Qt
+
+        if obj is self._editor and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Tab and self._can_accept_completion():
+                # Insert the suggestion, clear the annotation, and
+                # swallow the key so no literal tab/indent happens.
+                self._accept_completion()
+                return True
+            if event.key() == Qt.Key.Key_Escape and self._completion_annotation_line is not None:
+                self._clear_completion_annotation()
+                return True
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event) -> None:
         """Override to handle Tab for accepting completions."""
         from PyQt6.QtCore import Qt
 
-        if (
-            event.key() == Qt.Key.Key_Tab
-            and self._completion_annotation_line is not None
-            and self._completion_task
-            and self._completion_task.done()
-        ):
-            # Accept the completion (insert the text)
-            self._clear_completion_annotation()
-            # The actual insertion would need the full completion text
-            # For now, clear the annotation on Tab
+        if event.key() == Qt.Key.Key_Tab and self._can_accept_completion():
+            # Insert the stored suggestion at the cursor (one undo
+            # action) and clear the annotation instead of tabbing.
+            # Normally the editor's event filter handles this first;
+            # this is a fallback for when the tab itself has focus.
+            self._accept_completion()
+            return
         super().keyPressEvent(event)

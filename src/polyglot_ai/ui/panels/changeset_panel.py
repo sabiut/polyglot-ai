@@ -19,17 +19,20 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from polyglot_ai.core.hunks import apply_hunks, split_hunks
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
@@ -251,6 +254,59 @@ class ChangesetPanel(QWidget):
 
         right_layout.addWidget(action_bar)
 
+        # Per-hunk selection bar (visible only for pending multi-hunk changes)
+        self._hunk_section = QWidget()
+        self._hunk_section.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        hunk_layout = QVBoxLayout(self._hunk_section)
+        hunk_layout.setContentsMargins(12, 6, 12, 6)
+        hunk_layout.setSpacing(4)
+
+        hunk_header_layout = QHBoxLayout()
+        hunk_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        hunk_title = QLabel("PARTIAL APPLY")
+        hunk_title.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; font-weight: bold; color: {tc.get('text_tertiary')}; letter-spacing: 1px;"
+        )
+        hunk_header_layout.addWidget(hunk_title)
+        hunk_header_layout.addStretch()
+
+        self._apply_hunks_btn = QPushButton("Apply Selected Hunks")
+        self._apply_hunks_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {tc.get("accent_success")}; color: {tc.get("text_on_accent")}; font-weight: 600;
+                padding: 3px 12px; border: none; border-radius: {tc.RADIUS_SM}px; font-size: {tc.FONT_SM}px;
+            }}
+            QPushButton:hover {{ background-color: {tc.get("accent_success_hover")}; }}
+            QPushButton:disabled {{ background-color: {tc.get("border_secondary")}; color: {tc.get("text_muted")}; }}
+        """)
+        self._apply_hunks_btn.setToolTip(
+            "Write only the checked hunks to disk (backs up the original file); "
+            "unchecked hunks stay pending for later review"
+        )
+        self._apply_hunks_btn.clicked.connect(self._apply_selected_hunks)
+        hunk_header_layout.addWidget(self._apply_hunks_btn)
+
+        hunk_layout.addLayout(hunk_header_layout)
+
+        hunk_scroll = QScrollArea()
+        hunk_scroll.setWidgetResizable(True)
+        hunk_scroll.setMaximumHeight(140)
+        hunk_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self._hunk_list_widget = QWidget()
+        self._hunk_list_layout = QVBoxLayout(self._hunk_list_widget)
+        self._hunk_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._hunk_list_layout.setSpacing(2)
+        hunk_scroll.setWidget(self._hunk_list_widget)
+        hunk_layout.addWidget(hunk_scroll)
+
+        self._hunk_checkboxes: list[QCheckBox] = []
+        self._hunk_section.setVisible(False)
+        right_layout.addWidget(self._hunk_section)
+
         # Diff viewer
         self._diff_view = QTextEdit()
         self._diff_view.setReadOnly(True)
@@ -273,6 +329,7 @@ class ChangesetPanel(QWidget):
         self._show_empty_state()
 
     def _show_empty_state(self) -> None:
+        self._hunk_section.setVisible(False)
         self._diff_view.setHtml(
             f'<div style="color:{tc.get("text_muted")}; padding:40px; text-align:center; font-size:{tc.FONT_BASE}px;">'
             "No pending changes.<br><br>"
@@ -326,6 +383,10 @@ class ChangesetPanel(QWidget):
     # ── Internal ─────────────────────────────────────────────────
 
     def _refresh_list(self) -> None:
+        # Remember the selection: clear() drops it, and post-apply UI
+        # (status label, hunk section) is rebuilt via _on_file_selected,
+        # which needs a valid current row to fire.
+        selected_path = self._get_selected_path()
         self._file_list.clear()
         pending = 0
         for path, change in self._changes.items():
@@ -352,6 +413,9 @@ class ChangesetPanel(QWidget):
             if change.status == "pending":
                 pending += 1
 
+            if path == selected_path:
+                self._file_list.setCurrentRow(self._file_list.count() - 1)
+
         # Summary stats
         total_added = 0
         total_removed = 0
@@ -374,6 +438,7 @@ class ChangesetPanel(QWidget):
 
     def _on_file_selected(self, row: int) -> None:
         if row < 0:
+            self._hunk_section.setVisible(False)
             return
         item = self._file_list.item(row)
         if not item:
@@ -399,6 +464,9 @@ class ChangesetPanel(QWidget):
         self._apply_btn.setVisible(is_pending)
         self._reject_btn.setVisible(is_pending)
         self._rollback_btn.setVisible(is_applied)
+
+        # Per-hunk selection
+        self._populate_hunks(change)
 
         # Generate diff
         self._show_diff(change)
@@ -469,6 +537,27 @@ class ChangesetPanel(QWidget):
             return None
         return item.data(Qt.ItemDataRole.UserRole)
 
+    def _write_change(self, change: FileChange, content: str) -> None:
+        """Back up the on-disk file (once) and write ``content`` to it.
+
+        The backup is only taken the first time a change touches disk
+        (``backup_path is None``), so after a partial hunk apply a later
+        apply/rollback still restores the true pre-change file.
+        """
+        if not self._project_root:
+            return
+        target = self._project_root / change.path
+        if target.exists() and change.backup_path is None:
+            # Backup using centralized backup location
+            from polyglot_ai.core.ai.code_applier import _create_backup
+
+            backup_path = _create_backup(target)
+            if backup_path:
+                change.backup_path = str(backup_path)
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
     def _apply_selected(self) -> None:
         path = self._get_selected_path()
         if not path:
@@ -477,23 +566,97 @@ class ChangesetPanel(QWidget):
         if not change or change.status != "pending":
             return
 
-        if self._project_root:
-            target = self._project_root / path
-            # Backup using centralized backup location
-            if target.exists():
-                from polyglot_ai.core.ai.code_applier import _create_backup
-
-                backup_path = _create_backup(target)
-                if backup_path:
-                    change.backup_path = str(backup_path)
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(change.proposed, encoding="utf-8")
-            logger.info("Applied change to %s", path)
+        self._write_change(change, change.proposed)
+        logger.info("Applied change to %s", path)
 
         change.status = "applied"
         self._refresh_list()
         self._on_file_selected(self._file_list.currentRow())
+        self.change_applied.emit(path)
+
+    # ── Per-hunk apply ───────────────────────────────────────────
+    #
+    # Partial-apply model: applying a subset of hunks writes the
+    # composed content to disk and rebases the change on it —
+    # ``original`` becomes the newly written content, ``proposed``
+    # stays, status stays "pending". The remaining hunks are then
+    # recomputed naturally on the next render (the diff of the new
+    # original vs proposed is exactly the unapplied hunks). Selecting
+    # every hunk short-circuits into the ordinary whole-file apply, so
+    # the change flips to "applied" only when everything is taken.
+    # Rollback keeps working because _write_change backs the file up
+    # only on the first write.
+
+    def _populate_hunks(self, change: FileChange) -> None:
+        """Rebuild the per-hunk checkbox list for the selected change.
+
+        The section is shown only for pending changes with two or more
+        hunks — with a single hunk, partial apply degenerates to the
+        whole-file Apply button.
+        """
+        while self._hunk_list_layout.count():
+            item = self._hunk_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._hunk_checkboxes = []
+
+        hunks = split_hunks(change.original, change.proposed) if change.status == "pending" else []
+        if len(hunks) < 2:
+            self._hunk_section.setVisible(False)
+            return
+
+        for i, hunk in enumerate(hunks):
+            first_change = next((line for line in hunk.lines if line.startswith(("+", "-"))), "")
+            if len(first_change) > 60:
+                first_change = first_change[:57] + "…"
+            checkbox = QCheckBox(f"Hunk {i + 1}  {hunk.header}  {first_change}")
+            checkbox.setChecked(True)
+            checkbox.setStyleSheet(
+                f"QCheckBox {{ color: {tc.get('text_primary')}; font-size: {tc.FONT_SM}px; "
+                f"font-family: 'Consolas', 'Monaco', 'Courier New', monospace; spacing: 6px; }}"
+            )
+            checkbox.setToolTip(hunk.preview)
+            checkbox.toggled.connect(self._update_apply_hunks_btn)
+            self._hunk_list_layout.addWidget(checkbox)
+            self._hunk_checkboxes.append(checkbox)
+
+        self._hunk_section.setVisible(True)
+        self._update_apply_hunks_btn()
+
+    def _update_apply_hunks_btn(self) -> None:
+        checked = sum(1 for cb in self._hunk_checkboxes if cb.isChecked())
+        total = len(self._hunk_checkboxes)
+        self._apply_hunks_btn.setText(f"Apply Selected Hunks ({checked}/{total})")
+        self._apply_hunks_btn.setEnabled(checked > 0)
+
+    def _apply_selected_hunks(self) -> None:
+        path = self._get_selected_path()
+        if not path:
+            return
+        change = self._changes.get(path)
+        if not change or change.status != "pending":
+            return
+
+        selected = [i for i, cb in enumerate(self._hunk_checkboxes) if cb.isChecked()]
+        if not selected:
+            return
+        if len(selected) == len(self._hunk_checkboxes):
+            # Everything checked — identical to a whole-file apply.
+            self._apply_selected()
+            return
+
+        partial = apply_hunks(change.original, change.proposed, selected)
+        self._write_change(change, partial)
+        logger.info("Applied %d/%d hunks to %s", len(selected), len(self._hunk_checkboxes), path)
+
+        # Rebase: the written content is the new baseline; the change
+        # stays pending with only the unapplied hunks remaining.
+        change.original = partial
+        self._refresh_list()
+        self._on_file_selected(self._file_list.currentRow())
+        # The file on disk changed — notify listeners just like a full
+        # apply (the signal means "this path was written", not "done").
         self.change_applied.emit(path)
 
     def _reject_selected(self) -> None:

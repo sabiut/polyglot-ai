@@ -1121,9 +1121,12 @@ class ChatPanel(QWidget):
             system_prompt=system_prompt,
         )
 
-        # Set conversation context
+        # Set conversation context. Image parts ride along when the
+        # executing model supports vision — without this the plan
+        # executor silently dropped every attached image.
         if self._current_conversation:
-            messages = self._current_conversation.get_api_messages()
+            has_vision = _MODEL_CAPS.get(model_id, {}).get("vision", False)
+            messages = self._current_conversation.get_api_messages(include_images=has_vision)
             executor.set_messages(messages)
 
         self._set_streaming_ui(True)
@@ -1512,13 +1515,27 @@ class ChatPanel(QWidget):
 
         system_prompt = None
         if self._context_builder and self._context_builder._project_root:
-            # Offload to thread pool — build_system_prompt walks the
-            # filesystem and reads every source file, which can block
-            # the Qt event loop for 1-5s on large projects and trigger
-            # the OS "not responding" dialog.
+            # Offload to thread pool — both builders walk the
+            # filesystem and read source files, which can block the Qt
+            # event loop for 1-5s on large projects and trigger the OS
+            # "not responding" dialog.
             from polyglot_ai.core.async_utils import run_blocking
 
-            system_prompt = await run_blocking(self._context_builder.build_system_prompt)
+            user_text = ""
+            for msg in reversed(self._current_conversation.messages):
+                if msg.role == "user" and isinstance(msg.content, str):
+                    user_text = msg.content
+                    break
+            if user_text and self._auto_context_enabled():
+                # RAG path: the TF-IDF indexer picks files relevant to
+                # this message and build_augmented_prompt appends them
+                # (budgeted, secret-scanned). Falls back to the plain
+                # prompt internally when the index isn't ready.
+                system_prompt = await run_blocking(
+                    self._context_builder.build_augmented_prompt, user_text
+                )
+            else:
+                system_prompt = await run_blocking(self._context_builder.build_system_prompt)
         if not system_prompt:
             system_prompt = (
                 "You are Polyglot AI, a helpful general-purpose assistant. "
@@ -2008,7 +2025,24 @@ class ChatPanel(QWidget):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
 
-        row = InlineApprovalCard(tool_name, arguments, parent=self._message_widget)
+        # For file mutations, fetch the current on-disk content so the
+        # card's Details… view can render a real before/after diff.
+        current_content: str | None = None
+        if tool_name in ("file_write", "file_patch", "file_delete"):
+            try:
+                import json as _json
+
+                args = _json.loads(arguments) if arguments else {}
+                rel = args.get("path", "")
+                root = self._get_project_root()
+                if rel and root:
+                    target = Path(root) / rel
+                    if target.is_file():
+                        current_content = target.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                logger.debug("could not load current content for approval preview", exc_info=True)
+
+        row = InlineApprovalCard(tool_name, arguments, current_content, parent=self._message_widget)
 
         def _on_decided(approved: bool) -> None:
             if not future.done():
@@ -2027,7 +2061,11 @@ class ChatPanel(QWidget):
 
         logger.info("Starting follow-up stream (depth=%d)", _depth)
         self._set_agent_status("Analyzing results...")
-        messages = self._current_conversation.get_api_messages()
+        # Keep image parts through tool-call follow-ups for vision
+        # models — the first stream sent them, so dropping them here
+        # made the model lose sight of the image mid-conversation.
+        has_vision = _MODEL_CAPS.get(model_id, {}).get("vision", False)
+        messages = self._current_conversation.get_api_messages(include_images=has_vision)
 
         self._add_separator()
         model_label = f"{display_model} ({provider.display_name})"
@@ -3149,6 +3187,21 @@ class ChatPanel(QWidget):
 
     def set_database(self, db: Database) -> None:
         self._db = db
+
+    def _auto_context_enabled(self) -> bool:
+        """Read ``ai.auto_context`` from the app settings.
+
+        The SettingsManager lives on the main window (this panel has
+        no direct reference); headless tests and detached panels get
+        the DEFAULTS value (on).
+        """
+        settings = getattr(self.window(), "_settings", None)
+        if settings is None:
+            return True
+        try:
+            return bool(settings.get("ai.auto_context"))
+        except Exception:
+            return True
 
     def set_context_builder(self, cb: ContextBuilder) -> None:
         self._context_builder = cb
