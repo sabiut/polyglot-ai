@@ -180,3 +180,11 @@ These are only needed if you want to use the corresponding panel:
 ## License
 
 LGPL-3.0-or-later
+
+## Acknowledgements
+
+Package repository hosting is graciously provided by
+[Cloudsmith](https://cloudsmith.com). Cloudsmith is the only
+fully hosted, cloud-native, universal package management solution
+that enables your organization to create, store and share packages
+in any format, to any place, with total confidence.
