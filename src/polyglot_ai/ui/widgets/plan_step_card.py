@@ -21,7 +21,7 @@ _STATUS_STYLE = {
     PlanStepStatus.APPROVED: ("◉", "plan_approved", "plan_approved"),
     PlanStepStatus.SKIPPED: ("⊘", "plan_skipped", "text_muted"),
     PlanStepStatus.IN_PROGRESS: ("◐", "plan_in_progress", "plan_in_progress"),
-    PlanStepStatus.COMPLETED: ("✔", "plan_completed", "plan_completed"),
+    PlanStepStatus.COMPLETED: ("✓", "plan_completed", "plan_completed"),
     PlanStepStatus.FAILED: ("✗", "plan_failed", "plan_failed"),
 }
 

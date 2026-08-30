@@ -176,7 +176,7 @@ class PRSummaryDialog(QDialog):
     # ── Rendering helpers ──
 
     def _render_error(self, layout: QVBoxLayout) -> None:
-        title = QLabel("🔴 Could not generate PR description")
+        title = QLabel("Could not generate PR description")
         title.setStyleSheet(
             f"color: {tc.get('accent_error')}; font-size: {tc.FONT_LG}px; "
             f"font-weight: bold; background: transparent;"

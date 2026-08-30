@@ -537,7 +537,7 @@ class CICDPanel(QWidget):
         debug_action = None
         conclusion = run.get("conclusion") or run.get("status", "")
         if conclusion in ("failure", "cancelled", "timed_out", "startup_failure"):
-            debug_action = menu.addAction("✨ Debug this failure as a new task")
+            debug_action = menu.addAction("Debug this failure as a new task")
 
         chosen = menu.exec(self._runs_table.viewport().mapToGlobal(pos))
         if chosen is None:

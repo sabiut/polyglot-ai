@@ -1039,7 +1039,7 @@ class ChatPanel(QWidget):
             for i, s in enumerate(plan.steps)
         )
         plan_summary = (
-            f"## 📋 {plan.title}\n\n"
+            f"## {plan.title}\n\n"
             f"{plan.summary}\n\n"
             f"### Steps\n{step_list}\n\n"
             f"*Switch to the **Plan** tab to review, approve, and execute.*"
@@ -1054,10 +1054,9 @@ class ChatPanel(QWidget):
             window._plan_panel._on_execute = self._execute_plan
             # Switch to Plan tab
             if hasattr(window, "_right_tabs"):
-                for i in range(window._right_tabs.count()):
-                    if window._right_tabs.tabText(i).strip().startswith("📋"):
-                        window._right_tabs.setCurrentIndex(i)
-                        break
+                idx = window._right_tabs.indexOf(window._plan_panel)
+                if idx != -1:
+                    window._right_tabs.setCurrentIndex(idx)
 
         # Add tool result to conversation so context stays consistent
         self._current_conversation.messages.append(
@@ -1156,12 +1155,12 @@ class ChatPanel(QWidget):
             if plan.status == PlanStatus.COMPLETED:
                 completed = sum(1 for s in plan.steps if s.status == PlanStepStatus.COMPLETED)
                 self._add_system_message(
-                    f"✅ Plan completed! {completed}/{len(plan.steps)} steps executed successfully."
+                    f"✓ Plan completed! {completed}/{len(plan.steps)} steps executed successfully."
                 )
             elif plan.status == PlanStatus.PAUSED:
-                self._add_system_message("⏸ Plan paused. Check the Plan tab for details.")
+                self._add_system_message("Plan paused. Check the Plan tab for details.")
             elif plan.status == PlanStatus.FAILED:
-                self._add_system_message("❌ Plan failed. Check the Plan tab for error details.")
+                self._add_system_message("✗ Plan failed. Check the Plan tab for error details.")
 
         except Exception as e:
             logger.error("Plan execution error: %s", e)
@@ -1258,14 +1257,13 @@ class ChatPanel(QWidget):
             if branch:
                 window._review_panel._mode_combo.setCurrentIndex(2)  # Branch vs Main
             # Switch to review tab
-            for i in range(window._right_tabs.count()):
-                if window._right_tabs.tabText(i).strip().startswith("🔍"):
-                    window._right_tabs.setCurrentIndex(i)
-                    break
+            idx = window._right_tabs.indexOf(window._review_panel)
+            if idx != -1:
+                window._right_tabs.setCurrentIndex(idx)
             # Trigger the review
             window._review_panel._on_run_review()
             self._add_system_message(
-                "Review started — switch to the **🔍 Review** tab to see results."
+                "Review started — switch to the **Review** tab to see results."
             )
             return
 
@@ -1458,7 +1456,7 @@ class ChatPanel(QWidget):
 
                         if is_secret_file(Path(att["filename"])):
                             content += (
-                                f"\n\n⚠️ Skipped attachment **{att['filename']}** "
+                                f"\n\nSkipped attachment **{att['filename']}** "
                                 "— file name matches a known secret pattern "
                                 "(e.g. .env, credentials). Remove secrets before attaching."
                             )
@@ -1466,7 +1464,7 @@ class ChatPanel(QWidget):
                         secret_hits = scan_content_for_secrets(file_content)
                         if secret_hits:
                             content += (
-                                f"\n\n⚠️ Skipped attachment **{att['filename']}** "
+                                f"\n\nSkipped attachment **{att['filename']}** "
                                 f"— detected {len(secret_hits)} secret pattern(s). "
                                 "Remove secrets before attaching."
                             )
@@ -1489,7 +1487,7 @@ class ChatPanel(QWidget):
         # Show user message (with attachment chips)
         display_text = text
         if attachment_info:
-            chips = " ".join(f"📎 {a['filename']}" for a in attachment_info)
+            chips = "Attached: " + ", ".join(a["filename"] for a in attachment_info)
             display_text = f"{chips}\n\n{text}" if text else chips
         self._add_message_widget("user", display_text)
 
@@ -1836,7 +1834,7 @@ class ChatPanel(QWidget):
         error_layout.setContentsMargins(42, 4, 8, 4)
         error_layout.setSpacing(6)
 
-        error_label = QLabel(f"⚠ {error_text}")
+        error_label = QLabel(error_text)
         error_label.setWordWrap(True)
         error_label.setStyleSheet(
             f"color: {tc.get('accent_error')}; font-size: {tc.FONT_BASE}px; background: transparent;"
@@ -1846,7 +1844,7 @@ class ChatPanel(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        retry_btn = QPushButton("🔄 Retry")
+        retry_btn = QPushButton("⟳ Retry")
         retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         retry_btn.setStyleSheet(f"""
             QPushButton {{
@@ -2386,11 +2384,13 @@ class ChatPanel(QWidget):
 
         Decisions for "professional" presentation:
 
-        * **Drop category emoji** (💼 / 👤 / 🔬) from the title — the
-          category filter tabs already convey which category the user
-          is viewing, so duplicating it in every row is visual noise.
+        * **Drop category emoji** (briefcase / person / microscope)
+          from the title — the category filter tabs already convey
+          which category the user is viewing, so duplicating it in
+          every row is visual noise.
         * **Pin marker** stays but uses a small leading bullet ("• ")
-          rather than 📌 — fits better with the rest of the IDE chrome.
+          rather than a pin emoji — fits better with the rest of the
+          IDE chrome.
           The full title (without the marker) goes into the tooltip so
           the marker doesn't ever truncate the actual title.
         * **Tooltip** carries the full title verbatim, since long
@@ -2409,8 +2409,9 @@ class ChatPanel(QWidget):
             # as a single clean line in the row.
             display_title = " ".join(raw_title.split())
             if conv.get("pinned"):
-                # Subtle leading bullet instead of 📌 — communicates
-                # "pinned" without the visual weight of a coloured emoji.
+                # Subtle leading bullet instead of a pin emoji —
+                # communicates "pinned" without the visual weight of a
+                # coloured emoji.
                 display_title = f"• {display_title}"
             item = QListWidgetItem(display_title)
             item.setData(Qt.ItemDataRole.UserRole, conv["id"])
@@ -2525,9 +2526,6 @@ class ChatPanel(QWidget):
         display = self._model_combo.currentText().strip()
         if not full_id or display.startswith("──"):
             return None, display
-        # Strip capability badges from display
-        for badge in (" 👁", " 🧠", " ⚡"):
-            display = display.replace(badge, "")
         return full_id, display.strip()
 
     def _provider_missing_hint(self, display_model: str) -> str:

@@ -158,8 +158,11 @@ class OnboardingDialog(QDialog):
             )
             icon_lbl.setPixmap(pixmap)
         else:
-            icon_lbl.setText("🤖")
-            icon_lbl.setStyleSheet("font-size: 48px;")
+            # Plain-text monogram fallback when the PNG icon is missing.
+            icon_lbl.setText("P")
+            icon_lbl.setStyleSheet(
+                f"font-size: 48px; font-weight: 700; color: {tc.get('text_heading')};"
+            )
         icon_lbl.setFixedSize(72, 72)
         icon_row.addWidget(icon_lbl)
         layout.addLayout(icon_row)
@@ -185,21 +188,17 @@ class OnboardingDialog(QDialog):
         layout.addWidget(subtitle)
         layout.addSpacing(30)
 
-        # Feature highlights
+        # Feature highlights — plain text; the headings carry the
+        # meaning without decorative emoji icons.
         features = [
-            ("💬", "Chat with AI", "Multi-provider support — OpenAI, Claude, Gemini, DeepSeek"),
-            ("✏️", "Edit code safely", "AI proposes changes, you approve before they're applied"),
-            ("🔍", "Review & plan", "Structured code review and step-by-step planning"),
-            ("🔌", "Extensible", "Connect MCP servers for GitHub, databases, and more"),
+            ("Chat with AI", "Multi-provider support — OpenAI, Claude, Gemini, DeepSeek"),
+            ("Edit code safely", "AI proposes changes, you approve before they're applied"),
+            ("Review & plan", "Structured code review and step-by-step planning"),
+            ("Extensible", "Connect MCP servers for GitHub, databases, and more"),
         ]
-        for emoji, heading, desc in features:
+        for heading, desc in features:
             row = QHBoxLayout()
             row.setSpacing(12)
-            icon_lbl = QLabel(emoji)
-            icon_lbl.setFixedSize(32, 32)
-            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_lbl.setStyleSheet("font-size: 18px; background: transparent;")
-            row.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignTop)
 
             text_col = QVBoxLayout()
             text_col.setSpacing(1)

@@ -30,20 +30,20 @@ from polyglot_ai.ui import theme_colors as tc
 logger = logging.getLogger(__name__)
 
 _POD_STATUS = {
-    "Running": ("🟢", "accent_success_muted"),
-    "Succeeded": ("🟢", "accent_success_muted"),
-    "Completed": ("🟢", "accent_success_muted"),
-    "Pending": ("🟡", "accent_warning"),
-    "ContainerCreating": ("🟡", "accent_warning"),
-    "Init": ("🟡", "accent_warning"),
-    "Terminating": ("🟡", "accent_warning"),
-    "Failed": ("🔴", "accent_error"),
-    "CrashLoopBackOff": ("🔴", "accent_error"),
-    "Error": ("🔴", "accent_error"),
-    "ImagePullBackOff": ("🔴", "accent_error"),
-    "ErrImagePull": ("🔴", "accent_error"),
-    "OOMKilled": ("🔴", "accent_error"),
-    "Unknown": ("⚪", "text_disabled"),
+    "Running": ("●", "accent_success_muted"),
+    "Succeeded": ("●", "accent_success_muted"),
+    "Completed": ("●", "accent_success_muted"),
+    "Pending": ("●", "accent_warning"),
+    "ContainerCreating": ("●", "accent_warning"),
+    "Init": ("●", "accent_warning"),
+    "Terminating": ("●", "accent_warning"),
+    "Failed": ("●", "accent_error"),
+    "CrashLoopBackOff": ("●", "accent_error"),
+    "Error": ("●", "accent_error"),
+    "ImagePullBackOff": ("●", "accent_error"),
+    "ErrImagePull": ("●", "accent_error"),
+    "OOMKilled": ("●", "accent_error"),
+    "Unknown": ("●", "text_disabled"),
 }
 
 
@@ -381,7 +381,7 @@ class K8sPanel(QWidget):
 
         # Pods section
         pods_root = QTreeWidgetItem(self._resource_tree)
-        pods_root.setText(0, f"📦 Pods ({len(self._pods)})")
+        pods_root.setText(0, f"Pods ({len(self._pods)})")
         pods_root.setExpanded(True)
 
         for pod in self._pods:
@@ -400,13 +400,14 @@ class K8sPanel(QWidget):
                     break
 
             icon, color_token = _POD_STATUS.get(
-                display_status, _POD_STATUS.get(phase, ("⚪", "text_disabled"))
+                display_status, _POD_STATUS.get(phase, ("●", "text_disabled"))
             )
 
             item = QTreeWidgetItem(pods_root)
             name = meta.get("name", "")
             ns = meta.get("namespace", "")
             item.setText(0, f"{icon} {name}")
+            item.setForeground(0, QColor(tc.get(color_token)))
             item.setText(1, display_status)
             item.setText(2, f"ns:{ns} restarts:{restarts}")
             item.setData(
@@ -415,7 +416,7 @@ class K8sPanel(QWidget):
 
         # Deployments section
         deps_root = QTreeWidgetItem(self._resource_tree)
-        deps_root.setText(0, f"🚀 Deployments ({len(self._deployments)})")
+        deps_root.setText(0, f"Deployments ({len(self._deployments)})")
         deps_root.setExpanded(True)
 
         for dep in self._deployments:
@@ -425,12 +426,14 @@ class K8sPanel(QWidget):
             ready = status.get("readyReplicas", 0)
             desired = spec.get("replicas", 0)
 
-            icon = "🟢" if ready == desired and desired > 0 else "🟡"
+            healthy = ready == desired and desired > 0
+            color_token = "accent_success_muted" if healthy else "accent_warning"
 
             item = QTreeWidgetItem(deps_root)
             name = meta.get("name", "")
             ns = meta.get("namespace", "")
-            item.setText(0, f"{icon} {name}")
+            item.setText(0, f"● {name}")
+            item.setForeground(0, QColor(tc.get(color_token)))
             item.setText(1, f"{ready}/{desired} ready")
             item.setText(2, f"ns:{ns}")
             item.setData(
@@ -439,7 +442,7 @@ class K8sPanel(QWidget):
 
         # Services section
         svc_root = QTreeWidgetItem(self._resource_tree)
-        svc_root.setText(0, f"🌐 Services ({len(self._services)})")
+        svc_root.setText(0, f"Services ({len(self._services)})")
         svc_root.setExpanded(True)
 
         for svc in self._services:
@@ -530,25 +533,25 @@ class K8sPanel(QWidget):
         )
 
         if res_type == "pod":
-            logs_action = menu.addAction("📋 View Logs")
+            logs_action = menu.addAction("View Logs")
             logs_action.triggered.connect(lambda: self._view_resource(data))
-            describe_action = menu.addAction("🔍 Describe")
+            describe_action = menu.addAction("Describe")
             describe_action.triggered.connect(lambda: self._describe_resource(res_type, name, ns))
             menu.addSeparator()
-            delete_action = menu.addAction("🗑 Delete Pod")
+            delete_action = menu.addAction("Delete Pod")
             delete_action.triggered.connect(lambda: self._delete_resource(res_type, name, ns))
 
         elif res_type == "deployment":
-            describe_action = menu.addAction("🔍 Describe")
+            describe_action = menu.addAction("Describe")
             describe_action.triggered.connect(lambda: self._describe_resource(res_type, name, ns))
             restart_action = menu.addAction("⟳ Restart Rollout")
             restart_action.triggered.connect(lambda: self._restart_deployment(name, ns))
             menu.addSeparator()
-            scale_action = menu.addAction("📊 Scale")
+            scale_action = menu.addAction("Scale")
             scale_action.triggered.connect(lambda: self._scale_deployment(name, ns))
 
         elif res_type == "service":
-            describe_action = menu.addAction("🔍 Describe")
+            describe_action = menu.addAction("Describe")
             describe_action.triggered.connect(lambda: self._describe_resource(res_type, name, ns))
 
         menu.exec(self._resource_tree.viewport().mapToGlobal(pos))

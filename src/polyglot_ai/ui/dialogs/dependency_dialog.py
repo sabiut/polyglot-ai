@@ -82,7 +82,7 @@ class DependencyDialog(QDialog):
         layout.setSpacing(12)
 
         # ── Header ──
-        header = QLabel("⚠ Some optional features are unavailable")
+        header = QLabel("Some optional features are unavailable")
         header.setStyleSheet(
             f"font-size: {tc.FONT_XL}px; font-weight: bold; "
             f"color: {tc.get('accent_warning')}; background: transparent;"

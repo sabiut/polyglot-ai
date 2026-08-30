@@ -33,23 +33,11 @@ _SEVERITY_TOKENS = {
 }
 
 _SEVERITY_LABELS = {
-    "critical": "🔴 Critical",
-    "high": "🟠 High",
-    "medium": "🔵 Medium",
-    "low": "🟢 Low",
-    "info": "ℹ️ Info",
-}
-
-_CATEGORY_ICONS = {
-    "bug": "🐛",
-    "security": "🔒",
-    "performance": "⚡",
-    "maintainability": "🔧",
-    "style": "🎨",
-    "tests": "🧪",
-    "logic": "🧠",
-    "error_handling": "⚠️",
-    "other": "📝",
+    "critical": "● Critical",
+    "high": "● High",
+    "medium": "● Medium",
+    "low": "● Low",
+    "info": "● Info",
 }
 
 
@@ -98,23 +86,23 @@ class ReviewPanel(QWidget):
         self._mode_combo.addItemWithDesc("Staged Changes", "Review what will be committed")
         self._mode_combo.addItemWithDesc("Branch vs Main", "Review all commits on this branch")
         self._mode_combo.addItemWithDesc(
-            "🔍 Terraform Security", "Scan .tf files for cloud security issues"
+            "Terraform Security", "Scan .tf files for cloud security issues"
         )
         self._mode_combo.addItemWithDesc(
-            "🔍 Kubernetes Security", "Scan K8s manifests for pod security issues"
+            "Kubernetes Security", "Scan K8s manifests for pod security issues"
         )
         self._mode_combo.addItemWithDesc(
-            "🔍 Dockerfile Security", "Scan Dockerfiles for container security issues"
+            "Dockerfile Security", "Scan Dockerfiles for container security issues"
         )
         self._mode_combo.addItemWithDesc(
-            "🔍 Docker Compose Security",
+            "Docker Compose Security",
             "Scan docker-compose files for misconfig and secrets",
         )
         self._mode_combo.addItemWithDesc(
-            "🔍 Helm Chart Security", "Scan Helm templates and values for security issues"
+            "Helm Chart Security", "Scan Helm templates and values for security issues"
         )
         self._mode_combo.addItemWithDesc(
-            "🎨 Frontend Design Audit",
+            "Frontend Design Audit",
             "Audit UI components, styles, and tokens for hierarchy, accessibility, and polish",
         )
         self._mode_combo.setFixedWidth(220)
@@ -139,7 +127,7 @@ class ReviewPanel(QWidget):
         header_layout.addWidget(self._run_btn)
 
         # Copy results button — enabled only when results are displayed
-        self._copy_btn = QPushButton("📋 Copy")
+        self._copy_btn = QPushButton("Copy")
         self._copy_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {tc.get("bg_surface_raised")}; color: {tc.get("text_primary")};
@@ -194,7 +182,7 @@ class ReviewPanel(QWidget):
         wc_layout = QVBoxLayout(welcome_card)
         wc_layout.setContentsMargins(20, 20, 20, 20)
 
-        welcome_title = QLabel("🔍 Code Review")
+        welcome_title = QLabel("Code Review")
         welcome_title.setStyleSheet(
             f"font-size: 18px; font-weight: bold; color: {tc.get('text_heading')}; "
             "background: transparent; border: none;"
@@ -526,7 +514,7 @@ class ReviewPanel(QWidget):
         # Truncation warning
         if getattr(result, "truncated_files", None):
             warn = QLabel(
-                f"⚠ {len(result.truncated_files)} file(s) were truncated or "
+                f"{len(result.truncated_files)} file(s) were truncated or "
                 "skipped because the review hit size limits. Consider splitting "
                 "or narrowing the scan."
             )
@@ -539,7 +527,7 @@ class ReviewPanel(QWidget):
             self._content_layout.addWidget(warn)
 
         if not result.findings:
-            ok_label = QLabel("✅ No issues found — the changes look good!")
+            ok_label = QLabel("No issues found — the changes look good!")
             ok_label.setStyleSheet(
                 f"color: {tc.get('accent_success_muted')}; "
                 f"font-size: {tc.FONT_LG}px; padding: 16px;"
@@ -561,7 +549,7 @@ class ReviewPanel(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
 
-        title = QLabel("🔴 Review failed")
+        title = QLabel("Review failed")
         title.setStyleSheet(
             f"color: {tc.get('accent_error')}; font-size: {tc.FONT_LG}px; font-weight: bold; "
             "background: transparent; border: none;"
@@ -627,8 +615,7 @@ class ReviewPanel(QWidget):
         )
         top.addWidget(sev_label)
 
-        cat_icon = _CATEGORY_ICONS.get(finding.category.value, "📝")
-        cat_label = QLabel(f"{cat_icon} {finding.category.value}")
+        cat_label = QLabel(finding.category.value)
         cat_label.setStyleSheet(
             f"font-size: {tc.FONT_SM}px; color: {tc.get('text_tertiary')}; "
             "background: transparent; border: none;"
@@ -672,7 +659,7 @@ class ReviewPanel(QWidget):
 
         # Suggestion
         if finding.suggestion:
-            suggestion = QLabel(f"💡 Suggestion:\n{finding.suggestion}")
+            suggestion = QLabel(f"Suggestion:\n{finding.suggestion}")
             suggestion.setStyleSheet(
                 f"font-size: {tc.FONT_MD}px; color: {tc.get('accent_success_muted')}; "
                 f"background: {tc.get('bg_feedback_pos')}; "
@@ -737,7 +724,7 @@ class ReviewPanel(QWidget):
         lines.append(f"## Summary\n{result.summary}\n")
 
         if not result.findings:
-            lines.append("✅ No issues found — the changes look good!")
+            lines.append("No issues found — the changes look good!")
             return "\n".join(lines)
 
         # Findings grouped by severity
@@ -749,18 +736,11 @@ class ReviewPanel(QWidget):
                 continue
             lines.append(f"## {sev.upper()} ({len(findings)})\n")
             for f in findings:
-                icon = {
-                    "critical": "🔴",
-                    "high": "🟠",
-                    "medium": "🟡",
-                    "low": "🔵",
-                    "info": "ℹ️",
-                }.get(sev, "•")
-                lines.append(f"### {icon} {f.title}")
+                lines.append(f"### {f.title}")
                 lines.append(f"**File:** `{f.file}:{f.line}` | **Category:** {f.category.value}\n")
                 lines.append(f"{f.body}\n")
                 if f.suggestion:
-                    lines.append(f"**💡 Suggestion:**\n```\n{f.suggestion}\n```\n")
+                    lines.append(f"**Suggestion:**\n```\n{f.suggestion}\n```\n")
 
         return "\n".join(lines)
 
@@ -775,7 +755,7 @@ class ReviewPanel(QWidget):
         if clipboard:
             clipboard.setText(text)
             # Flash button text as confirmation
-            self._copy_btn.setText("✅ Copied!")
+            self._copy_btn.setText("✓ Copied!")
             from PyQt6.QtCore import QTimer
 
-            QTimer.singleShot(2000, lambda: self._copy_btn.setText("📋 Copy"))
+            QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy"))

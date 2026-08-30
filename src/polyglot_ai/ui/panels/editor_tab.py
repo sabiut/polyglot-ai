@@ -803,7 +803,7 @@ class EditorTab(QWidget):
         self._completion_text = text  # raw suggestion, inserted on Tab
         self._editor.annotate(
             line,
-            f"  💡 {preview}  (Tab to accept)",
+            f"  {preview}  (Tab to accept)",
             self._editor.SendScintilla(self._editor.SCI_GETSTYLEAT, 0),
         )
 

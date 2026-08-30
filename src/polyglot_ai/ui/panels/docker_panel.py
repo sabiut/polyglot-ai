@@ -29,13 +29,13 @@ from polyglot_ai.ui import theme_colors as tc
 logger = logging.getLogger(__name__)
 
 _CONTAINER_STATUS = {
-    "running": ("🟢", "accent_success_muted"),
-    "exited": ("🔴", "accent_error"),
-    "created": ("⚪", "text_disabled"),
-    "paused": ("🟡", "accent_warning"),
-    "restarting": ("🟡", "accent_warning"),
-    "removing": ("🔴", "accent_error"),
-    "dead": ("🔴", "accent_error"),
+    "running": ("●", "accent_success_muted"),
+    "exited": ("●", "accent_error"),
+    "created": ("●", "text_disabled"),
+    "paused": ("●", "accent_warning"),
+    "restarting": ("●", "accent_warning"),
+    "removing": ("●", "accent_error"),
+    "dead": ("●", "accent_error"),
 }
 
 
@@ -349,10 +349,11 @@ class DockerPanel(QWidget):
         self._container_tree.clear()
         for container in self._containers:
             state = container.get("State", "unknown")
-            icon, color = _CONTAINER_STATUS.get(state, ("⚪", tc.get("text_muted")))
+            icon, color_token = _CONTAINER_STATUS.get(state, ("●", "text_muted"))
 
             item = QTreeWidgetItem(self._container_tree)
             item.setText(0, icon)
+            item.setForeground(0, QColor(tc.get(color_token)))
             item.setText(1, container.get("Names", ""))
             item.setText(2, container.get("Image", ""))
             item.setText(3, container.get("Status", ""))
@@ -409,11 +410,11 @@ class DockerPanel(QWidget):
         )
 
         # Copy image name
-        copy_action = menu.addAction("📋 Copy Image Name")
+        copy_action = menu.addAction("Copy Image Name")
         copy_action.triggered.connect(lambda: self._copy_to_clipboard(image_ref))
 
         # Inspect
-        inspect_action = menu.addAction("🔍 Inspect")
+        inspect_action = menu.addAction("Inspect")
         inspect_action.triggered.connect(lambda: self._inspect_image(image_ref))
 
         # Run container from image
@@ -423,7 +424,7 @@ class DockerPanel(QWidget):
         menu.addSeparator()
 
         # Delete
-        delete_action = menu.addAction("🗑 Delete Image")
+        delete_action = menu.addAction("Delete Image")
         delete_action.triggered.connect(lambda: self._delete_image(image_ref))
 
         menu.exec(self._image_tree.viewport().mapToGlobal(pos))
@@ -511,7 +512,7 @@ class DockerPanel(QWidget):
             start_action.triggered.connect(lambda: self._container_action("start", name))
 
         menu.addSeparator()
-        logs_action = menu.addAction("📋 View Logs")
+        logs_action = menu.addAction("View Logs")
         logs_action.triggered.connect(lambda: self._view_logs(name))
 
         menu.exec(self._container_tree.viewport().mapToGlobal(pos))

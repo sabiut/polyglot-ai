@@ -1,4 +1,4 @@
-"""Playwright Test Agents view — the "🎭 Web Tests" tab in TestPanel.
+"""Playwright Test Agents view — the "Web Tests" tab in TestPanel.
 
 Surfaces the three Playwright workflows (planner, generator, healer)
 as a first-class UI:
@@ -255,7 +255,7 @@ class _PlannerDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("🎭 Plan Playwright tests")
+        self.setWindowTitle("Plan Playwright tests")
         self.setModal(True)
         # A touch taller now that we've added the credentials row.
         self.resize(540, 330)
@@ -344,7 +344,7 @@ class _GeneratorDialog(QDialog):
         preselect: Path | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("🎭 Generate Playwright tests")
+        self.setWindowTitle("Generate Playwright tests")
         self.setModal(True)
         self.resize(520, 240)
         self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_surface')}; }}")
@@ -412,7 +412,7 @@ class _HealerDialog(QDialog):
         preselect: Path | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("🎭 Heal a failing test")
+        self.setWindowTitle("Heal a failing test")
         self.setModal(True)
         self.resize(540, 290)
         self.setStyleSheet(f"QDialog {{ background: {tc.get('bg_surface')}; }}")
@@ -492,7 +492,7 @@ _PLAYWRIGHT_SPEC_GLOBS = ("*.spec.ts", "*.spec.js", "test_*.py")
 
 
 class WebTestsView(QWidget):
-    """The 🎭 Web Tests tab content for TestPanel.
+    """The Web Tests tab content for TestPanel.
 
     The view is intentionally read-only when no project is open — every
     button is disabled until ``set_project_root`` has been called with a
@@ -523,17 +523,17 @@ class WebTestsView(QWidget):
         ar.setContentsMargins(10, 8, 10, 8)
         ar.setSpacing(6)
 
-        self._plan_btn = self._action_button("📝  Plan…", "Explore the app and write a test plan")
+        self._plan_btn = self._action_button("Plan…", "Explore the app and write a test plan")
         self._plan_btn.clicked.connect(self._on_plan_clicked)
         ar.addWidget(self._plan_btn)
 
         self._generate_btn = self._action_button(
-            "⚙️  Generate…", "Turn a plan into runnable Playwright tests"
+            "Generate…", "Turn a plan into runnable Playwright tests"
         )
         self._generate_btn.clicked.connect(self._on_generate_clicked)
         ar.addWidget(self._generate_btn)
 
-        self._heal_btn = self._action_button("🩺  Heal…", "Diagnose and fix a failing test")
+        self._heal_btn = self._action_button("Heal…", "Diagnose and fix a failing test")
         self._heal_btn.clicked.connect(self._on_heal_clicked)
         ar.addWidget(self._heal_btn)
 
@@ -716,7 +716,7 @@ class WebTestsView(QWidget):
             rel = path.relative_to(self._project_root) if self._project_root else path
         except ValueError:
             rel = path
-        item.setText(f"  📄  {rel}")
+        item.setText(f"  {rel}")
         item.setData(_PATH_ROLE, str(path))
         item.setToolTip("Double-click to run the Generator against this plan")
         return item
@@ -730,7 +730,7 @@ class WebTestsView(QWidget):
         # Path-only row — no live status. The Heal dialog accepts any
         # path the user types in, so the row's only job is "let the
         # user point at a test without remembering the directory".
-        item.setText(f"  🎭  {rel}")
+        item.setText(f"  {rel}")
         item.setData(_PATH_ROLE, str(path))
         item.setToolTip("Double-click to heal this test")
         return item

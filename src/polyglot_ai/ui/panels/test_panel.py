@@ -323,7 +323,7 @@ class TestPanel(QWidget):
         )
         empty_layout.addWidget(self._empty_label)
 
-        self._empty_fix_btn = QPushButton("✨ Fix with AI")
+        self._empty_fix_btn = QPushButton("Fix with AI")
         self._empty_fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._empty_fix_btn.setStyleSheet(
             f"QPushButton {{ background: {tc.get('accent_primary')}; "
@@ -344,10 +344,10 @@ class TestPanel(QWidget):
         layout.addWidget(self._empty)
 
         # Finalise tab 1 and add the Playwright Test Agents tab.
-        self._tabs.addTab(pytest_view, "🧪 Pytest")
+        self._tabs.addTab(pytest_view, "Pytest")
 
         self._web_tests = WebTestsView()
-        self._tabs.addTab(self._web_tests, "🎭 Web Tests")
+        self._tabs.addTab(self._web_tests, "Web Tests")
 
     # ── Expand affordance ──────────────────────────────────────────
 
@@ -946,7 +946,7 @@ class TestPanel(QWidget):
         open_action = menu.addAction("Open in editor")
         fix_action = None
         if node.status in ("failed", "fail", "error"):
-            fix_action = menu.addAction("✨ Fix with AI")
+            fix_action = menu.addAction("Fix with AI")
         chosen = menu.exec(self._tree.viewport().mapToGlobal(pos))
         if chosen == run_action:
             self._run_node(node.node_id)

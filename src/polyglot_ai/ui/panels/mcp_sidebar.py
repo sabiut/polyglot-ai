@@ -312,7 +312,7 @@ class MCPSidebar(QWidget):
             layout.addWidget(badge)
 
         # Connect/disconnect button
-        action_btn = QPushButton("⏻" if connected else "▶")
+        action_btn = QPushButton("■" if connected else "▶")
         action_btn.setFixedSize(22, 20)
         action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         action_btn.setToolTip("Disconnect" if connected else "Connect")
@@ -342,7 +342,7 @@ class MCPSidebar(QWidget):
         layout.setContentsMargins(38, 0, 8, 0)
         layout.setSpacing(4)
 
-        icon = QLabel("⚡")
+        icon = QLabel("•")
         icon.setFixedWidth(14)
         icon.setStyleSheet(
             f"font-size: 9px; color: {tc.get('accent_warning')}; background: transparent;"

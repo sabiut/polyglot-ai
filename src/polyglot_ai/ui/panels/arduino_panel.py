@@ -2140,7 +2140,7 @@ class ArduinoPanel(QWidget):
         self._serial_monitor.connect_to(self._port, baud)
 
     def _on_serial_connected(self, port: str, baud: int) -> None:
-        self._serial_connect_btn.setText("⏹  Stop monitor")
+        self._serial_connect_btn.setText("■  Stop monitor")
         # Keep the same primary-button QSS — just the label flips.
         # Append a marker line so the user can tell where one
         # session ends and the next begins.

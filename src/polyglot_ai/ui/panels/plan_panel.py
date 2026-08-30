@@ -65,7 +65,7 @@ class PlanPanel(QWidget):
         header_layout.addWidget(self._execute_btn)
 
         # Pause button
-        self._pause_btn = QPushButton("⏸ Pause")
+        self._pause_btn = QPushButton("Pause")
         self._pause_btn.setFixedHeight(28)
         self._pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pause_btn.clicked.connect(self._on_pause)

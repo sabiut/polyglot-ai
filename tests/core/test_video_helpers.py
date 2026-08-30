@@ -394,11 +394,10 @@ def test_probe_video_uses_stat_size_when_format_size_missing(tmp_path):
 
 
 def test_quick_chips_are_well_formed():
-    """Each chip must have icon, label, and template strings."""
+    """Each chip must have label and template strings."""
     assert len(QUICK_CHIPS) >= 5, "Expected at least 5 quick-action chips"
     seen_labels: set[str] = set()
-    for icon, label, template in QUICK_CHIPS:
-        assert icon, "chip icon is empty"
+    for label, template in QUICK_CHIPS:
         assert label, "chip label is empty"
         assert template, "chip template is empty"
         assert label not in seen_labels, f"duplicate chip label: {label}"
@@ -416,6 +415,6 @@ def test_quick_chips_include_common_operations():
     ffmpeg operation should have a chip. Adding a new one is fine
     (test only checks the minimum); removing one breaks the test
     so you remember to document it."""
-    labels = {label for _, label, _ in QUICK_CHIPS}
+    labels = {label for label, _ in QUICK_CHIPS}
     for required in ("Trim", "Resize", "Audio", "Compress", "GIF"):
         assert required in labels, f"missing quick-action chip: {required!r}"

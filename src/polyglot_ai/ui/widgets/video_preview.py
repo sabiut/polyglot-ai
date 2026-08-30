@@ -628,7 +628,7 @@ class VideoPreviewWidget(QWidget):
 
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self._play_btn.setText("⏸" if playing else "▶")
+        self._play_btn.setText("‖" if playing else "▶")
         # Overlay is a visual "click to play" cue — hide it while
         # the video is actually playing so it doesn't sit on top
         # of the content the user wants to watch.

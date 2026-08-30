@@ -118,7 +118,7 @@ def start_workflow(panel: "ChatPanel", definition, inputs: dict[str, str]) -> No
     # Show workflow start banner
     input_summary = ", ".join(f"{k}={v}" for k, v in inputs.items())
     panel._add_system_message(
-        f"**⚡ Starting workflow: {definition.name}**\n"
+        f"**Starting workflow: {definition.name}**\n"
         f"{definition.description}\n"
         f"Inputs: {input_summary}\n"
         f"Steps: {len(definition.steps)}"
@@ -207,7 +207,7 @@ def finish_workflow(
     status = "completed" if steps_completed == total else "partial"
 
     panel._add_system_message(
-        f"**⚡ Workflow finished: {definition.name}** — {steps_completed}/{total} steps {status}"
+        f"**Workflow finished: {definition.name}** — {steps_completed}/{total} steps {status}"
     )
 
     # Record on active task (best-effort — the run already finished)

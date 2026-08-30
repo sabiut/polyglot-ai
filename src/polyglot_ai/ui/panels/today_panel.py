@@ -187,12 +187,12 @@ class TodayPanel(QWidget):
         actions_grid.setSpacing(6)
         # Build the action buttons in two rows of three.
         actions = [
-            ("✨  New task", self._action_new_task),
-            ("🗂  View all tasks", self._action_show_tasks),
+            ("New task", self._action_new_task),
+            ("View all tasks", self._action_show_tasks),
             ("▶  Run all tests", self._action_run_tests),
             ("⟳  Refresh CI", self._action_refresh_ci),
             ("⎇  Source control", self._action_open_git),
-            ("💬  Chat", self._action_open_chat),
+            ("Chat", self._action_open_chat),
         ]
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -753,10 +753,17 @@ class _AttentionRow(QWidget):
         layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(8)
 
-        icon_glyph = {"error": "🔴", "warn": "🟡", "info": "ℹ"}.get(item.severity, "·")
+        # Monochrome dot coloured by severity — no emoji glyphs.
+        icon_glyph = {"error": "●", "warn": "●", "info": "ℹ"}.get(item.severity, "·")
+        icon_color = {
+            "error": tc.get("accent_error"),
+            "warn": tc.get("accent_warning"),
+        }.get(item.severity, tc.get("text_tertiary"))
         icon = QLabel(icon_glyph)
         icon.setFixedWidth(18)
-        icon.setStyleSheet(f"font-size: {tc.FONT_SM}px; background: transparent;")
+        icon.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {icon_color}; background: transparent;"
+        )
         layout.addWidget(icon)
 
         text = QLabel(item.text)

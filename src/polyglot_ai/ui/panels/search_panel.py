@@ -161,7 +161,7 @@ class SearchPanel(QWidget):
                 row.setContentsMargins(tc.SPACING_LG, 0, tc.SPACING_MD, 0)
                 row.setSpacing(6)
 
-                icon = QLabel("📄")
+                icon = QLabel("•")
                 icon.setFixedWidth(14)
                 icon.setStyleSheet(f"font-size: {tc.FONT_XS}px; background: transparent;")
                 row.addWidget(icon)

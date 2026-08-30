@@ -69,7 +69,7 @@ def test_second_toggle_disables(chat_panel):
 def test_set_tools_refreshes_label_for_already_active_registry(qtbot):
     """If the registry is somehow already active when set_tools is
     called (theoretical edge case — registries are usually fresh),
-    the label should immediately reflect that instead of stale 🔓."""
+    the label should immediately reflect that instead of a stale label."""
     registry = ToolRegistry()
     registry.enable_bootstrap_mode(duration_seconds=120)
 

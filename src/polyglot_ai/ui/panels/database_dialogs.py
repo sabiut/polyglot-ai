@@ -332,9 +332,9 @@ class AddConnectionDialog(QDialog):
         form_layout.addWidget(type_label)
 
         self._type_combo = QComboBox()
-        self._type_combo.addItem("📁  SQLite", "sqlite")
-        self._type_combo.addItem("🐘  PostgreSQL", "postgresql")
-        self._type_combo.addItem("🐬  MySQL", "mysql")
+        self._type_combo.addItem("SQLite", "sqlite")
+        self._type_combo.addItem("PostgreSQL", "postgresql")
+        self._type_combo.addItem("MySQL", "mysql")
         self._type_combo.setFixedHeight(36)
         self._type_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._type_combo.setStyleSheet(
@@ -370,7 +370,7 @@ class AddConnectionDialog(QDialog):
         self._conn_input.setStyleSheet(input_style)
         sqlite_layout.addWidget(self._conn_input)
 
-        self._browse_btn = QPushButton("📂  Browse for file...")
+        self._browse_btn = QPushButton("Browse for file...")
         self._browse_btn.setObjectName("dbBrowseBtn")
         self._browse_btn.setFixedHeight(32)
         self._browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)

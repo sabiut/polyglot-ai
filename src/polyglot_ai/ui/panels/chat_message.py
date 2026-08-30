@@ -536,7 +536,7 @@ class ChatMessage(QWidget):
 
     def _build_reasoning_ui(self) -> None:
         toggle = QToolButton()
-        toggle.setText("💭 Thinking")
+        toggle.setText("Thinking")
         toggle.setCheckable(True)
         toggle.setChecked(False)
         toggle.setCursor(Qt.CursorShape.PointingHandCursor)

@@ -473,10 +473,8 @@ class _DatabaseWindow(QWidget):
         h_layout.setContentsMargins(12, 0, 12, 0)
 
         # Connection badge — extract database name from connection string
-        db_icons = {"sqlite": "📁", "postgresql": "🐘", "mysql": "🐬"}
-        icon = db_icons.get(self._conn.db_type, "🗄")
         db_name = self._extract_db_name()
-        conn_label = QLabel(f"{icon}  {db_name}")
+        conn_label = QLabel(db_name)
         conn_label.setStyleSheet(
             f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
             f"color: {tc.get('text_heading')}; background: transparent;"
@@ -687,7 +685,7 @@ class _DatabaseWindow(QWidget):
 
         # View toggle: Table / Chart / Profile
         self._view_toggle = QComboBox()
-        self._view_toggle.addItems(["📊 Table", "📈 Chart", "🔍 Profile"])
+        self._view_toggle.addItems(["Table", "Chart", "Profile"])
         self._view_toggle.setStyleSheet(combo_dropdown_style())
         self._view_toggle.currentIndexChanged.connect(self._on_view_changed)
         rh_layout.addWidget(self._view_toggle)
@@ -701,7 +699,7 @@ class _DatabaseWindow(QWidget):
         rh_layout.addWidget(self._results_status)
 
         # Header action buttons: save snippet, export CSV
-        self._snippet_btn = self._mk_header_btn("💾", "Save current SQL as a snippet")
+        self._snippet_btn = self._mk_header_btn("+", "Save current SQL as a snippet")
         self._snippet_btn.clicked.connect(self._on_save_snippet)
         rh_layout.addWidget(self._snippet_btn)
 
@@ -767,11 +765,11 @@ class _DatabaseWindow(QWidget):
         self._schema_tree.clear()
         for table in tables:
             table_item = QTreeWidgetItem(self._schema_tree)
-            table_item.setText(0, f"📋 {table.name}")
+            table_item.setText(0, table.name)
             table_item.setText(1, "table")
             for col in table.columns:
                 col_item = QTreeWidgetItem(table_item)
-                pk_marker = " 🔑" if col.primary_key else ""
+                pk_marker = " (PK)" if col.primary_key else ""
                 col_item.setText(0, f"  {col.name}{pk_marker}")
                 col_item.setText(1, col.data_type)
         self._schema_tree.expandAll()
@@ -779,13 +777,13 @@ class _DatabaseWindow(QWidget):
     def _on_table_double_click(self, item: QTreeWidgetItem, column: int) -> None:
         """Double-click a table to query its contents."""
         if item.parent() is None:
-            table_name = item.text(0).replace("📋 ", "")
+            table_name = item.text(0)
             self._query_table(table_name)
 
     def _on_table_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Single-click a table to preview its contents."""
         if item.parent() is None:
-            table_name = item.text(0).replace("📋 ", "")
+            table_name = item.text(0)
             self._query_table(table_name)
 
     def _query_table(self, table_name: str) -> None:
@@ -952,7 +950,7 @@ class _DatabaseWindow(QWidget):
                 preview = preview[:61] + "…"
             label = preview
             if entry.error:
-                label = f"⚠ {label}"
+                label = f"✗ {label}"
             elif entry.row_count >= 0:
                 label = f"{label}  · {entry.row_count} rows"
             item = QListWidgetItem(label)
@@ -1031,17 +1029,17 @@ class _DatabaseWindow(QWidget):
             col = item.column()
             col_name = self._results_table.horizontalHeaderItem(col).text() if col >= 0 else ""
 
-            edit_action = menu.addAction(f"✏️  Edit cell ({col_name})")
+            edit_action = menu.addAction(f"Edit cell ({col_name})")
             edit_action.triggered.connect(lambda: self._edit_cell(row, col))
 
             menu.addSeparator()
 
-            delete_action = menu.addAction("🗑  Delete this row")
+            delete_action = menu.addAction("Delete this row")
             delete_action.triggered.connect(lambda: self._delete_row(row))
 
         menu.addSeparator()
 
-        add_action = menu.addAction("➕  Insert new row")
+        add_action = menu.addAction("Insert new row")
         add_action.triggered.connect(self._insert_row)
 
         menu.exec(self._results_table.viewport().mapToGlobal(pos))

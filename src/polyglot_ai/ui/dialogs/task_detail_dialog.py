@@ -69,14 +69,14 @@ _NOTE_GLYPHS: dict[str, tuple[str, str]] = {
     "committed": ("✓", "#4ec9b0"),
     "pushed": ("⇡", "#4ec9b0"),
     "pr_opened": ("⇧", "#9cdcfe"),
-    "tested": ("⚙", "#4ec9b0"),
+    "tested": ("●", "#4ec9b0"),
     "review_clean": ("✓", "#4ec9b0"),
     "review_findings": ("!", "#e5a00d"),
     "review_failed": ("✗", "#f48771"),
     "ci_run": ("●", "#9cdcfe"),
-    "ci_failure_imported": ("⚠", "#f48771"),
-    "workflow_started": ("⚡", "#9cdcfe"),
-    "workflow_run": ("⚡", "#4ec9b0"),
+    "ci_failure_imported": ("!", "#f48771"),
+    "workflow_started": ("●", "#9cdcfe"),
+    "workflow_run": ("●", "#4ec9b0"),
     "chat_started": ("✎", "#888888"),
     "ai_response": ("✎", "#888888"),
     "user_message": ("✎", "#aaaaaa"),
@@ -418,7 +418,7 @@ class TaskDetailDialog(QDialog):
         btn_row.setSpacing(8)
         btn_row.addStretch()
 
-        self._plan_btn = QPushButton("✨ Generate checklist with AI")
+        self._plan_btn = QPushButton("Generate checklist with AI")
         self._plan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plan_btn.setToolTip(
             "Ask the configured AI provider to draft an ordered checklist for this task."
@@ -684,7 +684,7 @@ class TaskDetailDialog(QDialog):
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
                 self._plan_btn.setText(
-                    "Regenerate checklist" if self._task.plan else "✨ Generate checklist with AI"
+                    "Regenerate checklist" if self._task.plan else "Generate checklist with AI"
                 )
             return
         # Activate this task so set_plan() writes to the right one,
@@ -700,7 +700,7 @@ class TaskDetailDialog(QDialog):
             if self._plan_btn is not None:
                 self._plan_btn.setEnabled(True)
                 self._plan_btn.setText(
-                    "Regenerate checklist" if self._task.plan else "✨ Generate checklist with AI"
+                    "Regenerate checklist" if self._task.plan else "Generate checklist with AI"
                 )
             return
         self.accept()

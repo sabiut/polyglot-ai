@@ -230,7 +230,7 @@ class GitPanel(QWidget):
         # AI PR description generator — runs the branch diff through the
         # review engine with a dedicated prompt and shows the result in
         # a dialog with copy + `gh pr create` actions.
-        self._pr_btn = QPushButton("✨ Generate PR description")
+        self._pr_btn = QPushButton("Generate PR description")
         self._pr_btn.setFixedHeight(28)
         self._pr_btn.setToolTip(
             "Generate a PR title, summary, test plan and risks from the "
@@ -592,7 +592,7 @@ class GitPanel(QWidget):
         self.set_project_root(new_root)
 
     def set_review_engine(self, engine) -> None:
-        """Inject the ReviewEngine so ✨ Generate PR description works."""
+        """Inject the ReviewEngine so Generate PR description works."""
         self._review_engine = engine
 
     def _current_model_id(self) -> str:
@@ -629,7 +629,7 @@ class GitPanel(QWidget):
             return
 
         self._pr_btn.setEnabled(False)
-        self._pr_btn.setText("✨ Generating PR description…")
+        self._pr_btn.setText("Generating PR description…")
 
         from polyglot_ai.core.async_utils import safe_task
 
@@ -720,7 +720,7 @@ class GitPanel(QWidget):
 
     def _reset_pr_button(self) -> None:
         self._pr_btn.setEnabled(True)
-        self._pr_btn.setText("✨ Generate PR description")
+        self._pr_btn.setText("Generate PR description")
 
     def _on_push(self) -> None:
         """Push the current branch to origin on a background task.

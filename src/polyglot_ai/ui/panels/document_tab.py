@@ -67,7 +67,7 @@ class DocumentTab(QWidget):
             ("•", "Bullet list", lambda: self._prefix("- ")),
             ("1.", "Numbered list", lambda: self._prefix("1. ")),
             ("|", None, None),
-            ("🔗", "Link", lambda: self._wrap("[", "](url)")),
+            ("Link", "Link", lambda: self._wrap("[", "](url)")),
             ("`", "Inline code", lambda: self._wrap("`", "`")),
             ("```", "Code block", lambda: self._wrap("```\n", "\n```")),
             (">", "Blockquote", lambda: self._prefix("> ")),

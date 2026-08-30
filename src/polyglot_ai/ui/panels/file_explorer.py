@@ -979,7 +979,7 @@ class FileExplorer(QWidget):
         layout.addWidget(msg)
 
         if path.is_dir():
-            warn = QLabel("⚠ This will delete the folder and all its contents.")
+            warn = QLabel("This will delete the folder and all its contents.")
             warn.setStyleSheet(f"font-size: {tc.FONT_MD}px; color: {tc.get('accent_warning')};")
             warn.setWordWrap(True)
             layout.addWidget(warn)

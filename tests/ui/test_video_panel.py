@@ -52,7 +52,7 @@ def test_chip_fills_prompt_textarea(panel):
     point. The full button → slot connection is exercised by
     ``test_chip_button_signal_fires_apply_chip`` below.
     """
-    _, _label, template = QUICK_CHIPS[0]  # First chip — Trim
+    _label, template = QUICK_CHIPS[0]  # First chip — Trim
     panel._apply_chip(template)
     assert panel._prompt_input.toPlainText() == template
 
@@ -65,7 +65,7 @@ def test_chip_button_signal_fires_apply_chip(panel, qtbot):
     """
     from PyQt6.QtWidgets import QPushButton
 
-    chip_label_to_template = {label: template for _, label, template in QUICK_CHIPS}
+    chip_label_to_template = {label: template for label, template in QUICK_CHIPS}
     # The chip buttons live as QPushButton descendants of the panel
     # whose text contains the chip's label.
     found: dict[str, QPushButton] = {}
@@ -89,8 +89,8 @@ def test_chip_replaces_prior_prompt_contents(panel):
     """Chip click is a "replace, not append" operation. Two chip
     clicks in a row must leave only the second template, not a
     concatenation."""
-    _, _, t1 = QUICK_CHIPS[0]
-    _, _, t2 = QUICK_CHIPS[1]
+    _, t1 = QUICK_CHIPS[0]
+    _, t2 = QUICK_CHIPS[1]
 
     panel._apply_chip(t1)
     panel._apply_chip(t2)
@@ -102,7 +102,7 @@ def test_chip_overrides_user_typed_text(panel):
     template wins. The chip is an intentional "give me a starting
     point" action — the user can edit further if they want both."""
     panel._prompt_input.setPlainText("some half-typed thought")
-    _, _, template = QUICK_CHIPS[0]
+    _, template = QUICK_CHIPS[0]
     panel._apply_chip(template)
     assert panel._prompt_input.toPlainText() == template
 
@@ -110,7 +110,7 @@ def test_chip_overrides_user_typed_text(panel):
 def test_chip_focus_lands_in_prompt_textarea(panel):
     """After a chip click the prompt textarea has focus, so the user
     can immediately type follow-up text without an extra mouse move."""
-    _, _, template = QUICK_CHIPS[0]
+    _, template = QUICK_CHIPS[0]
     panel._apply_chip(template)
     assert panel._prompt_input.hasFocus()
 
@@ -129,7 +129,7 @@ def test_every_chip_template_is_usable(panel):
         ),
     ):
         panel._input_path = fake_video
-        for _, label, template in QUICK_CHIPS:
+        for label, template in QUICK_CHIPS:
             panel._apply_chip(template)
             assert panel._prompt_input.toPlainText() == template
             ready, _ = panel._readiness()

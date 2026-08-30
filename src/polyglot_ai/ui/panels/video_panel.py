@@ -79,26 +79,22 @@ _VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".flv", ".wmv", ".m4v"}
 # Ordering is value-by-frequency — Trim and Resize are by far the
 # most common ffmpeg requests in the wild, GIF/Subtitles less so.
 # Adding a chip is one tuple here; no other changes needed.
-QUICK_CHIPS: tuple[tuple[str, str, str], ...] = (
-    ("🎬", "Trim", "Trim from 0:00 to 0:30"),
+QUICK_CHIPS: tuple[tuple[str, str], ...] = (
+    ("Trim", "Trim from 0:00 to 0:30"),
     (
-        "📐",
         "Resize",
         "Scale to 1080p, keep the aspect ratio (no letterboxing)",
     ),
-    ("🎵", "Audio", "Extract just the audio as a 192 kbps MP3"),
+    ("Audio", "Extract just the audio as a 192 kbps MP3"),
     (
-        "📦",
         "Compress",
         "Compress to roughly half the file size while keeping watchable quality",
     ),
     (
-        "🎞️",
         "GIF",
         "Convert to a high-quality GIF — max 480p wide, 10 fps, loop",
     ),
     (
-        "💬",
         "Subtitles",
         "Burn the subtitles from subs.srt into the video",
     ),
@@ -420,7 +416,7 @@ class VideoPanel(QWidget):
 
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
-        pick_btn = QPushButton("📂  Pick a video")
+        pick_btn = QPushButton("Pick a video")
         pick_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         pick_btn.setStyleSheet(self._primary_button_qss())
         pick_btn.clicked.connect(self._on_pick_video)
@@ -605,8 +601,8 @@ class VideoPanel(QWidget):
         """
         row = QHBoxLayout()
         row.setSpacing(6)
-        for icon, label, template in QUICK_CHIPS:
-            btn = QPushButton(f"{icon}  {label}")
+        for label, template in QUICK_CHIPS:
+            btn = QPushButton(label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(self._chip_button_qss())
             btn.setToolTip(template)
@@ -1063,7 +1059,7 @@ class VideoPanel(QWidget):
         return getattr(parent, "_chat_panel", None) or getattr(parent, "chat_panel", None)
 
     def _append_status(self, message: str, kind: str = "info") -> None:
-        prefix = {"ok": "✓ ", "fail": "✗ ", "warn": "⚠ ", "info": "› "}.get(kind, "› ")
+        prefix = {"ok": "✓ ", "fail": "✗ ", "warn": "! ", "info": "› "}.get(kind, "› ")
         self._status.appendPlainText(f"{prefix}{message}")
 
     @property
