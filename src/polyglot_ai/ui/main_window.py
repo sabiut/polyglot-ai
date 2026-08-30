@@ -635,6 +635,9 @@ class MainWindow(QMainWindow):
         self._action_about = QAction("&About", self)
         help_menu.addAction(self._action_about)
 
+        self._action_check_updates = QAction("Check for &Updates…", self)
+        help_menu.addAction(self._action_check_updates)
+
         self._action_shortcuts = QAction("&Keyboard Shortcuts", self)
         help_menu.addAction(self._action_shortcuts)
 

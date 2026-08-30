@@ -280,6 +280,20 @@ def main() -> None:
             "Notification system failed to install — continuing without it"
         )
 
+    # Release update check — needs the toast manager from
+    # install_notifications, hence the ordering. Same best-effort
+    # stance: a broken check must never block startup.
+    try:
+        from polyglot_ai.startup.update_notifier import install_update_check
+
+        install_update_check(window, event_bus)
+    except Exception:  # pragma: no cover — best-effort wiring
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Update check failed to install — continuing without it"
+        )
+
     # MCP
     mcp_client = MCPClient()
     window._mcp_client = mcp_client
