@@ -1,0 +1,66 @@
+name: Publish existing release to package repos
+
+# Manual re-publish of an already-tagged GitHub release's .deb/.rpm
+# into the Cloudsmith repositories. Two uses:
+#   * testing the Cloudsmith pipeline without cutting a new release
+#   * backfilling a release that shipped before the credentials
+#     were configured (the release workflow's publish-repos job is
+#     soft-gated and would have skipped it)
+#
+# The normal path is automatic: release.yml's publish-repos job runs
+# on every new tag once CLOUDSMITH_API_KEY is set.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.15.0)"
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
+      CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot-ai' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require credentials
+        run: |
+          if [ -z "$CLOUDSMITH_API_KEY" ]; then
+            echo "::error::CLOUDSMITH_API_KEY secret is not set — see packaging/APT-REPO.md"
+            exit 1
+          fi
+
+      - name: Download release assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "${{ inputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.deb" --pattern "*.rpm" \
+            --dir assets
+          ls -la assets/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Cloudsmith CLI
+        run: pip install --upgrade cloudsmith-cli
+
+      - name: Publish .deb to the APT repository
+        run: |
+          set -euo pipefail
+          DEB=$(ls assets/*.deb)
+          for target in debian/trixie debian/bookworm ubuntu/noble ubuntu/jammy; do
+            cloudsmith push deb "$CLOUDSMITH_REPO/$target" "$DEB" --republish
+          done
+
+      - name: Publish .rpm to the RPM repository
+        run: |
+          set -euo pipefail
+          RPM=$(ls assets/*.rpm)
+          for target in fedora/44 fedora/43; do
+            cloudsmith push rpm "$CLOUDSMITH_REPO/$target" "$RPM" --republish
+          done
