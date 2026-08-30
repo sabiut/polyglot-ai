@@ -664,6 +664,10 @@ class MainWindow(QMainWindow):
         self._action_open_file.triggered.connect(lambda: self._editor_panel.open_file())
         self._action_save.triggered.connect(self._editor_panel.save_current)
         self._action_save_all.triggered.connect(self._editor_panel.save_all)
+        self._action_find.triggered.connect(lambda: self._editor_panel.show_find_bar(replace=False))
+        self._action_replace.triggered.connect(
+            lambda: self._editor_panel.show_find_bar(replace=True)
+        )
         self._action_close_tab.triggered.connect(
             lambda: self._editor_panel.close_tab(self._editor_panel.currentIndex())
         )

@@ -10,9 +10,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.core.coverage import FileCoverage
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 from PyQt6.Qsci import (
     QsciLexerBash,
     QsciLexerCPP,
@@ -100,6 +107,10 @@ class EditorTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        self._find_bar = self._build_find_bar()
+        self._find_bar.setVisible(False)
+        layout.addWidget(self._find_bar)
+
         self._editor = QsciScintilla()
         layout.addWidget(self._editor)
 
@@ -120,6 +131,173 @@ class EditorTab(QWidget):
 
         self._editor.modificationChanged.connect(self._on_modification_changed)
         self._editor.textChanged.connect(self._on_text_changed)
+
+    # ── Find / Replace bar ────────────────────────────────────────
+
+    def _build_find_bar(self) -> QWidget:
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(8, 4, 8, 4)
+        row.setSpacing(6)
+        bar.setStyleSheet(
+            f"background: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+
+        input_css = (
+            f"QLineEdit {{ background: {tc.get('bg_input')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_input')}; border-radius: 3px; "
+            f"padding: 3px 6px; font-size: {tc.FONT_MD}px; }}"
+            f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
+        )
+        btn_css = (
+            f"QPushButton {{ background: {tc.get('bg_surface_raised')}; "
+            f"color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_input')}; border-radius: 3px; "
+            f"padding: 3px 10px; font-size: {tc.FONT_SM}px; }}"
+            f"QPushButton:hover {{ border-color: {tc.get('accent_primary')}; }}"
+            f"QPushButton:checked {{ background: {tc.get('accent_primary')}; "
+            f"color: {tc.get('text_on_accent')}; border-color: {tc.get('accent_primary')}; }}"
+        )
+
+        self._find_input = QLineEdit()
+        self._find_input.setPlaceholderText("Find")
+        self._find_input.setStyleSheet(input_css)
+        self._find_input.returnPressed.connect(self.find_next)
+        row.addWidget(self._find_input, 2)
+
+        self._replace_input = QLineEdit()
+        self._replace_input.setPlaceholderText("Replace with")
+        self._replace_input.setStyleSheet(input_css)
+        self._replace_input.returnPressed.connect(self._replace_one)
+        row.addWidget(self._replace_input, 2)
+
+        self._case_btn = QPushButton("Aa")
+        self._case_btn.setCheckable(True)
+        self._case_btn.setToolTip("Match case")
+        self._case_btn.setStyleSheet(btn_css)
+        row.addWidget(self._case_btn)
+
+        self._regex_btn = QPushButton(".*")
+        self._regex_btn.setCheckable(True)
+        self._regex_btn.setToolTip("Regular expression")
+        self._regex_btn.setStyleSheet(btn_css)
+        row.addWidget(self._regex_btn)
+
+        prev_btn = QPushButton("Prev")
+        prev_btn.setToolTip("Find previous (Shift+Enter)")
+        prev_btn.setStyleSheet(btn_css)
+        prev_btn.clicked.connect(self.find_prev)
+        row.addWidget(prev_btn)
+
+        next_btn = QPushButton("Next")
+        next_btn.setToolTip("Find next (Enter)")
+        next_btn.setStyleSheet(btn_css)
+        next_btn.clicked.connect(self.find_next)
+        row.addWidget(next_btn)
+
+        self._replace_btn = QPushButton("Replace")
+        self._replace_btn.setStyleSheet(btn_css)
+        self._replace_btn.clicked.connect(self._replace_one)
+        row.addWidget(self._replace_btn)
+
+        self._replace_all_btn = QPushButton("Replace All")
+        self._replace_all_btn.setStyleSheet(btn_css)
+        self._replace_all_btn.clicked.connect(self._replace_all)
+        row.addWidget(self._replace_all_btn)
+
+        self._find_status = QLabel("")
+        self._find_status.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
+        row.addWidget(self._find_status)
+        row.addStretch()
+
+        close_btn = QPushButton("✕")
+        close_btn.setToolTip("Close (Esc)")
+        close_btn.setStyleSheet(btn_css)
+        close_btn.clicked.connect(self.hide_find_bar)
+        row.addWidget(close_btn)
+
+        # Esc anywhere in the bar closes it and returns focus.
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), bar, self.hide_find_bar)
+        # Shift+Enter in the find field searches backwards.
+        QShortcut(QKeySequence("Shift+Return"), self._find_input, self.find_prev)
+        return bar
+
+    def show_find_bar(self, *, replace: bool = False) -> None:
+        """Reveal the bar; prefill from the current selection."""
+        self._find_bar.setVisible(True)
+        for w in (self._replace_input, self._replace_btn, self._replace_all_btn):
+            w.setVisible(replace)
+        selected = self._editor.selectedText()
+        if selected and "\n" not in selected:
+            self._find_input.setText(selected)
+        self._find_input.setFocus()
+        self._find_input.selectAll()
+
+    def hide_find_bar(self) -> None:
+        if self._find_bar.isVisible():
+            self._find_bar.setVisible(False)
+            self._find_status.setText("")
+            self._editor.setFocus()
+
+    def _do_find(self, *, forward: bool) -> bool:
+        needle = self._find_input.text()
+        if not needle:
+            return False
+        # When searching backwards, start from the selection anchor so
+        # repeated Prev presses don't keep re-matching the same hit.
+        if not forward:
+            line, index, _, _ = self._editor.getSelection()
+            if line >= 0:
+                self._editor.setCursorPosition(line, index)
+        found = self._editor.findFirst(
+            needle,
+            self._regex_btn.isChecked(),
+            self._case_btn.isChecked(),
+            False,  # whole word
+            True,  # wrap
+            forward,
+        )
+        self._find_status.setText("" if found else "No matches")
+        return found
+
+    def find_next(self) -> bool:
+        return self._do_find(forward=True)
+
+    def find_prev(self) -> bool:
+        return self._do_find(forward=False)
+
+    def _replace_one(self) -> None:
+        # findFirst selects the match; replace() acts on that selection.
+        if self._editor.hasSelectedText() or self.find_next():
+            self._editor.replace(self._replace_input.text())
+            self.find_next()
+
+    def _replace_all(self) -> None:
+        needle = self._find_input.text()
+        if not needle:
+            return
+        count = 0
+        self._editor.beginUndoAction()
+        try:
+            self._editor.setCursorPosition(0, 0)
+            # wrap=False so the loop terminates at end of document.
+            while self._editor.findFirst(
+                needle,
+                self._regex_btn.isChecked(),
+                self._case_btn.isChecked(),
+                False,
+                False,
+                True,
+            ):
+                self._editor.replace(self._replace_input.text())
+                count += 1
+        finally:
+            self._editor.endUndoAction()
+        self._find_status.setText(f"Replaced {count}")
 
     def _setup_editor(self) -> None:
         editor = self._editor

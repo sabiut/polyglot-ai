@@ -470,10 +470,21 @@ class SettingsDialog(QDialog):
 
             api_layout.addLayout(row)
 
-        key_note = QLabel("🔒 Keys are stored securely in your system keyring.")
-        key_note.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 4px;"
-        )
+        # backend_ok is False when keyring fell back to its fail/null
+        # backend (no Secret Service / KWallet / pass on this system) —
+        # keys typed here would silently vanish on the next launch, so
+        # warn instead of making a false safety claim.
+        if self._keyring.backend_ok:
+            key_note = QLabel("Keys are stored securely in your system keyring.")
+            note_colour = tc.get("text_muted")
+        else:
+            key_note = QLabel(
+                "No usable system keyring found — API keys will NOT be saved "
+                "between sessions. Install gnome-keyring or KWallet to fix this."
+            )
+            note_colour = tc.get("accent_warning")
+        key_note.setWordWrap(True)
+        key_note.setStyleSheet(f"font-size: {tc.FONT_SM}px; color: {note_colour}; margin-top: 4px;")
         api_layout.addWidget(key_note)
         layout.addWidget(api_card)
 

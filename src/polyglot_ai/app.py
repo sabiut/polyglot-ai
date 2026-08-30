@@ -381,6 +381,7 @@ def main() -> None:
 
     window.git_panel.set_event_bus(event_bus)
     window.test_panel.set_event_bus(event_bus)
+    window._editor_panel.set_event_bus(event_bus)
 
     window.tasks_panel.set_task_manager(task_manager)
     window.tasks_panel.set_event_bus(event_bus)

@@ -73,6 +73,12 @@ MODEL_COSTS = {
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
     "gemini-3.1-pro-preview": {"input": 0.00125, "output": 0.005},
     "gemini-3-flash-preview": {"input": 0.0001, "output": 0.0004},
+    "gemini-3.1-flash-lite-preview": {"input": 0.00005, "output": 0.0002},
+    # DeepSeek is roughly an order of magnitude below the GPT/Claude
+    # flagships — without these entries the usage panel's generic
+    # fallback (0.002/0.006) over-reported DeepSeek spend ~20×.
+    "deepseek-v4-pro": {"input": 0.0005, "output": 0.002},
+    "deepseek-v4-flash": {"input": 0.0001, "output": 0.0004},
 }
 
 # Keyring

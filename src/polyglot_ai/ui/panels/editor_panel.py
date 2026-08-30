@@ -71,6 +71,7 @@ class EditorPanel(QTabWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._event_bus = None
         self.setTabsClosable(True)
         self.setMovable(True)
         self.setDocumentMode(True)
@@ -168,6 +169,28 @@ class EditorPanel(QTabWidget):
         index = self.addTab(tab, name)
         self.setCurrentIndex(index)
 
+    def set_event_bus(self, event_bus) -> None:
+        """Wire the app-wide bus so saves broadcast ``file:saved``.
+
+        The Git panel (dirty-list refresh) and Test panel (re-collect
+        after a test file changes) both subscribe to that event; until
+        this panel emits it, those refreshes never fire.
+        """
+        self._event_bus = event_bus
+
+    def _emit_saved(self, tab) -> None:
+        path = getattr(tab, "file_path", None)
+        if self._event_bus is not None and path is not None:
+            from polyglot_ai.constants import EVT_FILE_SAVED
+
+            self._event_bus.emit(EVT_FILE_SAVED, path=str(path))
+
+    def show_find_bar(self, *, replace: bool = False) -> None:
+        """Open the find (or find+replace) bar on the current editor tab."""
+        tab = self.currentWidget()
+        if isinstance(tab, EditorTab):
+            tab.show_find_bar(replace=replace)
+
     def save_current(self) -> bool:
         """Save the current tab's file."""
         tab = self.currentWidget()
@@ -181,6 +204,7 @@ class EditorPanel(QTabWidget):
 
         if tab.save():
             self._update_tab_title(self.currentIndex())
+            self._emit_saved(tab)
             return True
         return False
 
@@ -192,9 +216,9 @@ class EditorPanel(QTabWidget):
                 if tab.file_path is None:
                     self.setCurrentIndex(i)
                     self._save_as(tab)
-                else:
-                    tab.save()
+                elif tab.save():
                     self._update_tab_title(i)
+                    self._emit_saved(tab)
 
     def _save_as(self, tab: EditorTab) -> bool:
         file_path, _ = QFileDialog.getSaveFileName(self, "Save File", "", "All Files (*)")
@@ -206,6 +230,7 @@ class EditorPanel(QTabWidget):
             idx = self.indexOf(tab)
             self.setTabText(idx, path.name)
             self._open_tabs[str(path.resolve())] = idx
+            self._emit_saved(tab)
             return True
         return False
 
