@@ -23,6 +23,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.14.0" date="2026-08-30">
+      <description>
+        <p>Editor find and replace, git pull/fetch and per-file diffs,
+        full-text conversation search, Markdown export, live model
+        list, clickable review findings, and new editor/notification
+        settings. Plus fixes: save events now refresh the Git and
+        Test panels, honest keyring warnings, and corrected usage
+        pricing.</p>
+      </description>
+    </release>
     <release version="0.13.5" date="2026-08-30">
       <description>
         <p>In-app release update notifier, theme-token overhaul, vector
