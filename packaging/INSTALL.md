@@ -5,6 +5,30 @@ Python dependencies (~150 MB of wheels for PyQt6, openai, anthropic,
 google-genai, etc.) so a network connection is **not** required at
 install time.
 
+## Recommended: the APT / RPM repository (automatic updates)
+
+Registering the package repository once means every future release
+arrives through your normal system updates (`apt upgrade` /
+`dnf upgrade`) — no more downloading from the releases page.
+
+Debian / Ubuntu:
+
+```bash
+curl -1sLf 'https://dl.cloudsmith.io/public/sabiut/polyglot-ai/setup.deb.sh' | sudo -E bash
+sudo apt install polyglot-ai
+```
+
+Fedora / RHEL:
+
+```bash
+curl -1sLf 'https://dl.cloudsmith.io/public/sabiut/polyglot-ai/setup.rpm.sh' | sudo -E bash
+sudo dnf install polyglot-ai
+```
+
+If the repository isn't reachable yet (it's populated from v0.16.0
+onward), use the direct downloads below — the in-app update notifier
+will still tell you when new releases ship.
+
 ## Debian / Ubuntu / Mint / Pop!_OS / etc. (.deb)
 
 ```bash

@@ -59,7 +59,13 @@ Full documentation is available on the **[Polyglot AI Wiki](https://github.com/s
 
 ## Install
 
-### From release (recommended)
+### From the package repository (automatic updates)
+
+Register the repo once and future releases arrive via `apt upgrade` /
+`dnf upgrade` — see [packaging/INSTALL.md](packaging/INSTALL.md) for
+the one-line setup commands. (Populated from v0.16.0 onward.)
+
+### From release
 
 Download the latest release from [Releases](https://github.com/sabiut/polyglot-ai/releases):
 
