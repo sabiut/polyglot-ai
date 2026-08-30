@@ -4,6 +4,10 @@ site_url: https://sabiut.github.io/polyglot-ai/
 repo_url: https://github.com/sabiut/polyglot-ai
 repo_name: sabiut/polyglot-ai
 
+# Hide the theme's "Made with Material for MkDocs" footer notice.
+extra:
+  generator: false
+
 # Pages are generated from wiki/ by scripts/gen_docs.py — run it
 # before `mkdocs build` (the docs workflow does this automatically).
 docs_dir: docs_build
