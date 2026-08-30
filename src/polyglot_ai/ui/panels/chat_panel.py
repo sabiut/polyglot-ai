@@ -1587,6 +1587,7 @@ class ChatPanel(QWidget):
                 # Replace thinking indicator with actual message on first content
                 if not first_token_received and (chunk.delta_content or chunk.tool_calls):
                     first_token_received = True
+                    thinking_widget._timer.stop()
                     thinking_widget.deleteLater()
                     self._message_layout.removeWidget(thinking_widget)
                     self._message_layout.addWidget(self._current_assistant_msg)
@@ -1686,6 +1687,7 @@ class ChatPanel(QWidget):
             logger.exception("Error during streaming")
             # Clean up thinking indicator if still showing
             if not first_token_received:
+                thinking_widget._timer.stop()
                 thinking_widget.deleteLater()
                 self._message_layout.removeWidget(thinking_widget)
             error_msg = str(e)[:200]
@@ -1707,6 +1709,7 @@ class ChatPanel(QWidget):
             # Clean up thinking indicator if stream ended with no content
             if not first_token_received:
                 try:
+                    thinking_widget._timer.stop()
                     thinking_widget.deleteLater()
                     self._message_layout.removeWidget(thinking_widget)
                 except RuntimeError:
@@ -2717,21 +2720,36 @@ class ChatPanel(QWidget):
         widget._dot_state = 0
 
         def animate():
+            # The timer is connected to a plain closure, so Qt can't
+            # auto-disconnect it when the widgets die. Between the
+            # deleteLater() at the call sites and the actual deferred
+            # destruction — or during test-harness teardown — a tick
+            # can land on a half-destroyed widget tree; touching it
+            # then segfaults (seen on CI under pytest-qt). Bail out
+            # the moment the C++ side is gone.
+            from PyQt6 import sip
+
+            if sip.isdeleted(widget) or sip.isdeleted(dots_label):
+                return
             widget._dot_state = (widget._dot_state + 1) % 4
             s = widget._dot_state
             colors = [tc.get("text_tertiary"), tc.get("text_muted"), tc.get("text_disabled")]
             # Rotate which dot is brightest
             c = [colors[(0 - s) % 3], colors[(1 - s) % 3], colors[(2 - s) % 3]]
-            dots_label.setText(
-                f'<span style="color:{c[0]}; font-size:18px;">●</span>'
-                f'  <span style="color:{c[1]}; font-size:18px;">●</span>'
-                f'  <span style="color:{c[2]}; font-size:18px;">●</span>'
-            )
+            try:
+                dots_label.setText(
+                    f'<span style="color:{c[0]}; font-size:18px;">●</span>'
+                    f'  <span style="color:{c[1]}; font-size:18px;">●</span>'
+                    f'  <span style="color:{c[2]}; font-size:18px;">●</span>'
+                )
+            except RuntimeError:
+                # Label died between the isdeleted check and setText.
+                timer.stop()
 
         timer = QTimer(widget)
         timer.timeout.connect(animate)
         timer.start(400)
-        widget._timer = timer  # prevent GC
+        widget._timer = timer  # prevent GC; call sites stop() it on removal
 
         return widget
 

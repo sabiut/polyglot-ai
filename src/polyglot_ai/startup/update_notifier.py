@@ -19,6 +19,7 @@ callbacks on the main thread.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import TYPE_CHECKING
 
@@ -110,6 +111,14 @@ def install_update_check(window: "MainWindow", event_bus: EventBus) -> None:
     window._action_check_updates.triggered.connect(
         lambda: _check_in_background(force=True, result_event=EVT_UPDATE_MANUAL_RESULT)
     )
+
+    # Opt-out for the automatic phone-home: distro packagers who
+    # handle updates through their own repos can set this, and the
+    # test suite sets it so a stray timer can't fire a real network
+    # call mid-run against torn-down windows. The manual Help-menu
+    # action above still works either way.
+    if os.environ.get("POLYGLOT_AI_DISABLE_UPDATE_CHECK"):
+        return
 
     QTimer.singleShot(
         _AUTO_CHECK_DELAY_MS,

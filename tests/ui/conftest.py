@@ -21,6 +21,12 @@ import pytest
 # (pytest-qt constructs it on first use of qtbot).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Keep install_update_check() from scheduling its launch-time timer:
+# it would fire mid-session, hit the real GitHub API from CI, and
+# deliver into windows long since torn down. The manual-check path
+# stays testable; only the automatic timer is suppressed.
+os.environ.setdefault("POLYGLOT_AI_DISABLE_UPDATE_CHECK", "1")
+
 
 @pytest.fixture
 def task_manager(tmp_path):
