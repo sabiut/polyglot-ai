@@ -68,7 +68,7 @@ settings, and audit log).
 On the very first launch, an **Onboarding** wizard appears. It asks you for
 an OpenAI API key (the quickest way to get up and running). Skip it if you
 prefer to use a different provider — you can set keys later from
-**Settings → Providers**.
+**Settings → Accounts**.
 
 Keys are stored in your OS keyring via the `keyring` package, **not** in
 plaintext config. If your OS doesn't have a keyring backend, the app falls

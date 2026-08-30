@@ -59,9 +59,15 @@ After a run, the panel writes a `TestRunSnapshot` onto the active task
 (`passed` / `failed` / `skipped` / `timestamp`) and appends a `tested`
 note. The sidebar card then shows e.g. `12/13 tests`.
 
+### Coverage
+
+Tick the **Coverage** checkbox in the panel header to run pytest with
+`--cov` (requires `pytest-cov` in the project's venv). After the run the
+header shows the coverage percentage and hit/miss bars are painted in
+the editor gutter.
+
 ### Out of scope (for now)
 
-- Coverage reporting
 - Parameterized test expansion in the tree
 - Debugging integration
 - Non-pytest frameworks (unittest, hypothesis-only, etc.)
@@ -115,17 +121,6 @@ Each finding has:
 
 Findings can be filtered by severity and category.
 
-### Review profiles
-
-You can configure multiple review profiles (same diff, different system
-prompt emphasis) in **Settings → Review → Profiles**. Common profiles:
-
-- **Bug risk** — focus on logic bugs, null handling, race conditions.
-- **Security** — focus on injection, secrets, auth.
-- **Performance** — focus on hot paths, memory, query counts.
-- **Breaking change** — focus on API compatibility and migrations.
-- **Readability** — focus on naming, structure, comments.
-
 ### The AI can see review results
 
 Every time a review finishes, the panel publishes a compact snapshot to
@@ -177,7 +172,8 @@ as confirmation. Paste into issues, Slack, PRs, or documentation.
 
 - **Review branch vs main** right before opening a PR — catches the
   problems that would otherwise generate review comments.
-- **Use a tight profile** when you have a specific concern — the default
-  "everything" profile can be noisy on large diffs.
+- **Use one of the targeted IaC scan modes** when you have a specific
+  infrastructure concern — the general diff review can be noisy on
+  large diffs.
 - **Don't skip low-severity findings** on security reviews. "Low" on a
   security scan often means "low confidence", not "low impact".

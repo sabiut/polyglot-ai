@@ -20,7 +20,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **Session restore & branching** — Save workspace state, fork conversations
 
 ### Workflows
-- **12 built-in workflows** — Repeatable multi-step AI automations in YAML
+- **18 built-in workflows** — Repeatable multi-step AI automations in YAML
 - **QA & Testing** — verify-deploy, reproduce-bug, record-test, record-test-interactive
 - **Record Test Interactive** — Click through a site while Playwright records, AI hardens the code with 10 rules (resilient selectors, smart waits, assertions), auto-validates and fixes failures up to 3x
 - **DevOps** — infra-health-check, incident-response, pre-deploy-check, resource-optimization

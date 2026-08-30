@@ -63,7 +63,7 @@ This wiki is the full user guide. Pick a section below.
   the AI analyzes your project, proposes architecture with tradeoffs,
   generates modular Terraform, validates, and deploys — with approval gates
   at every stage. See **[Chat → Build Infrastructure](Chat#build-infrastructure-workflow)**.
-- **⚡ 12 Built-in Workflows** — repeatable multi-step AI workflows for
+- **⚡ 18 Built-in Workflows** — repeatable multi-step AI workflows for
   QA (verify-deploy, record-test, record-test-interactive, reproduce-bug),
   DevOps (health check, incident response, pre-deploy check, resource
   optimization), security audit, and database migration checks. Create

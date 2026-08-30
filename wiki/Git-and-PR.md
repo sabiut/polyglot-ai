@@ -6,20 +6,22 @@ The Git panel is the source-control workspace. Open it with `Ctrl+Shift+G`.
 
 Top of the panel shows:
 
-- **Current branch** and upstream tracking status.
-- **Ahead / behind** counts vs the upstream.
-- **Staged / modified / untracked** file lists.
+- **Current branch**.
+- **Staged changes** and **changes** (unstaged/untracked) file lists.
 
-Click a file to see its diff in the editor. Right-click for stage / unstage
-/ revert / delete actions.
+Double-click a file to see its diff in a side-by-side dialog.
+Right-click a file to stage or unstage it.
 
 ## Staging and committing
 
-- Check a file to stage it, or use **Stage all**.
+- Right-click a file → **Stage** (or **Unstage** in the staged list), or
+  use the **Stage All** / **Unstage All** buttons in the section
+  headers.
 - Enter a commit message.
-- **Commit** — standard commit.
-- **Commit and push** — one-click push to upstream.
-- **Amend last commit** — adds staged changes to the previous commit.
+- **Commit** — commits the staged changes.
+- **Push** — pushes the current branch to origin, setting the upstream
+  tracking branch automatically the first time.
+- **Pull** / **Fetch** — sync with the remote.
 
 Every commit is recorded on the active task (if any) as a `committed`
 note with the sha and message. The task's `modified_files` field is
@@ -27,20 +29,22 @@ updated.
 
 ## Branches
 
-- **Create branch** — pick a name and base. Switches to it on success.
-- **Switch branch** — dropdown of local branches. Dirty worktree prompts
-  you to stash first.
-- **Delete branch** — local or remote.
+- **Create branch** — pick a name. Switches to it on success.
+- If the active task points at a different branch than the one checked
+  out, the branch label shows a clickable hint that checks out the
+  task's branch.
 
 A branch created while a task is active fills in the task's `branch` and
 `base_branch` fields automatically.
 
 ## Diff review
 
-- **Review current diff** — runs the AI review engine on your working
-  changes.
-- **Review branch vs main** — runs the review on your whole branch.
-- **Review last commit** — runs on `HEAD^..HEAD`.
+The Review panel (see **[Review](Tests-and-Review#review)**) supports:
+
+- **Working Changes** — runs the AI review engine on your unstaged
+  modifications.
+- **Staged Changes** — reviews what's about to be committed.
+- **Branch vs Main** — reviews your whole branch.
 
 The review engine returns structured findings: bug risks, security issues,
 breaking changes, performance concerns, style. Each finding can be clicked
@@ -86,8 +90,7 @@ conforms to its structure instead of the default layout.
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Shift+G` | Show Git panel |
-| `Ctrl+Enter` (in commit message) | Commit |
-| `Ctrl+Shift+Enter` | Commit and push |
+| `Enter` (in commit message field) | Commit |
 
 ## Tips
 

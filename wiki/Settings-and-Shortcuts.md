@@ -2,63 +2,65 @@
 
 ## Settings dialog
 
-Open with `Ctrl+,`. Settings are persisted to
-`~/.config/polyglot-ai/settings.json` and take effect immediately.
+Open with `Ctrl+,`. Settings are persisted in the app's local database
+and take effect immediately.
+
+The dialog has five sections: **Accounts**, **Editor**, **AI**,
+**Terminal**, and **MCP Servers**.
 
 ### Sections
 
-#### General
-- **Theme** — Dark / Light. Toggle also available in the View menu.
-- **Restore last project on startup** — default on.
-- **Restore last conversation** — default on.
-- **Onboarding done** — set automatically; toggle off to re-run the
-  onboarding wizard.
+#### Accounts & API Keys
+One row per AI provider (OpenAI, Anthropic, Google, DeepSeek) with an
+API key field and a **Test** button — keys are stored securely in your
+system keyring.
 
-#### Providers
-One row per AI provider (OpenAI, Anthropic, Google). Each row has:
-- API key field (paste once, stored in keyring).
-- Test connection button.
-- Default model dropdown.
-
-OpenAI also has a **Sign in with OpenAI** button for subscription OAuth.
+OpenAI and Anthropic also offer subscription OAuth sign-in (works with
+ChatGPT Plus/Pro/Business/Enterprise and Claude Pro/Max/Team plans).
 
 #### Editor
+- **Theme** — Dark / Light. A toggle is also available in the View menu.
 - **Font family** / **font size**.
 - **Tab width**.
-- **Insert spaces** (vs tabs).
-- **Show whitespace**.
-- **Inline completions** — on/off.
-- **Auto-save on focus loss**.
+- **Word wrap**.
+- **Line numbers**.
+- **Inline AI completions** — on/off.
+
+Editor changes apply to tabs opened after saving.
 
 #### Terminal
 - **Shell** — path to your preferred shell (`/bin/bash`, `/usr/bin/zsh`, …).
-- **Font family** / **font size**.
-- **Scrollback lines**.
+- **Font size**.
 
-#### Chat
+#### AI
 - **Default model**.
-- **Max context messages** — how many past messages to include.
-- **Restore last conversation on startup**.
-- **Streaming** — default on.
+- **Temperature** / **max tokens**.
+- **System prompt** — extra instructions appended to every conversation.
+- **Notifications** — enable/disable desktop notifications, and set the
+  threshold (in seconds) below which a finished AI response doesn't
+  trigger one.
 
-#### MCP
+#### MCP Servers
 See **[MCP Servers](MCP-Servers)**. Add / edit / remove server configs,
 set environment variables, reconnect.
 
-#### Tool policy
-Configure which tools auto-approve and which always require prompting.
-Per-project policies can be saved.
+### Usage dashboard
 
-#### Review
-Manage **review profiles** — bug risk, security, performance, breaking
-change, readability.
+Not in the settings dialog — the **Usage** tab in the right-side panel
+shows token spend, backed by the usage table in the main app DB.
 
-#### Database
-Manage database connections. Credentials are stored in the OS keyring.
+---
 
-#### Usage dashboard
-Not a setting, but accessible here: a view of token spend per day, per
-provider, per model. Backed by the usage table in the main app DB.
+## Environment variables
+
+- **`POLYGLOT_AI_DISABLE_UPDATE_CHECK`** — when set (to any value),
+  skips the automatic launch-time update check. Normally the app checks
+  for a new release in the background about 8 seconds after launch
+  (results are cached for 24 hours) and shows a one-time toast if one is
+  available. Intended for distro packagers who ship updates through
+  their own repos, and for test suites. The manual
+  **Help → Check for Updates…** action still works either way — it
+  forces a fresh check and always reports back with a dialog.
 
 ---
 
@@ -91,10 +93,8 @@ provider, per model. Backed by the usage table in the main app DB.
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save all |
 | `Ctrl+W` | Close tab |
-| `Ctrl+Tab` | Next tab |
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Replace |
-| `Ctrl+G` | Go to line |
 | `Ctrl+N` | New file (explorer focused) |
 
 ### Chat
@@ -110,8 +110,7 @@ provider, per model. Backed by the usage table in the main app DB.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Enter` | Commit (in commit message field) |
-| `Ctrl+Shift+Enter` | Commit and push |
+| `Enter` | Commit (in commit message field) |
 
 ### Terminal
 

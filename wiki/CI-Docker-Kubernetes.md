@@ -22,26 +22,24 @@ colour-coded:
 ### Filters
 
 - **Branch** — if a task is active with a branch, the table auto-filters to that branch.
-- **Status** — only failures, only in-progress, etc.
-- **Workflow** — filter by workflow file name.
 
 ### Run detail
 
 Click a run to see:
 
-- Job list with status per job.
-- Log output per step (streamed as the run progresses).
-- Failure annotations extracted from logs.
+- Job list with status and duration per job.
+- **View logs** — streams the logs of the failed jobs via `gh` into a
+  viewer (a Cancel button aborts the in-flight log fetch).
+- **Open in browser** — opens the run on github.com.
 
 ### Actions
 
-- **Re-run** — re-runs a failed run via `gh run rerun`.
-- **Re-run failed jobs only** — `gh run rerun --failed`.
-- **Cancel** — cancels an in-progress run.
-- **Open in browser** — opens the run on github.com.
-- **Import failure as incident** — creates a new INCIDENT task seeded with
-  the workflow name, status, and run URL. The task is made active so the
-  rest of the app re-scopes to it.
+Right-click a run for the context menu:
+
+- **View jobs / logs** — same as clicking the run.
+- **Debug this failure as a new task** (failed/cancelled runs only) —
+  creates a new INCIDENT task seeded with the workflow name, branch,
+  status, and run id, and binds the failing branch to it.
 
 ### Task integration
 
@@ -61,21 +59,20 @@ The Docker panel provides a lightweight view of your local Docker engine.
 
 ### Views
 
-- **Containers** — running and stopped. Columns: name, image, status, ports, created.
-- **Images** — pulled images. Columns: repo, tag, size, created.
-- **Volumes** — named volumes.
-- **Networks** — user-defined networks.
+- **Containers** — running and stopped. Columns: name, image, status, ports.
+- **Images** — pulled images. Columns: repository, tag, size.
 
-### Actions per container
+### Actions per container (right-click)
 
-- Start / stop / restart / remove.
-- **Logs** — streamed in a viewer tab.
-- **Exec** — opens an interactive shell in the container (uses the integrated terminal).
-- **Inspect** — full JSON from `docker inspect`.
+- **Start** / **Stop** / **Restart** (with a confirmation dialog).
+- **View Logs** — shown in a viewer.
 
-### Actions per image
+### Actions per image (right-click)
 
-- Remove, prune dangling, pull an update.
+- **Copy Image Name**.
+- **Inspect** — output from `docker inspect`.
+- **Run Container**.
+- **Delete Image**.
 
 ### Requirements
 
@@ -92,25 +89,28 @@ selected in your current kubeconfig.
 ### Views
 
 - **Contexts / namespaces** — switch context and namespace at the top.
-- **Workloads** — deployments, statefulsets, daemonsets, jobs, cronjobs.
-- **Pods** — pods in the current namespace with status, node, age, restarts.
-- **Services** — services with type, cluster IP, ports.
-- **ConfigMaps / Secrets** — listed; secrets show key names only (never values).
+- **Pods** — pods in the current namespace.
+- **Deployments** — deployments in the current namespace.
+- **Services** — services in the current namespace.
 
-### Per-pod actions
+Other resource kinds (statefulsets, jobs, configmaps, secrets, …) aren't
+browsable yet.
 
-- **Logs** — streamed in a viewer tab. Supports follow mode and log level colouring.
-- **Exec** — `kubectl exec -it` into the pod via the integrated terminal.
+### Per-pod actions (right-click)
+
+- **View Logs** — shown in a viewer.
 - **Describe** — runs `kubectl describe` and shows the output.
-- **Port-forward** — forwards a container port to localhost.
-- **Delete** — with a confirmation dialog.
+- **Delete Pod** — with a confirmation dialog.
 
-### Apply and diff
+### Per-deployment actions (right-click)
 
-- **Apply YAML** — paste YAML, it runs `kubectl apply`.
-- **Dry-run + diff** — runs `kubectl diff` against the cluster before
-  applying so you can see exactly what would change. Strongly recommended
-  before any apply on a shared cluster.
+- **Describe**.
+- **Restart Rollout**.
+- **Scale**.
+
+### Per-service actions (right-click)
+
+- **Describe**.
 
 ### Requirements
 

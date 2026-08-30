@@ -20,9 +20,8 @@ in this directory.
 - Copy the whole `~/.config/polyglot-ai/` directory somewhere safe.
 - To restore, put it back and re-launch.
 
-Keyring secrets are **not** in that directory. Use
-`Settings → Providers → Export keys` if you need to migrate them, or
-re-enter them by hand on the new machine.
+Keyring secrets are **not** in that directory — re-enter them by hand
+on the new machine.
 
 ## Reset
 
@@ -53,8 +52,8 @@ Or call the venv's Python directly: `.venv/bin/python -m polyglot_ai`.
 
 ### Chat shows "No providers configured"
 
-Open **Settings → Providers** and set an API key for at least one
-provider. Click **Test connection**.
+Open **Settings → Accounts** and set an API key for at least one
+provider. Click **Test**.
 
 ### Chat reply cuts off
 

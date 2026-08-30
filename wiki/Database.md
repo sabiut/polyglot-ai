@@ -10,9 +10,8 @@ with result grid, charts, profiling, history, and saved snippets. Open with
 - **MySQL / MariaDB** (aiomysql)
 - **SQLite** (aiosqlite)
 
-Connections are configured in **Settings → Database → Connections** or
-via the **+** button in the panel. Credentials are stored in the OS
-keyring.
+Connections are configured via the **+** button in the panel.
+Credentials are stored in the OS keyring.
 
 ## Layout
 

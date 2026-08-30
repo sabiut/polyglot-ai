@@ -178,10 +178,11 @@ The model dropdown aggregates every model exposed by your connected
 providers. Built-in providers:
 
 - **OpenAI** (API key or OpenAI OAuth subscription login)
-- **Anthropic** (API key)
+- **Anthropic** (API key or Claude OAuth subscription login)
 - **Google** (Gemini API key)
+- **DeepSeek** (API key)
 
-Set keys in **Settings → Providers**. Keys are stored in the OS keyring.
+Set keys in **Settings → Accounts**. Keys are stored in the OS keyring.
 
 ### Switching model mid-conversation
 
@@ -196,26 +197,28 @@ the main app database. The sidebar on the left of the chat panel lists your
 conversations, grouped by category.
 
 ### Sidebar actions
-- **Search** — fuzzy search over titles and message contents.
+- **Search** — case-insensitive substring search over conversation
+  titles and message contents. Titles filter instantly on each
+  keystroke; content matches fill in after a brief typing pause.
 - **Category filter** — All / Work / Personal / Research. Right-click a
   conversation to assign it a category.
 - **+ New** — start a fresh conversation. If a task is active, the new
   conversation is bound to the task on first save.
-- **Right-click** a conversation for: rename, pin, delete, export to
-  markdown.
+- **Right-click** a conversation for: rename, pin, delete, export as
+  Markdown.
 
 ### Branching
 
 You can **branch** a conversation from any assistant reply (right-click the
-message → *Branch from here*). A new conversation is created, seeded with
+message → *Fork from here*). A new conversation is created, seeded with
 every message up to and including the branch point. Use this to explore
 "what if I asked it differently" without losing your current thread.
 
 ### Session restore
 
 When you close the app, the currently open conversation is remembered. Next
-launch the same conversation is loaded. To disable, turn off
-**Settings → Chat → Restore last conversation**.
+launch the same conversation is loaded. (There is no settings toggle for
+this yet.)
 
 ## Messages
 
@@ -224,14 +227,15 @@ links) plus syntax highlighting. Long outputs are streamed token-by-token.
 
 ### Message actions
 
-Hover over a message and you'll see a toolbar:
+Hover over an assistant message and you'll see a toolbar:
 
 - **Copy** — copy the message content (raw markdown).
-- **Copy code block** — each code block has its own copy button.
-- **Retry** (on user messages) — resend, replacing the assistant reply.
-- **Edit** (on user messages) — edit and re-send.
-- **Branch from here** — see above.
-- **Delete** — remove the message (pair of user + assistant).
+- **Good response / Bad response** — thumbs up/down feedback.
+- **Regenerate** — re-run the reply.
+
+User messages have an **Edit** action (edit and re-send), and
+right-clicking a message offers **Fork from here** — see
+[Branching](#branching) above.
 
 ### Stop streaming
 
@@ -266,8 +270,9 @@ remove one, or press `Esc` to clear all pending attachments.
 
 The AI can invoke **tools** to take action. Tools come from three places:
 
-1. **Built-in tools**: file read/write, listing, grep, ripgrep, run shell
-   commands in the sandbox, git operations, fetch, think, etc.
+1. **Built-in tools**: file read/write/edit, listing, plain-text file
+   search, run shell commands in the sandbox, git operations, web
+   search, etc.
 2. **MCP tools**: whatever the servers in `Settings → MCP` expose. See
    **[MCP Servers](MCP-Servers)**.
 3. **Project-aware tools**: wired in once a project is open
@@ -283,8 +288,6 @@ tool name, arguments, and a preview. You can:
 - **Approve always for this session** — skip for the rest of the session.
 - **Reject** — tell the AI the tool call was denied (it will continue
   reasoning).
-
-The policy engine is configurable per project in **Settings → Tool policy**.
 
 ### Bootstrap mode
 
@@ -348,7 +351,7 @@ Docker, DB, Git) as needed, then the engine advances to the next step.
 
 ### Bundled workflows
 
-12 workflows ship out of the box, organized by category:
+18 workflows ship out of the box, organized by category:
 
 #### QA & Testing
 - **verify-deploy** — Navigate to a URL, take a screenshot, check for
@@ -363,6 +366,23 @@ Docker, DB, Git) as needed, then the engine advances to the next step.
   enhances the raw recording into production-quality test code with robust
   selectors, assertions, and fixtures — and validates by running the test.
   See [Record Test Interactive](#record-test-interactive-workflow).
+- **playwright-planner** — Explore a web app with Playwright MCP and
+  produce a human-readable Markdown test plan in `specs/`. Stage 1 of the
+  Playwright Test Agents loop.
+- **playwright-generator** — Read a Markdown test plan from `specs/` and
+  produce executable Playwright tests in `tests/`, verifying selectors
+  live against the running app. Stage 2 of the loop.
+- **playwright-healer** — Run a failing Playwright test, inspect the live
+  DOM, and propose a unified diff for approval before any code is
+  rewritten. Stage 3 of the loop.
+
+#### Arduino & Microcontrollers
+- **arduino-scaffold** — Scaffold a new Arduino / MCU project from the
+  bundled starters.
+- **arduino-cpp-build** — Compile a C++ Arduino sketch with `arduino-cli`
+  and upload it to the board.
+- **arduino-python-flash** — Upload a Python script to a microcontroller
+  running MicroPython or CircuitPython.
 
 #### DevOps & Operations
 - **infra-health-check** — Comprehensive K8s cluster and Docker container
@@ -670,12 +690,14 @@ See **[Tasks and Today](Tasks-and-Today)**.
 
 ## Exporting
 
-Right-click a conversation → **Export**. Saves to markdown with:
+Right-click a conversation → **Export as Markdown…**. Saves a `.md`
+file with:
 
-- Title, created-at timestamp, model used
-- Full message history
-- Tool calls collapsed as code blocks
-- Attachments listed by filename
+- Title, model, created/updated timestamps, export time
+- Full message history (system messages are skipped), with each
+  assistant heading naming the model that produced it
+- Tool calls as fenced JSON blocks and tool results as fenced text
+  blocks
 
 ## Usage tracking
 

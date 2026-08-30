@@ -4,30 +4,46 @@ The code workspace — where you actually write, read, and navigate your project
 
 ## Editor panel
 
-The editor is a tabbed code editor based on `QPlainTextEdit` with syntax
+The editor is a tabbed code editor based on QScintilla with syntax
 highlighting, line numbers, and AI-powered inline completions.
 
 ### Features
-- **Tabs** — multiple open files. `Ctrl+W` to close, `Ctrl+Tab` to cycle.
+- **Tabs** — multiple open files. `Ctrl+W` to close.
 - **Syntax highlighting** — Python, JS/TS, Go, Rust, HTML/CSS, Markdown, YAML, JSON, SQL, shell, and more.
 - **Line numbers** — always visible, click to place cursor.
-- **Find / Replace** — `Ctrl+F` to find, `Ctrl+H` to replace. Supports regex.
-- **Go to line** — `Ctrl+G`.
+- **Find / Replace** — `Ctrl+F` opens the find bar, `Ctrl+H` opens it with
+  the replace controls. See below.
 - **Save** — `Ctrl+S`. Save-all: `Ctrl+Shift+S`.
 - **Preview** — Markdown files and HTML files get a preview tab.
-- **Notebook support** — `.ipynb` files open in a dedicated notebook tab.
+
+### Find / Replace
+
+`Ctrl+F` reveals a find bar above the editor (prefilled from the current
+selection). `Ctrl+H` shows the same bar with the replace field and
+buttons.
+
+- **Match case** (`Aa`) and **regex** (`.*`) toggles.
+- `Enter` (or **Next**) finds the next match; `Shift+Enter` (or **Prev**)
+  searches backwards. Search wraps around the document.
+- In replace mode, **Replace** substitutes the current match and advances;
+  **Replace All** replaces every match and reports the count.
+- `Esc` closes the bar and returns focus to the editor.
+
+There is no whole-word option or go-to-line command.
 
 ### Inline completions
 
-When enabled in **Settings → Editor → Inline completions**, the editor
-requests a short completion from the active AI provider as you type. A
-greyed-out suggestion appears; press `Tab` to accept, `Esc` to dismiss.
+When enabled in **Settings → Editor → Inline AI Completions** (on by
+default), the editor requests a short completion from the active AI
+provider as you pause typing. The suggestion is shown as an annotation
+below the current line; automatic insertion isn't implemented yet —
+`Tab` dismisses the annotation.
 
 ### Refactoring preview
 
 Ask the AI to refactor a file (via chat) and you get a diff preview in a
 dedicated tab. Accept applies the change, reject drops it. The diff viewer
-supports side-by-side and unified modes.
+shows the old and new content side by side.
 
 ## Terminal panel
 
@@ -111,9 +127,9 @@ shell see the updated geometry immediately (try it with `htop`).
 
 Open with `Ctrl+Shift+E` or the first activity-bar icon (after Today/Tasks).
 
-- **Tree view** of the project root. Respects `.gitignore` by default.
+- **Tree view** of the project root.
 - **Double-click** a file to open it in the editor.
-- **Right-click** for a context menu: new file, new folder, rename, delete, reveal in terminal, copy path.
+- **Right-click** for a context menu: new file, new folder, rename, delete, copy path (absolute or relative), reveal in file manager.
 - **Drag and drop** a file into the chat panel to attach it.
 - **New file** shortcut: right-click → New file, or `Ctrl+N` when the explorer is focused.
 
@@ -124,12 +140,14 @@ change outside the app.
 
 Open with `Ctrl+Shift+F`.
 
-- **Content search** across the project using ripgrep (falls back to a
-  Python implementation if `rg` isn't installed).
-- **Glob filters** for include/exclude (e.g. `*.py`, `!tests/**`).
-- **Case sensitivity**, **whole word**, **regex** toggles.
-- **Results tree** — click to jump to the file and line.
-- **Replace** (batch) — preview replacements, then apply.
+- **Content search** across the project — type a query and press `Enter`.
+  The search is a literal (not regex) text match, run via `grep` over a
+  fixed set of common source-file extensions (`.py`, `.js`, `.ts`,
+  `.html`, `.css`, `.json`, `.yaml`/`.yml`, `.toml`, `.md`, `.txt`,
+  `.rs`, `.go`, `.java`, `.c`/`.cpp`/`.h`, `.rb`, `.sh`).
+- **Results** are listed as matching *files* (up to 50) — click one to
+  open it in the editor. There are no per-line results, glob filters,
+  case/whole-word/regex toggles, or batch replace yet.
 
 A semantic search index is built in the background when a project opens
 (via the RAG indexer). The AI uses this for @-mention suggestions and for
@@ -137,8 +155,6 @@ A semantic search index is built in the background when a project opens
 
 ## Tips
 
-- Put `.gitignore` in the project root — both the file explorer and search
-  respect it.
 - Use the **command palette** (`Ctrl+Shift+P`) for anything you can't find
   in a menu.
 - Drag files out of the explorer into the chat to attach them without
