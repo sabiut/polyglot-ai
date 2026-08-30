@@ -50,18 +50,24 @@ cp "$SCRIPT_DIR/rpm/polyglot-ai.spec" "$RPMBUILD/SPECS/"
 # rationale; same trade-off applies here.
 mkdir -p "$RPMBUILD/SOURCES/wheels"
 echo "Pre-downloading dependency wheels for offline install..."
-python3 -m pip download \
-    --dest "$RPMBUILD/SOURCES/wheels" \
-    --only-binary=:all: \
-    --python-version 3.11 \
-    --platform manylinux2014_x86_64 \
-    --platform manylinux_2_17_x86_64 \
-    --platform manylinux_2_28_x86_64 \
-    --platform any \
-    "$PROJECT_DIR/dist/"*.whl \
-    || python3 -m pip download \
+WHEELS_OK=1
+for PYVER in 3.11 3.12 3.13; do
+    python3 -m pip download \
+        --dest "$RPMBUILD/SOURCES/wheels" \
+        --only-binary=:all: \
+        --python-version "$PYVER" \
+        --platform manylinux2014_x86_64 \
+        --platform manylinux_2_17_x86_64 \
+        --platform manylinux_2_28_x86_64 \
+        --platform any \
+        "$PROJECT_DIR/dist/"*.whl \
+        || WHEELS_OK=0
+done
+if [ "$WHEELS_OK" -ne 1 ]; then
+    python3 -m pip download \
         --dest "$RPMBUILD/SOURCES/wheels" \
         "$PROJECT_DIR/dist/"*.whl
+fi
 
 # Build RPM
 rpmbuild --define "_topdir $RPMBUILD" \

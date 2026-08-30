@@ -56,24 +56,35 @@ cp "$PROJECT_DIR/dist/"*.whl "$STAGING/opt/polyglot-ai/"
 # a fresh distro before networking comes up.
 mkdir -p "$STAGING/opt/polyglot-ai/wheels"
 echo "Pre-downloading dependency wheels for offline install..."
-python3 -m pip download \
-    --dest "$STAGING/opt/polyglot-ai/wheels" \
-    --only-binary=:all: \
-    --python-version 3.11 \
-    --platform manylinux2014_x86_64 \
-    --platform manylinux_2_17_x86_64 \
-    --platform manylinux_2_28_x86_64 \
-    --platform any \
-    "$PROJECT_DIR/dist/"*.whl \
-    || {
-        # Fall back to the host's resolver if the strict platform
-        # filter rejects something — better a slightly bigger .deb
-        # than no .deb at all.
-        echo "Strict platform download failed; retrying with host resolver…"
-        python3 -m pip download \
-            --dest "$STAGING/opt/polyglot-ai/wheels" \
-            "$PROJECT_DIR/dist/"*.whl
-    }
+# One pass per Python minor version the target distros ship: the
+# postinst venv uses the SYSTEM python3 (Debian 12 → 3.11, Debian 13
+# → 3.13, Ubuntu 24.04 → 3.12), so compiled cpXY wheels bundled for
+# only the CI runner's Python are useless on newer distros — the
+# offline install then dies on the first compiled dep (asyncpg) and
+# falls back to PyPI, defeating the bundling. Pure-Python wheels
+# dedupe across passes; only compiled ones are stored per version.
+WHEELS_OK=1
+for PYVER in 3.11 3.12 3.13; do
+    python3 -m pip download \
+        --dest "$STAGING/opt/polyglot-ai/wheels" \
+        --only-binary=:all: \
+        --python-version "$PYVER" \
+        --platform manylinux2014_x86_64 \
+        --platform manylinux_2_17_x86_64 \
+        --platform manylinux_2_28_x86_64 \
+        --platform any \
+        "$PROJECT_DIR/dist/"*.whl \
+        || WHEELS_OK=0
+done
+if [ "$WHEELS_OK" -ne 1 ]; then
+    # Fall back to the host's resolver if the strict platform
+    # filter rejects something — better a slightly bigger .deb
+    # than no .deb at all.
+    echo "Strict platform download failed; retrying with host resolver…"
+    python3 -m pip download \
+        --dest "$STAGING/opt/polyglot-ai/wheels" \
+        "$PROJECT_DIR/dist/"*.whl
+fi
 
 # Copy desktop file
 cp "$SCRIPT_DIR/debian/polyglot-ai.desktop" "$STAGING/usr/share/applications/"
