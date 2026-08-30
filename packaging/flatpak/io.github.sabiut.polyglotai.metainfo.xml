@@ -23,6 +23,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.15.0" date="2026-08-31">
+      <description>
+        <p>AI answers become project-aware (auto-attached relevant
+        files), image attachments now work with Claude and Gemini,
+        per-hunk apply for AI-proposed changes, Tab accepts inline
+        completions, and a rich diff preview on tool approvals.</p>
+      </description>
+    </release>
     <release version="0.14.0" date="2026-08-30">
       <description>
         <p>Editor find and replace, git pull/fetch and per-file diffs,
