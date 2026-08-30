@@ -180,3 +180,27 @@ jobs:
           for target in fedora/44 fedora/43; do
             cloudsmith push rpm "$CLOUDSMITH_REPO/$target" "$RPM" --republish
           done
+
+  publish-pypi:
+    # Publish the wheel to PyPI so `pipx install polyglot-ai` works
+    # without downloading release assets. Uses PyPI trusted publishing
+    # (OIDC) — no token or secret anywhere.
+    #
+    # Gated on the PYPI_PUBLISH_ENABLED repository variable: flip it
+    # to "true" after registering the trusted publisher on pypi.org
+    # (see packaging/PYPI.md). Until then the job is skipped entirely.
+    if: vars.PYPI_PUBLISH_ENABLED == 'true'
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC token for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

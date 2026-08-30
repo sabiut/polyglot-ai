@@ -1,0 +1,51 @@
+name: Docs
+
+# Build the documentation site from wiki/ and deploy it to GitHub
+# Pages at https://sabiut.github.io/polyglot-ai/. The wiki itself is
+# unaffected (wiki-sync.yml keeps handling that) — this renders the
+# same markdown as a searchable MkDocs Material site.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - "mkdocs.yml"
+      - "scripts/gen_docs.py"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build site
+        run: |
+          pip install mkdocs-material
+          python scripts/gen_docs.py
+          mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+      - uses: actions/deploy-pages@v4
+        id: deployment
