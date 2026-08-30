@@ -14,14 +14,14 @@ arrives through your normal system updates (`apt upgrade` /
 Debian / Ubuntu:
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/sabiut/polyglot-ai/setup.deb.sh' | sudo -E bash
+curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot-ai/setup.deb.sh' | sudo -E bash
 sudo apt install polyglot-ai
 ```
 
 Fedora / RHEL:
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/sabiut/polyglot-ai/setup.rpm.sh' | sudo -E bash
+curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot-ai/setup.rpm.sh' | sudo -E bash
 sudo dnf install polyglot-ai
 ```
 
