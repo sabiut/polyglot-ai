@@ -40,9 +40,9 @@ the picker to reduce friction.
 
 | Kind | Use for | In dropdown? |
 |---|---|---|
-| **feature** | New functionality (default) | ✅ |
-| **bugfix** | Targeted defect fix | ✅ |
-| **refactor** | Restructuring with no behaviour change | ✅ |
+| **feature** | New functionality (default) | |
+| **bugfix** | Targeted defect fix | |
+| **refactor** | Restructuring with no behaviour change | |
 | incident | Production issue | legacy only |
 | explore | Data / codebase exploration | legacy only |
 | chore | Deps, config, maintenance | legacy only |
@@ -70,7 +70,7 @@ focused purely on alerts:
 2. **Quick Actions** — buttons for *New task*, *View all tasks*, *Run all
    tests*, *Refresh CI*, *Source control*, *Chat*.
 
-Click **🗂 View all tasks** to jump to the Tasks sidebar when you need
+Click **View all tasks** to jump to the Tasks sidebar when you need
 the full list.
 
 ## Tasks sidebar
@@ -106,21 +106,21 @@ Lists every non-archived task in the current project, grouped by state
 ### Task card shows
 - Coloured dot for the kind.
 - Title.
-- Meta line: `kind · ⎇ branch · 12/13 tests · CI ✓ · 3m ago`.
+- Meta line: `kind · branch · 12/13 tests · CI ✓ · 3m ago`.
 
 ## Task Detail window
 
 Opened by double-clicking a card. **Non-modal** — you can keep it open
-alongside the chat, review, and git panels while you work. The `⛶`
+alongside the chat, review, and git panels while you work. The ``
 button in the title row toggles maximize. Close it any time; a new one
 opens fresh next time.
 
 Contents:
 
-1. **Header** — kind dot, title, ⛶ maximize button, meta line.
+1. **Header** — kind dot, title, maximize button, meta line.
 2. **Description** — if set.
 3. **Checklist** — either a populated read-only list of steps (when the
-   AI has generated one), or a prominent **"✨ Generate checklist with
+   AI has generated one), or a prominent **"Generate checklist with
    AI"** primary-action card when the task is new and a plan generator
    is configured. This is the main thing to click first on a fresh task.
 4. **Stats card** — test ratio, CI symbol, files touched, PR number.
@@ -158,7 +158,7 @@ Type "Add login page" and press Enter. A new task card appears under
 ### 2. Generate a checklist
 
 Double-click the task card to open the **Task Detail** window. You'll
-see a prominent card that says **"✨ Generate checklist with AI"** —
+see a prominent card that says **"Generate checklist with AI"** —
 click it. The AI breaks "Add login page" into ordered steps:
 
 ```
@@ -200,7 +200,7 @@ As you implement each step:
 The task card in the sidebar updates its meta line in real time:
 
 ```
-feature · ⎇ feat/login-page · 4/6 tests · CI ✓ · 3m ago
+feature · feat/login-page · 4/6 tests · CI ✓ · 3m ago
 ```
 
 ### 5. Open a PR

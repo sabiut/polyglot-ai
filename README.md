@@ -32,13 +32,13 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 ### Code review
 - **Diff review** — AI-powered review of working changes, staged changes, or branch-vs-main
 - **IaC security scans** — One-click security reviews for:
-  - 🔍 Terraform (`.tf`, `.tfvars`, `.hcl`)
-  - 🔍 Kubernetes manifests (real YAML parsing, not substring matching)
-  - 🔍 Dockerfiles and Docker Compose
-  - 🔍 Helm charts (Chart.yaml, values.yaml, templates)
-  - 🎨 Frontend Design Audit
+  - Terraform (`.tf`, `.tfvars`, `.hcl`)
+  - Kubernetes manifests (real YAML parsing, not substring matching)
+  - Dockerfiles and Docker Compose
+  - Helm charts (Chart.yaml, values.yaml, templates)
+  - Frontend Design Audit
 - **Structured findings** — Severity, category, file:line, suggested fix
-- **Copy results** — 📋 Export full review as formatted Markdown
+- **Copy results** — Export full review as formatted Markdown
 
 ### DevOps panels
 - **Git panel** — Branch view, staging, commits

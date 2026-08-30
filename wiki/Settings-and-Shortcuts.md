@@ -144,7 +144,7 @@ See **[Terminal panel](Editor-Terminal-Files#terminal-panel)** for full details.
 | `Esc` (in quick-create) | Cancel quick-create |
 | Double-click a card | Open Task Detail window (non-modal) |
 | Right-click a card | Context menu |
-| `⛶` in detail title row | Toggle maximize of the detail window |
+| `` in detail title row | Toggle maximize of the detail window |
 
 ### Command palette task entries
 
@@ -169,7 +169,7 @@ See **[Terminal panel](Editor-Terminal-Files#terminal-panel)** for full details.
 
 | Button | Action |
 |---|---|
-| **🔓 Bootstrap** | Relax `shell_exec` approval for 15 min (scaffolding) — see [Chat › Bootstrap mode](Chat.md#bootstrap-mode) |
+| **Bootstrap** | Relax `shell_exec` approval for 15 min (scaffolding) — see [Chat › Bootstrap mode](Chat.md#bootstrap-mode) |
 | **+ New** | New conversation |
 
 ## Tips

@@ -89,14 +89,14 @@ Diff modes:
 
 IaC security scan modes (run against files, not diffs):
 
-- **🔍 Terraform Security** — `.tf` files, cloud misconfig + IAM.
-- **🔍 Kubernetes Security** — manifests, pod security, RBAC.
-- **🔍 Dockerfile Security** — container image best practices.
-- **🔍 Docker Compose Security** — `docker-compose*.yml` / `compose*.yml`,
+- **Terraform Security** — `.tf` files, cloud misconfig + IAM.
+- **Kubernetes Security** — manifests, pod security, RBAC.
+- **Dockerfile Security** — container image best practices.
+- **Docker Compose Security** — `docker-compose*.yml` / `compose*.yml`,
   checks for hardcoded secrets, `privileged: true`, host networking,
   docker.sock bind mounts, DB ports on `0.0.0.0`, missing `cap_drop`,
   `:latest` tags, resource limits, and more.
-- **🔍 Helm Chart Security** — Chart.yaml, values, templates.
+- **Helm Chart Security** — Chart.yaml, values, templates.
 
 ### Running a review
 
@@ -154,7 +154,7 @@ timeline:
 
 ### Copy results
 
-Click the **📋 Copy** button in the header bar to copy the full review
+Click the **Copy** button in the header bar to copy the full review
 as formatted Markdown. The output includes:
 
 - Stats (files reviewed, additions, deletions, finding counts)
@@ -165,7 +165,7 @@ as formatted Markdown. The output includes:
   - Description
   - Suggestion (if any)
 
-The button is enabled after a successful review and flashes **✅ Copied!**
+The button is enabled after a successful review and flashes **Copied!**
 as confirmation. Paste into issues, Slack, PRs, or documentation.
 
 ### Tips

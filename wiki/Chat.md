@@ -293,11 +293,11 @@ tool name, arguments, and a preview. You can:
 
 Greenfield projects need a lot of shell commands up front — `npm
 install`, `pip install -r`, `go mod tidy`, `cargo new`, etc. Approving
-each one individually is friction. The **🔓 Bootstrap** button in the
+each one individually is friction. The **Bootstrap** button in the
 chat panel header relaxes `shell_exec` approval for **15 minutes** so
 scaffolding commands run without dialogs.
 
-- Click **🔓 Bootstrap** → the button flips to **🔒 Bootstrap · M:SS**
+- Click **Bootstrap** → the button flips to **Bootstrap · M:SS**
   with an amber background and a live countdown.
 - Click again (or let it expire) to revert.
 - **Only `shell_exec`** is relaxed. Everything else that normally
@@ -319,7 +319,7 @@ this directive:
 This stops the model from silently scaffolding Next.js or Django when
 you had a specific stack in mind. Pair it with Bootstrap mode for a
 smooth "build me X" experience — answer the stack question, approve
-the plan, click 🔓 Bootstrap, let the scaffolding run.
+the plan, click Bootstrap, let the scaffolding run.
 
 ### Sandbox
 

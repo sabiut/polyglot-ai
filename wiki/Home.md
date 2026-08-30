@@ -58,46 +58,46 @@ This wiki is the full user guide. Pick a section below.
 
 ## Recent additions
 
-- **🏗️ Build Infrastructure** — architecture-first infrastructure copilot.
+- **Build Infrastructure** — architecture-first infrastructure copilot.
   Describe what you want ("deploy this Flask API to AWS with Postgres"),
   the AI analyzes your project, proposes architecture with tradeoffs,
   generates modular Terraform, validates, and deploys — with approval gates
   at every stage. See **[Chat → Build Infrastructure](Chat#build-infrastructure-workflow)**.
-- **⚡ 18 Built-in Workflows** — repeatable multi-step AI workflows for
+- **18 Built-in Workflows** — repeatable multi-step AI workflows for
   QA (verify-deploy, record-test, record-test-interactive, reproduce-bug),
   DevOps (health check, incident response, pre-deploy check, resource
   optimization), security audit, and database migration checks. Create
   your own in `.polyglot/workflows/`. See **[Chat → Workflows](Chat#workflows)**.
-- **🎬 Record Test Interactive** — click through a site while Playwright
+- **Record Test Interactive** — click through a site while Playwright
   records, AI hardens the code with 10 mandatory rules (resilient
   selectors, smart waits, assertions), auto-validates by running the test,
   and fixes failures up to 3 times. See
   **[Chat → Record Test Interactive](Chat#record-test-interactive-workflow)**.
-- **📋 Copy Review Results** — new Copy button in the Review panel header
+- **Copy Review Results** — new Copy button in the Review panel header
   exports the full review as formatted Markdown (summary, stats, all
   findings grouped by severity with suggestions).
-- **⏱️ Shell exec timeout** — the AI can now request up to 10-minute
+- **Shell exec timeout** — the AI can now request up to 10-minute
   timeouts for long-running commands like Playwright codegen.
-- **🤖 Autonomous workflow mode** — all workflows now execute without
+- **Autonomous workflow mode** — all workflows now execute without
   asking "Should I go ahead?". The user approved by launching the workflow.
-- **🔍 Docker Compose Security** review mode — scans `docker-compose*.yml`
+- **Docker Compose Security** review mode — scans `docker-compose*.yml`
   for hardcoded secrets, privileged containers, docker.sock mounts, DB
   ports on `0.0.0.0`, missing `cap_drop`, and more.
 - **Panel state in the system prompt** — the chat can now see the most
   recent review without the user pasting anything.
-- **🔓 Bootstrap mode** in the chat header — relaxes `shell_exec` approval
+- **Bootstrap mode** in the chat header — relaxes `shell_exec` approval
   for 15 minutes so scaffolding commands (`npm install`, `pip install`,
   `go mod tidy`) don't prompt per command.
 - **Empty-project directive** — when you open a blank folder, the chat
   is forced to ask which stack you want before scaffolding anything.
 - **Inline quick-create** for tasks — click `+` in the Tasks sidebar,
   type a title, press Enter. No modal dialog.
-- **Non-modal Task Detail window** with a ⛶ maximize button — keep it
+- **Non-modal Task Detail window** with a maximize button — keep it
   open alongside chat, review, and git while you work.
 - **`Task:` command palette entries** — every task operation is
   reachable via `Ctrl+Shift+P`.
 - **Today panel is now alerts-only** — the duplicate task list was
-  removed; use the Tasks sidebar or `🗂 View all tasks` quick action.
+  removed; use the Tasks sidebar or `View all tasks` quick action.
 
 ---
 
