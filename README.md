@@ -63,7 +63,21 @@ Full documentation is available on the **[Polyglot AI Wiki](https://github.com/s
 
 Register the repo once and future releases arrive via `apt upgrade` /
 `dnf upgrade` — see [packaging/INSTALL.md](packaging/INSTALL.md) for
-the one-line setup commands. (Populated from v0.16.0 onward.)
+the one-line setup commands.
+
+### From PyPI
+
+Polyglot AI is on [PyPI](https://pypi.org/project/polyglot-ai/); the
+recommended installer is [`pipx`](https://pipx.pypa.io/), which isolates
+the app in its own venv and puts `polyglot-ai` on your `PATH`:
+
+```bash
+pipx install polyglot-ai
+```
+
+Upgrade later with `pipx upgrade polyglot-ai`. On Debian/Ubuntu the
+`.deb` route above is still preferred — it adds the desktop entry, icon,
+and apt-managed system dependencies the wheel can't provide.
 
 ### From release
 
@@ -79,9 +93,8 @@ Download the latest release from [Releases](https://github.com/sabiut/polyglot-a
 > **Note on the wheel install:** modern distros (Ubuntu 23.04+, Fedora 38+,
 > Debian 12+) ship Python with PEP 668's `externally-managed-environment`
 > marker, so a bare `pip install` errors with a hint to use a venv or
-> [`pipx`](https://pipx.pypa.io/). `pipx` is the friendliest path — it
-> isolates the install in its own venv and adds `polyglot-ai` to your
-> `PATH` automatically.
+> [`pipx`](https://pipx.pypa.io/). Installing from PyPI (above) is simpler
+> than downloading the wheel by hand.
 
 ### From source
 

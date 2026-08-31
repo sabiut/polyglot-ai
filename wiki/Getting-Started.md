@@ -13,10 +13,45 @@ first time, configuring an AI provider, and opening your first project.
 
 ## Install
 
+### From the package repository (recommended on Debian/Ubuntu/Fedora)
+
+Register the repo once and every future release arrives through your
+normal system updates (`apt upgrade` / `dnf upgrade`). The one-line
+setup commands are in
+[packaging/INSTALL.md](https://github.com/sabiut/polyglot-ai/blob/main/packaging/INSTALL.md).
+This route also installs the desktop entry, icon, and system
+dependencies.
+
+### With pipx (any Linux)
+
+Polyglot AI is on [PyPI](https://pypi.org/project/polyglot-ai/).
+[`pipx`](https://pipx.pypa.io/) installs it in its own isolated venv and
+puts the `polyglot-ai` command on your `PATH`:
+
+```bash
+pipx install polyglot-ai
+```
+
+Upgrade later with `pipx upgrade polyglot-ai`. (A bare `pip install`
+fails on modern distros because of PEP 668's
+`externally-managed-environment` marker — pipx is the friendly path.)
+
+### From a release download
+
+Grab a `.deb`, `.rpm`, `.AppImage`, or `.whl` from the
+[Releases page](https://github.com/sabiut/polyglot-ai/releases) —
+the AppImage runs on any Linux with no install at all:
+
+```bash
+chmod +x Polyglot_AI-*.AppImage && ./Polyglot_AI-*.AppImage
+```
+
+### From source (for development)
+
 Clone the repo and install in a virtualenv:
 
 ```bash
-git clone https://github.com/<you>/polyglot-ai.git
+git clone https://github.com/sabiut/polyglot-ai.git
 cd polyglot-ai
 python3 -m venv .venv
 source .venv/bin/activate
@@ -34,7 +69,7 @@ Node.js (for `npx` MCP servers), `uv` (for `uvx`), `ruff`, `pre-commit`,
 `gh`, and the project itself in editable mode:
 
 ```bash
-git clone https://github.com/<you>/polyglot-ai.git
+git clone https://github.com/sabiut/polyglot-ai.git
 cd polyglot-ai
 nix develop          # drops you into a fully-set-up shell
 polyglot-ai          # launches the app
@@ -47,7 +82,13 @@ auto-activates on `cd` (the repo includes an `.envrc`).
 
 ## Launch
 
-From the project root:
+With a package or pipx install, launch from your app menu or run:
+
+```bash
+polyglot-ai
+```
+
+For a source install, from the project root:
 
 ```bash
 .venv/bin/polyglot-ai
