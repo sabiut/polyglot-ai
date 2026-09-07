@@ -23,6 +23,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.2" date="2026-09-08">
+      <description>
+        <p>Fixes Claude models failing on every message with the newer
+        Anthropic SDK. The window title bar and native menus now follow
+        the app theme, the stray line above the editor tabs is gone,
+        and the status bar matches the rest of the dark palette.</p>
+      </description>
+    </release>
     <release version="0.18.1" date="2026-09-08">
       <description>
         <p>Crisper explorer toolbar icons (New File, New Folder, Refresh,
