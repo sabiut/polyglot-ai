@@ -27,6 +27,26 @@ def qapp():
     yield QApplication.instance() or QApplication([])
 
 
+def _wait_for_status(panel: CICDPanel, timeout_ms: int = 5000) -> str:
+    """Pump the event loop until the off-thread refresh reports back.
+
+    ``_refresh_runs`` probes git in a worker thread and delivers the
+    outcome through a queued signal, so the status label only changes
+    once the GUI thread processes events.
+    """
+    import time
+
+    app = QApplication.instance()
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        app.processEvents()
+        text = panel._status_label.text()
+        if text and text != "  Loading..." and "load pipeline runs" not in text:
+            return text
+        time.sleep(0.01)
+    return panel._status_label.text()
+
+
 def _init_git_repo(path: Path, with_github: bool = False) -> None:
     """Create a real git repo at ``path`` so the helpers can probe it."""
     subprocess.run(
@@ -62,7 +82,7 @@ class TestRepoCapabilityGuards:
         # when the user clicks the Refresh button.
         panel._refresh_runs()
 
-        text = panel._status_label.text()
+        text = _wait_for_status(panel)
         # The error must NOT be the raw git/gh stderr that prompted
         # this fix in the first place.
         assert "fatal" not in text.lower()
@@ -76,7 +96,7 @@ class TestRepoCapabilityGuards:
         panel.set_project_root(tmp_path)
         panel._refresh_runs()
 
-        text = panel._status_label.text()
+        text = _wait_for_status(panel)
         # No GitHub remote → tell the user how to add one. ``gh``
         # never gets invoked, so its stderr can't leak.
         assert "github" in text.lower()

@@ -6,7 +6,6 @@ import json
 import logging
 import shutil
 import subprocess
-import threading
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -25,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.thread_bridge import run_in_thread
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class DockerPanel(QWidget):
         self._docker_available: bool | None = None
         self._containers: list[dict] = []
         self._images: list[dict] = []
+        self._log_request = 0
 
         self._setup_ui()
 
@@ -58,7 +59,7 @@ class DockerPanel(QWidget):
     def showEvent(self, event) -> None:
         """Refresh data when the panel becomes visible."""
         super().showEvent(event)
-        QTimer.singleShot(100, self._refresh_sync)
+        QTimer.singleShot(100, self._refresh)
 
     # ── UI Setup ────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ class DockerPanel(QWidget):
             f"padding: 0 8px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
             f"#dockerRefresh:hover {{ background: {tc.get('accent_primary_hover')}; }}"
         )
-        refresh_btn.clicked.connect(self._refresh_sync)
+        refresh_btn.clicked.connect(self._refresh)
         h_layout.addWidget(refresh_btn)
 
         layout.addWidget(header)
@@ -278,27 +279,20 @@ class DockerPanel(QWidget):
             return f"Error: {exc}", 1
 
     def _refresh(self) -> None:
-        """Fetch docker data in background thread, update UI on main thread."""
+        """Fetch docker data in a background thread, update UI on the GUI thread."""
 
-        def do_fetch():
-            try:
-                c_out, c_code = self._run_docker(["ps", "-a", "--format", "{{json .}}"])
-                i_out, i_code = self._run_docker(["images", "--format", "{{json .}}"])
-                # Marshal back to main thread
-                QTimer.singleShot(0, lambda: self._on_data_loaded(c_out, c_code, i_out, i_code))
-            except Exception:
-                logger.exception("Docker refresh failed")
-                QTimer.singleShot(
-                    0, lambda: self._status_label.setText("  Error refreshing Docker")
-                )
+        def fetch():
+            c_out, c_code = self._run_docker(["ps", "-a", "--format", "{{json .}}"])
+            i_out, i_code = self._run_docker(["images", "--format", "{{json .}}"])
+            return c_out, c_code, i_out, i_code
 
-        threading.Thread(target=do_fetch, daemon=True).start()
-
-    def _refresh_sync(self) -> None:
-        """Synchronous refresh — called from Refresh button click."""
-        c_out, c_code = self._run_docker(["ps", "-a", "--format", "{{json .}}"])
-        i_out, i_code = self._run_docker(["images", "--format", "{{json .}}"])
-        self._on_data_loaded(c_out, c_code, i_out, i_code)
+        run_in_thread(
+            fetch,
+            lambda r: self._on_data_loaded(*r),
+            lambda _exc: self._status_label.setText("  Error refreshing Docker"),
+            owner=self,
+            name="docker-refresh",
+        )
 
     def _on_data_loaded(
         self, containers_out: str, c_code: int, images_out: str, i_code: int
@@ -438,17 +432,37 @@ class DockerPanel(QWidget):
             self._status_label.setText(f"  Copied: {text}")
 
     def _inspect_image(self, image_ref: str) -> None:
-        output, code = self._run_docker(["image", "inspect", image_ref, "--format", "{{json .}}"])
-        if code == 0:
-            try:
-                data = json.loads(output)
-                formatted = json.dumps(data, indent=2)
-            except json.JSONDecodeError:
-                formatted = output
-            self._log_title.setText(f"INSPECT — {image_ref}")
-            self._log_viewer.setPlainText(formatted)
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
+        self._log_title.setText(f"INSPECT — {image_ref}")
+        self._log_viewer.setPlainText("Loading...")
+
+        def done(result):
+            output, code = result
+            if code == 0:
+                try:
+                    formatted = json.dumps(json.loads(output), indent=2)
+                except json.JSONDecodeError:
+                    formatted = output
+                self._log_viewer.setPlainText(formatted)
+            else:
+                self._log_viewer.setPlainText(f"Error: {output[:500]}")
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        run_in_thread(
+            lambda: self._run_docker(["image", "inspect", image_ref, "--format", "{{json .}}"]),
+            done,
+            owner=self,
+            name="docker-inspect",
+        )
+
+    def _run_docker_async(self, args: list[str], on_done) -> None:
+        """Run a docker command off-thread; ``on_done(output, code)`` on the GUI thread."""
+        run_in_thread(
+            lambda: self._run_docker(args),
+            lambda r: on_done(*r),
+            lambda exc: self._status_label.setText(f"  Error: {exc}"),
+            owner=self,
+            name="docker-cmd",
+        )
 
     def _run_image(self, image_ref: str) -> None:
         reply = QMessageBox.question(
@@ -459,12 +473,16 @@ class DockerPanel(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        output, code = self._run_docker(["run", "-d", image_ref])
-        if code == 0:
-            self._status_label.setText(f"  Started container from {image_ref}")
-            self._refresh_sync()
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
+        self._status_label.setText(f"  Starting container from {image_ref}...")
+
+        def done(output, code):
+            if code == 0:
+                self._status_label.setText(f"  Started container from {image_ref}")
+                self._refresh()
+            else:
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        self._run_docker_async(["run", "-d", image_ref], done)
 
     def _delete_image(self, image_ref: str) -> None:
         reply = QMessageBox.question(
@@ -475,12 +493,16 @@ class DockerPanel(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        output, code = self._run_docker(["rmi", image_ref])
-        if code == 0:
-            self._status_label.setText(f"  Deleted {image_ref}")
-            self._refresh_sync()
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
+        self._status_label.setText(f"  Deleting {image_ref}...")
+
+        def done(output, code):
+            if code == 0:
+                self._status_label.setText(f"  Deleted {image_ref}")
+                self._refresh()
+            else:
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        self._run_docker_async(["rmi", image_ref], done)
 
     def _show_container_menu(self, pos) -> None:
         item = self._container_tree.itemAt(pos)
@@ -528,8 +550,9 @@ class DockerPanel(QWidget):
             return
 
         self._status_label.setText(f"  {action.title()}ing {name}...")
-        output, code = self._run_docker([action, name])
-        self._on_action_done(action, name, output, code)
+        self._run_docker_async(
+            [action, name], lambda output, code: self._on_action_done(action, name, output, code)
+        )
 
     def _on_action_done(self, action: str, name: str, output: str, code: int) -> None:
         if code == 0:
@@ -541,9 +564,23 @@ class DockerPanel(QWidget):
     def _view_logs(self, name: str) -> None:
         self._log_title.setText(f"LOGS — {name}")
         self._log_viewer.setPlainText("Loading logs...")
-        # Docker logs writes to both stdout AND stderr — capture both
-        output, code = self._run_docker_logs(name)
-        self._on_logs_loaded(output, code)
+        # Arrow-keying through the container list fires a fetch per
+        # row; only the newest request may write into the viewer.
+        self._log_request += 1
+        request = self._log_request
+
+        def done(result):
+            if request != self._log_request:
+                return
+            self._on_logs_loaded(*result)
+
+        run_in_thread(
+            lambda: self._run_docker_logs(name),
+            done,
+            lambda exc: self._log_viewer.setPlainText(f"Error fetching logs: {exc}"),
+            owner=self,
+            name="docker-logs",
+        )
 
     def _run_docker_logs(self, name: str) -> tuple[str, int]:
         """Fetch container logs — combines stdout + stderr since Docker
@@ -582,13 +619,24 @@ class DockerPanel(QWidget):
 
         # Fetch more lines for the full window (1000 instead of 200)
         container_name = title.replace("LOGS — ", "") if "—" in title else ""
-        if container_name:
-            output, code = self._run_docker_logs_full(container_name)
-            if code == 0 and output:
-                content = output
+        if not container_name:
+            _LogViewerDialog(title, content, self).show()
+            return
 
-        dialog = _LogViewerDialog(title, content, self)
-        dialog.show()
+        self._status_label.setText(f"  Fetching full logs for {container_name}...")
+
+        def done(result):
+            output, code = result
+            _LogViewerDialog(title, output if code == 0 and output else content, self).show()
+            self._status_label.setText("")
+
+        run_in_thread(
+            lambda: self._run_docker_logs_full(container_name),
+            done,
+            lambda _exc: _LogViewerDialog(title, content, self).show(),
+            owner=self,
+            name="docker-logs-full",
+        )
 
     def _run_docker_logs_full(self, name: str) -> tuple[str, int]:
         """Fetch more container logs for the full log window."""

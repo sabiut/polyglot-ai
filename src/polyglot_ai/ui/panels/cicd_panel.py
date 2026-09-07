@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.core.tasks import CIRunSnapshot, TaskKind
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.thread_bridge import call_on_gui, run_in_thread
 
 logger = logging.getLogger(__name__)
 
@@ -348,37 +349,56 @@ class CICDPanel(QWidget):
             self._set_empty_state("  Open a project first")
             return
 
-        # Friendly empty states *before* we shell out — these guard
-        # against the "fatal: not a git repository" stderr that
-        # otherwise leaked into the status bar when a non-git
-        # project was open.
-        if not self._is_git_repo():
-            self._set_empty_state(
-                "  This project isn't a git repository — CI/CD only works for git-tracked projects."
-            )
-            return
-        if not self._has_github_remote():
-            self._set_empty_state(
-                "  No GitHub remote configured for this project. Add "
-                "one with: git remote add origin "
-                "git@github.com:<you>/<repo>.git"
-            )
-            return
-
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
 
-        output, code = self._run_gh(
-            [
-                "run",
-                "list",
-                "--json",
-                "status,conclusion,name,headBranch,createdAt,databaseId,event",
-                "--limit",
-                "25",
-            ]
+        # The git probes and ``gh run list`` all shell out — on a slow
+        # remote or network filesystem that used to freeze the window
+        # for seconds on every tab open, so the whole chain runs off
+        # the GUI thread and only the outcome comes back.
+        def work():
+            # Friendly empty states *before* calling gh — these guard
+            # against the "fatal: not a git repository" stderr that
+            # otherwise leaked into the status bar for non-git projects.
+            if not self._is_git_repo():
+                return "not_git", "", 1
+            if not self._has_github_remote():
+                return "no_remote", "", 1
+            output, code = self._run_gh(
+                [
+                    "run",
+                    "list",
+                    "--json",
+                    "status,conclusion,name,headBranch,createdAt,databaseId,event",
+                    "--limit",
+                    "25",
+                ]
+            )
+            return "ok", output, code
+
+        def done(result):
+            kind, output, code = result
+            if kind == "not_git":
+                self._set_empty_state(
+                    "  This project isn't a git repository — CI/CD only works "
+                    "for git-tracked projects."
+                )
+            elif kind == "no_remote":
+                self._set_empty_state(
+                    "  No GitHub remote configured for this project. Add "
+                    "one with: git remote add origin "
+                    "git@github.com:<you>/<repo>.git"
+                )
+            else:
+                self._on_runs_loaded(output, code)
+
+        run_in_thread(
+            work,
+            done,
+            lambda exc: self._set_empty_state(f"  Error: {exc}"),
+            owner=self,
+            name="cicd-refresh",
         )
-        self._on_runs_loaded(output, code)
 
     def _set_empty_state(self, message: str) -> None:
         """Clear the runs table and show ``message`` as the status.
@@ -746,20 +766,18 @@ class CICDPanel(QWidget):
             output, code = self._run_gh(["run", "view", str(run_id), "--json", "jobs"])
             if code != 0:
                 logger.warning("cicd: job list fetch failed (rc=%s): %s", code, output[:200])
-                QTimer.singleShot(
-                    0, lambda: self._on_logs_loaded(f"Could not list jobs: {output[:500]}", 1)
-                )
+                call_on_gui(lambda: self._on_logs_loaded(f"Could not list jobs: {output[:500]}", 1))
                 return
             try:
                 jobs = json.loads(output).get("jobs", [])
             except json.JSONDecodeError:
-                QTimer.singleShot(0, lambda: self._on_logs_loaded("Could not parse job list.", 1))
+                call_on_gui(lambda: self._on_logs_loaded("Could not parse job list.", 1))
                 return
             logger.info("cicd: got %d jobs for run %s", len(jobs), run_id)
             if not hasattr(self, "_cached_jobs"):
                 self._cached_jobs = {}
             self._cached_jobs[run_id] = jobs
-            QTimer.singleShot(0, lambda: self._dispatch_per_job_fetch(run_id, jobs, is_failure))
+            call_on_gui(lambda: self._dispatch_per_job_fetch(run_id, jobs, is_failure))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -810,11 +828,10 @@ class CICDPanel(QWidget):
                 # so only update for jobs 2..N. Saves one round-trip
                 # of UI churn on the common single-job case.
                 if idx > 1:
-                    QTimer.singleShot(
-                        0,
+                    call_on_gui(
                         lambda i=idx, n=name: self._update_log_progress(
                             f"Fetching job {i}/{total}: {n}…"
-                        ),
+                        )
                     )
 
                 logger.info("cicd: gh run view --job %s --log (job %d/%d)", job_id, idx, total)
@@ -835,7 +852,7 @@ class CICDPanel(QWidget):
                     cwd=self._project_root or None,
                 )
                 if self._log_dialog is not None:
-                    QTimer.singleShot(0, lambda p=proc: self._set_dialog_subprocess(p))
+                    call_on_gui(lambda p=proc: self._set_dialog_subprocess(p))
 
                 # Stream stdout line by line so the dialog fills
                 # progressively instead of staring at a frozen
@@ -867,13 +884,12 @@ class CICDPanel(QWidget):
                         now = _time.monotonic()
                         if (now - last_push) >= 0.25 or (len(lines) % 100 == 0):
                             partial_kb = sum(len(s) for s in lines) // 1024
-                            QTimer.singleShot(
-                                0,
+                            call_on_gui(
                                 lambda i=idx, n=name, t=total, kb=partial_kb: (
                                     self._update_log_progress(
                                         f"Fetching job {i}/{t}: {n}… ({kb} KB)"
                                     )
-                                ),
+                                )
                             )
                             last_push = now
                         if (now - started) > per_job_timeout:
@@ -907,7 +923,7 @@ class CICDPanel(QWidget):
             output = "".join(collected) if collected else "(no logs)"
             self._logs_cache[run_id] = output
             logger.info("cicd: per-job fetch complete (%d KB)", len(output) // 1024)
-            QTimer.singleShot(0, lambda: self._on_logs_loaded(output, 0))
+            call_on_gui(lambda: self._on_logs_loaded(output, 0))
 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.thread_bridge import run_in_thread
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class K8sPanel(QWidget):
         self._services: list[dict] = []
         self._current_context: str = ""
         self._current_namespace: str = ""
+        self._details_request = 0
 
         self._setup_ui()
         self._apply_theme_styles()
@@ -306,67 +308,108 @@ class K8sPanel(QWidget):
     # ── Data fetching ───────────────────────────────────────────────
 
     def _refresh_direct(self) -> None:
-        """Direct synchronous refresh — for button click and showEvent.
+        """Full refresh — for button click and showEvent.
 
-        Loads contexts (fast, local config only) synchronously,
-        then fetches resources in a background thread.
+        Loads the context list first (local ~/.kube/config, but still
+        a kubectl process launch — off-thread like everything else),
+        then fetches resources from the cluster.
         """
         if not self._check_kubectl():
             self._status_label.setText("  kubectl not found")
             return
 
-        # Contexts — reads local ~/.kube/config, instant
-        ctx_output, ctx_code = self._run_kubectl(["config", "get-contexts", "-o", "name"])
-        contexts = (
-            [c.strip() for c in ctx_output.splitlines() if c.strip()] if ctx_code == 0 else []
+        self._status_label.setText("  loading contexts...")
+
+        def fetch():
+            ctx_output, ctx_code = self._run_kubectl(["config", "get-contexts", "-o", "name"])
+            contexts = (
+                [c.strip() for c in ctx_output.splitlines() if c.strip()] if ctx_code == 0 else []
+            )
+            current_ctx, _ = self._run_kubectl(["config", "current-context"])
+            return contexts, current_ctx.strip()
+
+        def done(result):
+            contexts, current_ctx = result
+            self._ctx_combo.blockSignals(True)
+            self._ctx_combo.clear()
+            for ctx in contexts:
+                self._ctx_combo.addItem(ctx)
+            if current_ctx in contexts:
+                self._ctx_combo.setCurrentText(current_ctx)
+                self._current_context = current_ctx
+            self._ctx_combo.blockSignals(False)
+            self._status_label.setText(f"  {current_ctx} | loading resources...")
+            self._refresh()
+
+        run_in_thread(
+            fetch,
+            done,
+            lambda exc: self._status_label.setText(f"  Error: {exc}"),
+            owner=self,
+            name="k8s-contexts",
         )
-        current_ctx, _ = self._run_kubectl(["config", "current-context"])
-        current_ctx = current_ctx.strip()
-
-        self._ctx_combo.blockSignals(True)
-        self._ctx_combo.clear()
-        for ctx in contexts:
-            self._ctx_combo.addItem(ctx)
-        if current_ctx in contexts:
-            self._ctx_combo.setCurrentText(current_ctx)
-            self._current_context = current_ctx
-        self._ctx_combo.blockSignals(False)
-
-        self._status_label.setText(f"  {current_ctx} | loading resources...")
-
-        # Fetch resources in background (these hit the cluster API)
-        self._refresh()
 
     def _refresh(self) -> None:
         """Background refresh — fetches resources in a thread."""
-        import threading
-
         if not self._check_kubectl():
             return
 
-        def do_fetch():
-            try:
-                self._fetch_data()
-                QTimer.singleShot(0, self._populate_tree)
-            except Exception:
-                logger.exception("K8s refresh failed")
+        def done(result):
+            self._pods, self._deployments, self._services = result
+            self._populate_tree()
 
-        threading.Thread(target=do_fetch, daemon=True).start()
+        run_in_thread(
+            self._fetch_data,
+            done,
+            lambda exc: self._status_label.setText(f"  Error refreshing: {exc}"),
+            owner=self,
+            name="k8s-refresh",
+        )
 
-    def _fetch_data(self) -> None:
+    def _fetch_data(self) -> tuple[list[dict], list[dict], list[dict]]:
+        """Fetch pods/deployments/services. Runs off-thread — returns, doesn't mutate."""
         ns_args = ["-A"] if not self._current_namespace else ["-n", self._current_namespace]
 
-        # Pods
         output, code = self._run_kubectl(["get", "pods", *ns_args, "-o", "json"])
-        self._pods = self._parse_items(output) if code == 0 else []
+        pods = self._parse_items(output) if code == 0 else []
 
-        # Deployments
         output, code = self._run_kubectl(["get", "deployments", *ns_args, "-o", "json"])
-        self._deployments = self._parse_items(output) if code == 0 else []
+        deployments = self._parse_items(output) if code == 0 else []
 
-        # Services
         output, code = self._run_kubectl(["get", "services", *ns_args, "-o", "json"])
-        self._services = self._parse_items(output) if code == 0 else []
+        services = self._parse_items(output) if code == 0 else []
+        return pods, deployments, services
+
+    def _run_kubectl_async(self, args: list[str], on_done) -> None:
+        """Run kubectl off-thread; ``on_done(output, code)`` on the GUI thread."""
+        run_in_thread(
+            lambda: self._run_kubectl(args),
+            lambda r: on_done(*r),
+            lambda exc: self._status_label.setText(f"  Error: {exc}"),
+            owner=self,
+            name="kubectl",
+        )
+
+    def _show_in_details(self, title: str, args: list[str]) -> None:
+        """Load a kubectl command's output into the details viewer off-thread.
+
+        Clicking through the resource tree fires one of these per row;
+        only the most recent request may write into the viewer.
+        """
+        self._details_title.setText(title)
+        self._details_viewer.setPlainText("Loading...")
+        self._details_request += 1
+        request = self._details_request
+
+        def done(output, code):
+            if request != self._details_request:
+                return
+            if code == 0:
+                self._details_viewer.setPlainText(output or "(no output)")
+            else:
+                self._details_viewer.setPlainText(f"Error: {output[:500]}")
+
+        self._run_kubectl_async(args, done)
 
     @staticmethod
     def _parse_items(output: str) -> list[dict]:
@@ -494,21 +537,11 @@ class K8sPanel(QWidget):
         ns = data["namespace"]
 
         if res_type == "pod":
-            self._details_title.setText(f"LOGS — {name}")
-            output, code = self._run_kubectl(
-                ["logs", name, "-n", ns, "--tail=200", "--all-containers"]
+            self._show_in_details(
+                f"LOGS — {name}", ["logs", name, "-n", ns, "--tail=200", "--all-containers"]
             )
-            if code == 0:
-                self._details_viewer.setPlainText(output or "(no logs)")
-            else:
-                self._details_viewer.setPlainText(f"Error: {output[:500]}")
         else:
-            self._details_title.setText(f"DESCRIBE — {name}")
-            output, code = self._run_kubectl(["describe", res_type, name, "-n", ns])
-            if code == 0:
-                self._details_viewer.setPlainText(output)
-            else:
-                self._details_viewer.setPlainText(f"Error: {output[:500]}")
+            self._show_in_details(f"DESCRIBE — {name}", ["describe", res_type, name, "-n", ns])
 
     # ── Context menu ────────────────────────────────────────────────
 
@@ -560,9 +593,7 @@ class K8sPanel(QWidget):
         self._on_item_selected(self._resource_tree.currentItem(), None)
 
     def _describe_resource(self, res_type: str, name: str, ns: str) -> None:
-        self._details_title.setText(f"DESCRIBE — {name}")
-        output, code = self._run_kubectl(["describe", res_type, name, "-n", ns])
-        self._details_viewer.setPlainText(output if code == 0 else f"Error: {output[:500]}")
+        self._show_in_details(f"DESCRIBE — {name}", ["describe", res_type, name, "-n", ns])
 
     def _delete_resource(self, res_type: str, name: str, ns: str) -> None:
         reply = QMessageBox.question(
@@ -574,12 +605,16 @@ class K8sPanel(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        output, code = self._run_kubectl(["delete", res_type, name, "-n", ns])
-        if code == 0:
-            self._status_label.setText(f"  Deleted {res_type} {name}")
-            self._refresh()
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
+        self._status_label.setText(f"  Deleting {res_type} {name}...")
+
+        def done(output, code):
+            if code == 0:
+                self._status_label.setText(f"  Deleted {res_type} {name}")
+                self._refresh()
+            else:
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        self._run_kubectl_async(["delete", res_type, name, "-n", ns], done)
 
     def _restart_deployment(self, name: str, ns: str) -> None:
         reply = QMessageBox.question(
@@ -590,12 +625,16 @@ class K8sPanel(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        output, code = self._run_kubectl(["rollout", "restart", f"deployment/{name}", "-n", ns])
-        if code == 0:
-            self._status_label.setText(f"  Restarted {name}")
-            self._refresh()
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
+        self._status_label.setText(f"  Restarting {name}...")
+
+        def done(output, code):
+            if code == 0:
+                self._status_label.setText(f"  Restarted {name}")
+                self._refresh()
+            else:
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        self._run_kubectl_async(["rollout", "restart", f"deployment/{name}", "-n", ns], done)
 
     def _scale_deployment(self, name: str, ns: str) -> None:
         from PyQt6.QtWidgets import QInputDialog
@@ -613,14 +652,18 @@ class K8sPanel(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        output, code = self._run_kubectl(
-            ["scale", f"deployment/{name}", f"--replicas={replicas}", "-n", ns]
+        self._status_label.setText(f"  Scaling {name} to {replicas}...")
+
+        def done(output, code):
+            if code == 0:
+                self._status_label.setText(f"  Scaled {name} to {replicas}")
+                self._refresh()
+            else:
+                self._status_label.setText(f"  Error: {output[:60]}")
+
+        self._run_kubectl_async(
+            ["scale", f"deployment/{name}", f"--replicas={replicas}", "-n", ns], done
         )
-        if code == 0:
-            self._status_label.setText(f"  Scaled {name} to {replicas}")
-            self._refresh()
-        else:
-            self._status_label.setText(f"  Error: {output[:60]}")
 
     # ── Expand to full window ───────────────────────────────────────
 
