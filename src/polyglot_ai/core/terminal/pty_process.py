@@ -25,6 +25,7 @@ import signal
 import struct
 import termios
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -85,6 +86,11 @@ class PtyProcess:
                     f"\x1b[31mFailed to start shell '{shell}': {exc}\x1b[0m\r\n".encode(),
                 )
                 os._exit(126)
+            except BaseException:
+                # Anything else must still never return: a forked child
+                # that falls out of start() would carry on running the
+                # whole Qt application as a second process.
+                os._exit(1)
         else:
             # Parent process
             self._master_fd = fd
@@ -132,11 +138,28 @@ class PtyProcess:
                 break
 
         self._running = False
+        self._reap(block=False)
         try:
             self._on_exited()
         except Exception:
             logger.exception("PTY on_exited callback failed")
         logger.info("PTY reader loop ended")
+
+    def _reap(self, *, block: bool) -> bool:
+        """Collect the child's exit status so it doesn't linger as a zombie.
+
+        Returns True once the child is gone (or was never ours to reap).
+        """
+        pid = self._pid
+        if pid is None:
+            return True
+        try:
+            done_pid, _ = os.waitpid(pid, 0 if block else os.WNOHANG)
+        except ChildProcessError:
+            return True
+        except OSError:
+            return False
+        return done_pid == pid
 
     def write(self, data: bytes) -> None:
         """Write data to the PTY."""
@@ -155,20 +178,40 @@ class PtyProcess:
     def terminate(self) -> None:
         """Terminate the PTY process."""
         self._running = False
+
+        # Stop the reader *before* closing the fd. Closing first raced
+        # the reader's select()/read(): if the OS recycled the fd number
+        # for another thread's file, the reader fed that data into the
+        # terminal. (Skip the join when called from the reader itself,
+        # e.g. via the on_exited callback — a thread can't join itself.)
+        reader = self._reader_thread
+        if reader and reader.is_alive() and reader is not threading.current_thread():
+            reader.join(timeout=2)
+
         if self._pid is not None:
             try:
                 os.kill(self._pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
+            # Give the shell a moment to exit, then escalate. Without
+            # the waitpid, every closed terminal tab left a zombie.
+            deadline = time.monotonic() + 1.0
+            while not self._reap(block=False):
+                if time.monotonic() > deadline:
+                    try:
+                        os.kill(self._pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    self._reap(block=True)
+                    break
+                time.sleep(0.02)
+
         if self._master_fd is not None:
             try:
                 os.close(self._master_fd)
             except OSError:
                 pass
             self._master_fd = None
-
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=2)
 
         self._pid = None
         logger.info("PTY terminated")

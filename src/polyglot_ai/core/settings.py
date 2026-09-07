@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from polyglot_ai.core.database import Database
+
+logger = logging.getLogger(__name__)
 
 DEFAULTS = {
     "theme": "dark",
@@ -49,7 +52,13 @@ class SettingsManager:
     async def load(self) -> None:
         rows = await self._db.fetchall("SELECT key, value FROM settings")
         for row in rows:
-            self._cache[row["key"]] = json.loads(row["value"])
+            try:
+                self._cache[row["key"]] = json.loads(row["value"])
+            except (json.JSONDecodeError, TypeError):
+                # One corrupt row (interrupted write, hand-edited DB)
+                # must not stop the app from starting; the key falls
+                # back to its default until it's next saved.
+                logger.warning("Ignoring corrupt setting %r", row["key"])
 
     def get(self, key: str) -> Any:
         if key in self._cache:

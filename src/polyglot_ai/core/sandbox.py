@@ -377,6 +377,7 @@ class Sandbox:
         if not args:
             return "Empty command", 1
 
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -394,10 +395,29 @@ class Sandbox:
             return output, proc.returncode or 0
 
         except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except (ProcessLookupError, OSError):
-                pass
+            await _kill_and_reap(proc)
             return f"Command timed out after {timeout}s", 1
+        except asyncio.CancelledError:
+            # The user pressed Stop mid-command. CancelledError is a
+            # BaseException, so the generic handler below never saw it
+            # and the child (a long build, a test run) kept going
+            # detached with nothing left to kill it.
+            await _kill_and_reap(proc)
+            raise
         except Exception as e:
+            await _kill_and_reap(proc)
             return f"Error executing command: {e}", 1
+
+
+async def _kill_and_reap(proc) -> None:
+    """Kill a subprocess and wait for it so no zombie or open pipe is left behind."""
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=2)
+    except (asyncio.TimeoutError, Exception):
+        pass
