@@ -55,6 +55,29 @@ def _is_oauth_unsupported_error(error_text: str) -> bool:
     return needle in error_text.lower()
 
 
+def drop_unsupported_stream_kwargs(stream_fn, kwargs: dict) -> dict:
+    """Return ``kwargs`` minus anything ``stream_fn``'s signature doesn't accept.
+
+    anthropic SDK 1.x removed ``temperature`` from ``messages.stream()``
+    and ``messages.create()`` altogether, so passing it raises a Python
+    ``TypeError`` *before* any request is made — the 400-based
+    strip-and-retry below never gets a chance. Filtering against the
+    real signature works for every SDK version at once.
+    """
+    import inspect
+
+    try:
+        params = inspect.signature(stream_fn).parameters
+    except (TypeError, ValueError):
+        return kwargs
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return kwargs
+    dropped = [k for k in kwargs if k not in params]
+    if dropped:
+        logger.info("Dropping parameters this anthropic SDK doesn't accept: %s", dropped)
+    return {k: v for k, v in kwargs.items() if k in params}
+
+
 def _is_temperature_deprecated_error(error_text: str) -> bool:
     """Detect the 400 newer Claude models return for ``temperature``.
 
@@ -336,6 +359,7 @@ class ClaudeOAuthClient(AIProvider):
             # one-shot retry without ``temperature`` is safe and
             # transparent to the caller. Older models still accept it,
             # so we try with it first.
+            kwargs = drop_unsupported_stream_kwargs(self._client.messages.stream, kwargs)
             stream_cm = self._client.messages.stream(**kwargs)
             try:
                 stream = await stream_cm.__aenter__()

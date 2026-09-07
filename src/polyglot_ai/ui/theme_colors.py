@@ -81,8 +81,8 @@ _DARK = {
     "activity_icon_hover": "#cccccc",
     "activity_icon_active": "#e8e8e8",
     # Status bar
-    "status_bar_bg": "#1a1a2e",
-    "status_bar_fg": "#8888cc",
+    "status_bar_bg": "#252526",
+    "status_bar_fg": "#969696",
     # Scrollbar
     "scrollbar_track": "#1e1e1e",
     "scrollbar_thumb": "#424242",

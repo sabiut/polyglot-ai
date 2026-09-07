@@ -306,8 +306,10 @@ class AnthropicClient(AIProvider):
             # still accept it, so we send it on the first attempt.
             from polyglot_ai.core.ai.claude_oauth import (
                 _is_temperature_deprecated_error,
+                drop_unsupported_stream_kwargs,
             )
 
+            kwargs = drop_unsupported_stream_kwargs(self._client.messages.stream, kwargs)
             stream_cm = self._client.messages.stream(**kwargs)
             try:
                 stream = await stream_cm.__aenter__()

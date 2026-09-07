@@ -56,11 +56,54 @@ class ThemeManager(QObject):
 
     def apply_theme(self, theme: str = "dark") -> None:
         tc.set_theme(theme)
+        # The QSS covers our widgets; the palette covers everything
+        # the stylesheet can't reach — native menus/tooltips, and the
+        # window decoration. On GNOME Wayland, Qt draws its own title
+        # bar and colours it from QPalette.Window at window creation,
+        # so without this the app got a light title bar over a dark UI.
+        self._app.setPalette(_build_palette())
         stylesheet = _generate_qss()
         self._app.setStyleSheet(stylesheet)
         self._current_theme = theme
         self.theme_changed.emit()
         logger.info("Applied theme: %s", theme)
+
+
+def _build_palette():
+    from PyQt6.QtGui import QColor, QPalette
+
+    g = tc.get
+    pal = QPalette()
+    roles = {
+        QPalette.ColorRole.Window: g("bg_surface"),
+        QPalette.ColorRole.WindowText: g("text_primary"),
+        QPalette.ColorRole.Base: g("bg_base"),
+        QPalette.ColorRole.AlternateBase: g("bg_surface_raised"),
+        QPalette.ColorRole.Text: g("text_primary"),
+        QPalette.ColorRole.Button: g("bg_surface_raised"),
+        QPalette.ColorRole.ButtonText: g("text_primary"),
+        QPalette.ColorRole.ToolTipBase: g("bg_surface_overlay"),
+        QPalette.ColorRole.ToolTipText: g("text_primary"),
+        QPalette.ColorRole.PlaceholderText: g("text_muted"),
+        QPalette.ColorRole.Highlight: g("accent_primary"),
+        QPalette.ColorRole.HighlightedText: g("text_on_accent"),
+        QPalette.ColorRole.Link: g("text_link"),
+        QPalette.ColorRole.Light: g("bg_surface_overlay"),
+        QPalette.ColorRole.Midlight: g("border_primary"),
+        QPalette.ColorRole.Mid: g("border_menu"),
+        QPalette.ColorRole.Dark: g("bg_base"),
+        QPalette.ColorRole.Shadow: g("bg_base"),
+    }
+    for role, hex_value in roles.items():
+        pal.setColor(role, QColor(hex_value))
+    disabled = QColor(g("text_disabled"))
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        pal.setColor(QPalette.ColorGroup.Disabled, role, disabled)
+    return pal
 
     def toggle_theme(self) -> str:
         new_theme = "light" if self._current_theme == "dark" else "dark"
@@ -160,6 +203,12 @@ QSplitter::handle:vertical {{
 QTabWidget::pane {{
     border: 1px solid {g("border_primary")};
     background-color: {g("bg_base")};
+}}
+QTabBar {{
+    /* documentMode tab bars paint a palette-coloured base line under
+       the tabs — the stray light line at the top of the editor. */
+    qproperty-drawBase: 0;
+    background-color: {g("bg_surface")};
 }}
 QTabBar::tab {{
     background-color: {g("bg_surface_raised")};
