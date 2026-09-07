@@ -16,14 +16,12 @@ LEGACY_DATA_DIR = Path.home() / ".local" / "share" / "codex-desktop"
 LEGACY_CONFIG_DIR = Path.home() / ".config" / "codex-desktop"
 
 # Limits
-MAX_AGENT_ITERATIONS = 20
 COMMAND_TIMEOUT = 30  # seconds
 
 # Event names — AI
 EVT_AI_SEND_MESSAGE = "ai:send_message"
 EVT_AI_STREAM_CHUNK = "ai:stream_chunk"
 EVT_AI_STREAM_DONE = "ai:stream_done"
-EVT_AI_TOOL_CALL_REQUEST = "ai:tool_call_request"
 EVT_AI_ERROR = "ai:error"
 
 # Event names — Files
@@ -42,8 +40,6 @@ EVT_TERMINAL_OUTPUT = "terminal:output"
 EVT_TERMINAL_EXITED = "terminal:exited"
 
 # Event names — Approval
-EVT_APPROVAL_REQUESTED = "approval:requested"
-EVT_APPROVAL_RESPONSE = "approval:response"
 
 # Event names — Git
 EVT_GIT_REFRESH = "git:refresh"

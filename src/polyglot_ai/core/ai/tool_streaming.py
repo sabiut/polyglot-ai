@@ -7,7 +7,7 @@ tagged with an integer ``index`` that ties the fragments of one call
 together.
 
 This accumulator centralises the reassembly that used to be copy-pasted
-into :class:`~polyglot_ai.core.ai.agent.AgentLoop` and — twice — into the
+into the (since-removed) AgentLoop and — twice — into the
 chat panel's streaming loop. Keeping it in one place means the fragile
 fragment-concatenation logic is implemented, and hardened, exactly once.
 """
