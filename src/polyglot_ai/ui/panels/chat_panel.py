@@ -1208,6 +1208,23 @@ class ChatPanel(QWidget):
                 else:
                     self._add_system_message("MCP client not available. Open a project first.")
 
+    def _start_stream_task(self) -> None:
+        from polyglot_ai.core.async_utils import safe_task
+
+        self._stream_task = safe_task(
+            self._stream_response(),
+            name="stream_response",
+            on_error=self._on_stream_task_failed,
+        )
+
+    def _on_stream_task_failed(self, exc: Exception) -> None:
+        # A failure before the streaming try-block (the context builder
+        # choking on an unreadable file, say) used to escape a bare
+        # ensure_future and leave the panel stuck: Send hidden, Stop
+        # inert, input read-only, until the app was restarted.
+        self._set_streaming_ui(False)
+        self._add_system_message(f"Couldn't send message: {exc}")
+
     def _stop_generation(self) -> None:
         """Cancel the current streaming task."""
         if self._stream_task and not self._stream_task.done():
@@ -1491,7 +1508,7 @@ class ChatPanel(QWidget):
             display_text = f"{chips}\n\n{text}" if text else chips
         self._add_message_widget("user", display_text)
 
-        self._stream_task = asyncio.ensure_future(self._stream_response())
+        self._start_stream_task()
 
     async def _stream_response(self) -> None:
         if not self._provider_manager or not self._current_conversation:
@@ -1770,7 +1787,7 @@ class ChatPanel(QWidget):
                     break
 
         # Re-stream
-        self._stream_task = asyncio.ensure_future(self._stream_response())
+        self._start_stream_task()
 
     # ─── Edit & Resend ──────────────────────────────────────────────
 
@@ -1819,7 +1836,7 @@ class ChatPanel(QWidget):
         self._current_conversation.messages.append(user_msg)
         self._add_message_widget("user", new_text.strip())
 
-        self._stream_task = asyncio.ensure_future(self._stream_response())
+        self._start_stream_task()
 
     # ─── Error recovery ─────────────────────────────────────────────
 
@@ -1874,7 +1891,7 @@ class ChatPanel(QWidget):
                 and not self._current_conversation.messages[-1].content
             ):
                 self._current_conversation.messages.pop()
-            self._stream_task = asyncio.ensure_future(self._stream_response())
+            self._start_stream_task()
 
     # ─── Tool execution ─────────────────────────────────────────────
 
@@ -2435,6 +2452,38 @@ class ChatPanel(QWidget):
                 tooltip_lines.append("<small>" + "<br>".join(meta_bits) + "</small>")
             item.setToolTip("".join(tooltip_lines))
             self._conv_list.addItem(item)
+
+    def clear_all_history(self) -> None:
+        """Delete every saved conversation after confirmation (AI → Clear History)."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        if not self._db:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear History",
+            "Delete all saved conversations?\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        async def _clear() -> None:
+            for conv in await self._db.list_conversations():
+                await self._db.delete_conversation(conv["id"])
+            self._new_conversation()
+            await self.populate_conversations()
+
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(
+            _clear(),
+            name="clear_history",
+            on_error=lambda exc: QMessageBox.warning(
+                self, "Clear History", f"Couldn't clear history:\n{exc}"
+            ),
+        )
 
     def _new_conversation(self) -> None:
         full_id, display = self._get_selected_model()
@@ -3397,8 +3446,10 @@ class ChatPanel(QWidget):
 
     def set_mcp_client(self, mcp_client) -> None:
         self._mcp_client = mcp_client
-        # Check if GitHub is already connected
-        if mcp_client and "github" in mcp_client.connected_servers:
+        # Check if GitHub is already connected. The button is optional
+        # (never built in the current layout) — without the guard this
+        # crashed at startup for anyone with the GitHub MCP server on.
+        if mcp_client and "github" in mcp_client.connected_servers and self._github_btn:
             self._github_btn.setText("⌥ GitHub ✓")
             self._github_btn.setStyleSheet(f"""
                 QPushButton {{

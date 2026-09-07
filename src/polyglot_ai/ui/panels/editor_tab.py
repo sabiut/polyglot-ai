@@ -602,9 +602,13 @@ class EditorTab(QWidget):
             self._file_path.write_text(self._editor.text(), encoding="utf-8")
             self._editor.setModified(False)
             self._is_modified = False
+            self.last_save_error = None
             logger.info("Saved file: %s", self._file_path)
             return True
-        except OSError:
+        except OSError as exc:
+            # Kept for the panel to surface in an error dialog — a
+            # bare False loses the reason (read-only file? disk full?).
+            self.last_save_error = str(exc)
             logger.exception("Failed to save file: %s", self._file_path)
             return False
 

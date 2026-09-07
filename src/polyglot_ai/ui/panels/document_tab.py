@@ -290,8 +290,10 @@ class DocumentTab(QWidget):
         try:
             self._file_path.write_text(self._source.toPlainText(), encoding="utf-8")
             self._is_modified = False
+            self.last_save_error = None
             logger.info("Saved document: %s", self._file_path)
             return True
-        except OSError:
+        except OSError as exc:
+            self.last_save_error = str(exc)
             logger.exception("Failed to save document: %s", self._file_path)
             return False

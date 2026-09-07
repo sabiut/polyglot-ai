@@ -128,20 +128,28 @@ class EditorPanel(QTabWidget):
             self.setCurrentIndex(self._open_tabs[abs_path])
             return
 
-        self._remove_placeholder()
-
         suffix = path.suffix.lower()
-        if suffix in MARKDOWN_EXTENSIONS:
-            tab = DocumentTab()
-            tab.load(path)
-        elif suffix in PREVIEW_EXTENSIONS:
-            tab = PreviewTab(path)
-        else:
-            tab = EditorTab()
-            tab.load(path)
-            if hasattr(self, "_ai_provider_manager"):
-                tab.set_ai_services(self._ai_provider_manager, self._ai_settings)
+        try:
+            if suffix in MARKDOWN_EXTENSIONS:
+                tab = DocumentTab()
+                tab.load(path)
+            elif suffix in PREVIEW_EXTENSIONS:
+                tab = PreviewTab(path)
+            else:
+                tab = EditorTab()
+                tab.load(path)
+                if hasattr(self, "_ai_provider_manager"):
+                    tab.set_ai_services(self._ai_provider_manager, self._ai_settings)
+        except OSError as exc:
+            logger.warning("Couldn't open %s: %s", path, exc)
+            QMessageBox.warning(
+                self,
+                "Couldn't open file",
+                f"{path.name} couldn't be opened:\n{exc}",
+            )
+            return
 
+        self._remove_placeholder()
         index = self.addTab(tab, path.name)
         self.setCurrentIndex(index)
         self._open_tabs[abs_path] = index
@@ -226,10 +234,21 @@ class EditorPanel(QTabWidget):
             self._update_tab_title(self.currentIndex())
             self._emit_saved(tab)
             return True
+        self._report_save_failures([tab])
         return False
+
+    def unsaved_tab_names(self) -> list[str]:
+        """Display names of tabs with unsaved changes (for the close prompt)."""
+        names = []
+        for i in range(self.count()):
+            tab = self.widget(i)
+            if hasattr(tab, "is_modified") and hasattr(tab, "save") and tab.is_modified:
+                names.append(self.tabText(i).lstrip("● ").strip())
+        return names
 
     def save_all(self) -> None:
         """Save all modified tabs."""
+        failed = []
         for i in range(self.count()):
             tab = self.widget(i)
             if hasattr(tab, "is_modified") and hasattr(tab, "save") and tab.is_modified:
@@ -239,6 +258,27 @@ class EditorPanel(QTabWidget):
                 elif tab.save():
                     self._update_tab_title(i)
                     self._emit_saved(tab)
+                else:
+                    failed.append(tab)
+        if failed:
+            self._report_save_failures(failed)
+
+    def _report_save_failures(self, tabs) -> None:
+        # A failed save used to be log-only: the tab stayed marked
+        # modified but nothing told the user, so they'd keep editing
+        # (or quit) believing the work was on disk.
+        lines = []
+        for tab in tabs:
+            path = getattr(tab, "file_path", None)
+            reason = getattr(tab, "last_save_error", None) or "unknown error"
+            lines.append(f"{path.name if path else 'Untitled'}: {reason}")
+        QMessageBox.critical(
+            self,
+            "Couldn't save",
+            "The following file(s) were NOT saved:\n\n"
+            + "\n".join(lines)
+            + "\n\nCheck the file's permissions and free disk space, then try again.",
+        )
 
     def _save_as(self, tab: EditorTab) -> bool:
         file_path, _ = QFileDialog.getSaveFileName(self, "Save File", "", "All Files (*)")

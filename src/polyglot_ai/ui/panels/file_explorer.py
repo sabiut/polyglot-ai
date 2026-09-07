@@ -395,6 +395,9 @@ class _DragDropTreeView(QTreeView):
             event.accept()
         except Exception as e:
             logger.error("Move failed: %s", e)
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Move Failed", f"Couldn't move '{source_path.name}':\n{e}")
             event.ignore()
 
 
@@ -934,7 +937,11 @@ class FileExplorer(QWidget):
             if new_path.exists():
                 QMessageBox.warning(self, "Error", f"'{name}' already exists.")
                 return
-            new_path.touch()
+            try:
+                new_path.touch()
+            except OSError as exc:
+                QMessageBox.warning(self, "Error", f"Couldn't create '{name}':\n{exc}")
+                return
             logger.info("Created file: %s", new_path)
 
     def _new_folder(self, parent_dir: Path) -> None:
@@ -944,7 +951,11 @@ class FileExplorer(QWidget):
             if new_path.exists():
                 QMessageBox.warning(self, "Error", f"'{name}' already exists.")
                 return
-            new_path.mkdir(parents=True)
+            try:
+                new_path.mkdir(parents=True)
+            except OSError as exc:
+                QMessageBox.warning(self, "Error", f"Couldn't create folder '{name}':\n{exc}")
+                return
             logger.info("Created folder: %s", new_path)
 
     def _rename(self, path: Path) -> None:
@@ -954,7 +965,11 @@ class FileExplorer(QWidget):
             if new_path.exists():
                 QMessageBox.warning(self, "Error", f"'{name}' already exists.")
                 return
-            path.rename(new_path)
+            try:
+                path.rename(new_path)
+            except OSError as exc:
+                QMessageBox.warning(self, "Error", f"Couldn't rename '{path.name}':\n{exc}")
+                return
             logger.info("Renamed: %s → %s", path.name, name)
 
     def _delete(self, path: Path) -> None:
@@ -1017,12 +1032,16 @@ class FileExplorer(QWidget):
         layout.addLayout(btn_row)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            if path.is_file():
-                path.unlink()
-            elif path.is_dir():
-                import shutil
+            try:
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    import shutil
 
-                shutil.rmtree(path)
+                    shutil.rmtree(path)
+            except OSError as exc:
+                QMessageBox.warning(self, "Error", f"Couldn't delete '{path.name}':\n{exc}")
+                return
             logger.info("Deleted: %s", path)
 
     def _copy_path(self, path: Path) -> None:

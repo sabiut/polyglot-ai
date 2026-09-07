@@ -627,9 +627,11 @@ class MainWindow(QMainWindow):
 
         self._action_new_chat = QAction("&New Conversation", self)
         self._action_new_chat.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        self._action_new_chat.triggered.connect(self._chat_panel._new_conversation)
         ai_menu.addAction(self._action_new_chat)
 
         self._action_clear_history = QAction("&Clear History", self)
+        self._action_clear_history.triggered.connect(self._chat_panel.clear_all_history)
         ai_menu.addAction(self._action_clear_history)
 
         # Help menu
@@ -642,6 +644,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._action_check_updates)
 
         self._action_shortcuts = QAction("&Keyboard Shortcuts", self)
+        self._action_shortcuts.triggered.connect(self._show_shortcuts_dialog)
         help_menu.addAction(self._action_shortcuts)
 
         # Re-trigger the onboarding wizard. Since the dialog now
@@ -905,8 +908,77 @@ class MainWindow(QMainWindow):
             "AI",
             "Ctrl+Shift+N",
         )
+        reg.register(
+            "ai.clear_history",
+            "Clear Conversation History…",
+            lambda: self._action_clear_history.trigger(),
+            "AI",
+        )
         reg.register("edit.undo", "Undo", self._forward_undo, "Edit", "Ctrl+Z")
         reg.register("edit.redo", "Redo", self._forward_redo, "Edit", "Ctrl+Shift+Z")
+
+        # Shortcuts that were bound as QActions but never registered —
+        # the palette (and Help → Keyboard Shortcuts) is the only place
+        # users can discover them, so every live binding belongs here.
+        reg.register(
+            "file.close_tab",
+            "Close Tab",
+            lambda: self._action_close_tab.trigger(),
+            "File",
+            "Ctrl+W",
+        )
+        reg.register(
+            "file.settings",
+            "Settings…",
+            lambda: self._action_settings.trigger(),
+            "File",
+            "Ctrl+,",
+        )
+        reg.register("edit.find", "Find…", lambda: self._action_find.trigger(), "Edit", "Ctrl+F")
+        reg.register(
+            "edit.replace", "Replace…", lambda: self._action_replace.trigger(), "Edit", "Ctrl+H"
+        )
+        reg.register(
+            "view.tests",
+            "Show Tests",
+            lambda: self._on_activity_changed("tests"),
+            "View",
+            "Ctrl+Shift+T",
+        )
+        reg.register(
+            "view.tasks",
+            "Show Tasks",
+            lambda: self._on_activity_changed("tasks"),
+            "View",
+            "Ctrl+Shift+J",
+        )
+        reg.register(
+            "view.today",
+            "Show Today",
+            lambda: self._on_activity_changed("today"),
+            "View",
+            "Ctrl+Shift+H",
+        )
+        reg.register(
+            "view.arduino",
+            "Show Arduino",
+            lambda: self._on_activity_changed("arduino"),
+            "View",
+            "Ctrl+Shift+B",
+        )
+        reg.register(
+            "view.command_palette",
+            "Command Palette",
+            self._show_command_palette,
+            "View",
+            "Ctrl+Shift+P",
+        )
+        reg.register(
+            "help.shortcuts",
+            "Keyboard Shortcuts",
+            self._show_shortcuts_dialog,
+            "Help",
+        )
 
         # Task commands — palette-driven entry points so users can
         # create/open/block tasks without touching the sidebar. Each
@@ -1051,10 +1123,40 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Ensure clean shutdown — session save happens in app.py after loop stops."""
-        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+
+        unsaved = self._editor_panel.unsaved_tab_names()
+        if unsaved:
+            listing = "\n".join(f"  • {name}" for name in unsaved[:10])
+            if len(unsaved) > 10:
+                listing += f"\n  … and {len(unsaved) - 10} more"
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                f"You have unsaved changes in:\n\n{listing}\n\nSave before quitting?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                self._editor_panel.save_all()
+                if self._editor_panel.unsaved_tab_names():
+                    # A save failed (the panel already showed why) or
+                    # the user cancelled a Save As — don't lose the work.
+                    event.ignore()
+                    return
 
         event.accept()
         QApplication.quit()
+
+    def _show_shortcuts_dialog(self) -> None:
+        from polyglot_ai.ui.dialogs.shortcuts_dialog import ShortcutsDialog
+
+        ShortcutsDialog(self._action_registry, self).exec()
 
     # ── Session save / restore ────────────────────────────────────
 
