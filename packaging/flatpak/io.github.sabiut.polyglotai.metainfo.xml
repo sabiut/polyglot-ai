@@ -23,6 +23,17 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.17.0" date="2026-09-07">
+      <description>
+        <p>Arduino panel fixes: board detection no longer reports
+        legacy motherboard serial ports as a connected board, an
+        unrecognised USB device now clearly asks you to pick your
+        board instead of showing a false success, two-line hints are
+        no longer clipped, and the starter tiles lead with the
+        classic Arduino blink. The app is also installable from PyPI
+        with pipx.</p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-08-31">
       <description>
         <p>Cleaner professional interface with the last emoji replaced
