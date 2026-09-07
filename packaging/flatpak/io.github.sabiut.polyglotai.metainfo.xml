@@ -23,6 +23,22 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.0" date="2026-09-08">
+      <description>
+        <p>A large reliability release. The Docker, Kubernetes and CI/CD
+        panels no longer freeze the window and their background
+        refreshes actually update the UI; failed saves, unreadable
+        files and other errors are reported instead of silently
+        ignored; closing the window prompts about unsaved changes;
+        the editor, terminal and AI options in Settings now take
+        effect; the light theme renders correctly throughout; project
+        search runs in the background; user messages can be edited and
+        resent; and subscription sign-in works without a restart.
+        Under the hood, terminal shells and AI-run commands are
+        cleaned up properly and a corrupt setting can no longer block
+        startup.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-09-07">
       <description>
         <p>Arduino panel fixes: board detection no longer reports
