@@ -452,8 +452,11 @@ class TasksPanel(QWidget):
             dlg.raise_()
             dlg.activateWindow()
             self._detail_dialog = dlg
-        except Exception:
+        except Exception as exc:
             logger.exception("tasks_panel: could not open task detail dialog")
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Couldn't open task", str(exc))
 
     def _on_card_menu(self, task_id: str, global_pos) -> None:
         if self._task_manager is None:

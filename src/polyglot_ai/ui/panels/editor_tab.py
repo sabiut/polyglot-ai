@@ -191,6 +191,10 @@ class EditorTab(QWidget):
         self._regex_btn.setToolTip("Regular expression")
         self._regex_btn.setStyleSheet(btn_css)
         row.addWidget(self._regex_btn)
+        # Re-run the search when a mode toggles — otherwise clicking
+        # "Aa" or ".*" visibly does nothing until the next Enter.
+        self._case_btn.toggled.connect(lambda _checked: self.find_next())
+        self._regex_btn.toggled.connect(lambda _checked: self.find_next())
 
         prev_btn = QPushButton("Prev")
         prev_btn.setToolTip("Find previous (Shift+Enter)")

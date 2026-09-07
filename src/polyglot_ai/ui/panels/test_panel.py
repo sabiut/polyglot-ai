@@ -976,8 +976,11 @@ class TestPanel(QWidget):
             return
         try:
             editor.open_file(full)
-        except Exception:
+        except Exception as exc:
             logger.exception("test_panel: failed to open %s in editor", full)
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Couldn't open file", f"{full.name}:\n{exc}")
 
     def _on_fix_collection_error(self) -> None:
         """Send the collection error to the chat panel for an AI fix.

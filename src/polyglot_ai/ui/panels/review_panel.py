@@ -692,8 +692,9 @@ class ReviewPanel(QWidget):
             return
         try:
             self._editor_panel.open_file_at(path, finding.line or None)
-        except Exception:
+        except Exception as exc:
             logger.exception("review_panel: failed to open %s in editor", path)
+            self._show_message(f"Couldn't open {path.name}: {exc}", tc.get("accent_error"))
 
     def _show_missing_file_tooltip(self, path: Path) -> None:
         from PyQt6.QtGui import QCursor

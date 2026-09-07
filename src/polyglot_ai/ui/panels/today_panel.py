@@ -368,8 +368,11 @@ class TodayPanel(QWidget):
             dlg.raise_()
             dlg.activateWindow()
             self._detail_dialog = dlg
-        except Exception:
+        except Exception as exc:
             logger.exception("today_panel: could not open task detail dialog")
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Couldn't open task", str(exc))
 
     def open_task(self, task_id: str) -> None:
         """Public entry point used by attention-row action buttons."""

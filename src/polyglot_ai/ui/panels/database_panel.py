@@ -328,8 +328,16 @@ class DatabasePanel(QWidget):
                     self._conn_combo.addItem(f"{name} ({db_type})")
             if self._conn_combo.count() > 0:
                 logger.info("Loaded %d saved database connections", self._conn_combo.count())
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to load saved database connections")
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "Database connections",
+                "Your saved database connections couldn't be loaded, so the "
+                f"connection list is empty:\n{exc}\n\nThe file is {self._CONFIG_PATH}.",
+            )
 
     def _on_connection_changed(self, text: str) -> None:
         if not text:

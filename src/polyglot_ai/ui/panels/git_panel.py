@@ -1298,6 +1298,8 @@ class GitPanel(QWidget):
     def _do_commit(self) -> None:
         msg = self._commit_input.text().strip()
         if not msg:
+            show_message(self, "Commit", "Enter a commit message first.", kind="warn")
+            self._commit_input.setFocus()
             return
         from polyglot_ai.core.async_utils import safe_task
 

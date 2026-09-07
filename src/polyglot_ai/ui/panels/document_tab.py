@@ -238,8 +238,11 @@ class DocumentTab(QWidget):
             printer.setOutputFileName(path)
             self._preview.document().print_(printer)
             logger.info("Exported PDF: %s", path)
-        except Exception:
+        except Exception as exc:
             logger.exception("PDF export failed")
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Export failed", f"Couldn't write the PDF:\n{exc}")
 
     def _export_html(self) -> None:
         if not self._file_path:
@@ -256,8 +259,11 @@ class DocumentTab(QWidget):
             html = self._preview.toHtml()
             Path(path).write_text(html, encoding="utf-8")
             logger.info("Exported HTML: %s", path)
-        except Exception:
+        except Exception as exc:
             logger.exception("HTML export failed")
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Export failed", f"Couldn't write the HTML file:\n{exc}")
 
     # File operations (same interface as EditorTab)
 

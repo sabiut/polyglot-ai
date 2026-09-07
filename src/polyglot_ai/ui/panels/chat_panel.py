@@ -1415,8 +1415,11 @@ class ChatPanel(QWidget):
                 try:
                     fc = (Path(project_root) / mf).read_text(encoding="utf-8", errors="replace")
                     content += f"\n\n--- {mf} ---\n```\n{fc}\n```"
-                except Exception:
-                    pass
+                except OSError as exc:
+                    # Don't silently send the prompt without the file —
+                    # the model would answer as if it had seen it.
+                    content += f"\n\n--- {mf} --- (could not be read: {exc})"
+                    self._add_system_message(f"Couldn't attach @{mf}: {exc}")
         attachment_info = []
         message_attachments: list[Attachment] = []
 

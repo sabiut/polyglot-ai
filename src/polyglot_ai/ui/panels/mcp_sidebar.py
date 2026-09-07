@@ -179,7 +179,11 @@ class MCPSidebar(QWidget):
 
     def _on_connect_all(self) -> None:
         if self._mcp_client:
-            safe_task(self._mcp_client.connect_all(), name="mcp_connect_all")
+            safe_task(
+                self._mcp_client.connect_all(),
+                name="mcp_connect_all",
+                on_error=lambda exc: self._report_failure("Connect all", exc),
+            )
             self._refresh_timer.start()
             QTimer.singleShot(10000, self._refresh_timer.stop)
 
@@ -188,11 +192,32 @@ class MCPSidebar(QWidget):
             return
         connected = set(self._mcp_client.connected_servers)
         if name in connected:
-            safe_task(self._mcp_client.disconnect(name), name=f"mcp_disconnect_{name}")
+            safe_task(
+                self._mcp_client.disconnect(name),
+                name=f"mcp_disconnect_{name}",
+                on_error=lambda exc: self._report_failure(f"Disconnect {name}", exc),
+            )
         else:
-            safe_task(self._mcp_client.connect(name), name=f"mcp_connect_{name}")
+            safe_task(
+                self._mcp_client.connect(name),
+                name=f"mcp_connect_{name}",
+                on_error=lambda exc: self._report_failure(f"Connect {name}", exc),
+            )
         self._refresh_timer.start()
         QTimer.singleShot(6000, self._refresh_timer.stop)
+
+    def _report_failure(self, what: str, exc: Exception) -> None:
+        # Before this, a server that failed to start just flipped its
+        # toggle back after the poll timer, with the reason only in
+        # the log — users assumed the click hadn't registered.
+        from PyQt6.QtWidgets import QMessageBox
+
+        self.refresh()
+        QMessageBox.warning(
+            self,
+            f"{what} failed",
+            f"{exc}\n\nCheck the server's command and arguments in Settings → MCP.",
+        )
 
     def _toggle_expand(self, name: str) -> None:
         if name in self._expanded:
