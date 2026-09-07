@@ -409,7 +409,7 @@ def main() -> None:
     window.editor_panel.set_ai_services(provider_manager, settings)
 
     wire_plan_events(event_bus, window.plan_panel)
-    wire_changeset_events(event_bus, window.changeset_panel)
+    wire_changeset_events(event_bus, window.changeset_panel, window)
     wire_project_events(
         event_bus,
         window,

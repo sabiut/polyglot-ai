@@ -500,6 +500,11 @@ class GitPanel(QWidget):
         self._event_bus = event_bus
         event_bus.subscribe("file:saved", lambda **kw: self._refresh())
         event_bus.subscribe("file:created", lambda **kw: self._refresh())
+        # AI tool writes and deletes go through file_ops, which emits
+        # these two — without them the dirty list only caught the
+        # user's own saves.
+        event_bus.subscribe("file:changed", lambda **kw: self._refresh())
+        event_bus.subscribe("file:deleted", lambda **kw: self._refresh())
         # Also listen for project_refreshed (fired by file_explorer when
         # its root is set through any path) so we catch projects opened
         # via drag-drop / command palette / future entry points that

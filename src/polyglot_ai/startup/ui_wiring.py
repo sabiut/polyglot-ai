@@ -53,8 +53,32 @@ def wire_plan_events(event_bus, plan_panel):
     event_bus.subscribe("plan:done", _on_plan_step_update)
 
 
-def wire_changeset_events(event_bus, changeset):
-    """Subscribe Changes panel to file change/create events."""
+def wire_changeset_events(event_bus, changeset, window=None):
+    """Subscribe Changes panel to file change/create events, and fan its
+    own "I wrote this file" signals back out to the rest of the app."""
+    from polyglot_ai.constants import EVT_FILE_SAVED
+
+    def _on_written(rel_path: str) -> None:
+        # Apply / partial apply / rollback all rewrite the file on disk
+        # behind the editor's back. Nothing listened to these signals
+        # before, so an open tab kept showing the pre-change text and
+        # the git panel stayed stale until the next manual save.
+        root = changeset.project_root
+        if not root or not rel_path:
+            return
+        abs_path = Path(root) / rel_path
+        if window is not None:
+            try:
+                window.editor_panel.reload_from_disk(abs_path)
+            except Exception:
+                logger.debug("editor reload after changeset write failed", exc_info=True)
+        # file:saved is what the git panel, test panel and indexer
+        # already refresh on — a changeset write is a save for their
+        # purposes.
+        event_bus.emit(EVT_FILE_SAVED, path=str(abs_path))
+
+    changeset.change_applied.connect(_on_written)
+    changeset.change_rolledback.connect(_on_written)
 
     def _on_file_changed(path: str = "", **kwargs):
         if not changeset.project_root or not path:
@@ -185,6 +209,30 @@ def wire_project_events(
         logger.info("Tools enabled for project: %s", path)
 
     event_bus.subscribe("project:opened", _on_project_opened)
+
+    # Keep the search index current. It was built once on project
+    # open and never touched again, so context/RAG lookups saw a
+    # snapshot that went stale with the first edit.
+    if indexer is not None:
+        from polyglot_ai.constants import (
+            EVT_FILE_CHANGED,
+            EVT_FILE_CREATED,
+            EVT_FILE_DELETED,
+            EVT_FILE_SAVED,
+        )
+        from polyglot_ai.core.async_utils import run_blocking
+
+        def _reindex(path: str = "", **kwargs):
+            if path:
+                safe_task(run_blocking(indexer.update_file, Path(path)), name="reindex_file")
+
+        def _unindex(path: str = "", **kwargs):
+            if path:
+                safe_task(run_blocking(indexer.remove_file, Path(path)), name="unindex_file")
+
+        for evt in (EVT_FILE_SAVED, EVT_FILE_CREATED, EVT_FILE_CHANGED):
+            event_bus.subscribe(evt, _reindex)
+        event_bus.subscribe(EVT_FILE_DELETED, _unindex)
 
 
 def wire_settings_dialog(

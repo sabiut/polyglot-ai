@@ -237,6 +237,40 @@ class EditorPanel(QTabWidget):
         self._report_save_failures([tab])
         return False
 
+    def reload_from_disk(self, path: Path | str) -> bool:
+        """Re-read ``path`` into its open tab, if one exists and has no unsaved edits.
+
+        Used when something other than the editor writes the file (an
+        applied AI change, a rollback) so the tab doesn't keep showing
+        stale text. Returns True when a tab was reloaded. A tab with
+        unsaved edits is left alone — clobbering the user's work is
+        worse than a stale view.
+        """
+        idx = self._open_tabs.get(str(Path(path).resolve()))
+        if idx is None:
+            return False
+        tab = self.widget(idx)
+        if not hasattr(tab, "load") or getattr(tab, "is_modified", False):
+            return False
+        file_path = getattr(tab, "file_path", None)
+        if not file_path or not file_path.exists():
+            return False
+
+        editor = getattr(tab, "editor", None)
+        cursor = editor.getCursorPosition() if editor is not None else None
+        first_line = editor.firstVisibleLine() if editor is not None else None
+        try:
+            tab.load(file_path)
+        except OSError as exc:
+            logger.warning("Couldn't reload %s: %s", file_path, exc)
+            return False
+        if editor is not None and cursor is not None:
+            line, col = cursor
+            editor.setCursorPosition(min(line, max(editor.lines() - 1, 0)), col)
+            editor.setFirstVisibleLine(first_line)
+        self._update_tab_title(idx)
+        return True
+
     def unsaved_tab_names(self) -> list[str]:
         """Display names of tabs with unsaved changes (for the close prompt)."""
         names = []

@@ -119,10 +119,15 @@ class ProjectIndexer:
         return scores[:top_k]
 
     def update_file(self, path: Path) -> None:
-        """Re-index a single file."""
+        """Re-index a single file. Paths outside the project are ignored."""
         if not self._project_root:
             return
-        rel = str(path.relative_to(self._project_root))
+        try:
+            rel = str(path.relative_to(self._project_root))
+        except ValueError:
+            return
+        if path.is_dir():
+            return
         try:
             content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -136,11 +141,20 @@ class ProjectIndexer:
         self._rebuild_idf()
 
     def remove_file(self, path: Path) -> None:
+        """Drop a file — or, for a directory, everything under it — from the index."""
         if not self._project_root:
             return
-        rel = str(path.relative_to(self._project_root))
-        self._tf.pop(rel, None)
-        self._files.discard(rel)
+        try:
+            rel = str(path.relative_to(self._project_root))
+        except ValueError:
+            return
+        prefix = rel.rstrip("/") + "/"
+        doomed = [r for r in self._files if r == rel or r.startswith(prefix)]
+        if not doomed:
+            return
+        for r in doomed:
+            self._tf.pop(r, None)
+            self._files.discard(r)
         self._rebuild_idf()
 
     def _rebuild_idf(self) -> None:
