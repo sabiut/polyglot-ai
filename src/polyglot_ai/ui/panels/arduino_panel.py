@@ -694,6 +694,13 @@ class ArduinoPanel(QWidget):
             "background: transparent; padding: 6px 4px;"
         )
         self._detection_label.setWordWrap(True)
+        # Default QLabel vertical policy is Preferred, which lets the
+        # column squeeze the label below its size hint — with the
+        # two-line hint texts, the second line was silently clipped.
+        # Minimum makes the hint a floor so the card grows instead.
+        self._detection_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
         det_row.addWidget(self._detection_label, 1)
         refresh_btn = QPushButton("↻  Look again")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
