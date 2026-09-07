@@ -337,11 +337,6 @@ def task_kind_color(kind) -> str:
     return get(_TASK_KIND_TOKENS.get(name, "text_tertiary"))
 
 
-def get_for(theme: str, token: str) -> str:
-    """Return the hex value for *token* in a specific theme."""
-    return _THEMES[theme][token]
-
-
 # ── Screen scale factor ──────────────────────────────────────────
 # Computed once from the primary screen's logical DPI.  All layout
 # constants below are the "reference" values for a 96-DPI / 1× display.

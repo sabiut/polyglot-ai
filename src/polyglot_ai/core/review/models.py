@@ -44,36 +44,6 @@ class DiffHunk:
     header: str = ""
     lines: list[str] = field(default_factory=list)
 
-    @property
-    def added_lines(self) -> list[tuple[int, str]]:
-        """Return (line_number, content) for added lines."""
-        result = []
-        line_num = self.new_start
-        for line in self.lines:
-            if line.startswith("+"):
-                result.append((line_num, line[1:]))
-                line_num += 1
-            elif line.startswith("-"):
-                pass  # deleted line, doesn't increment new line number
-            else:
-                line_num += 1
-        return result
-
-    @property
-    def removed_lines(self) -> list[tuple[int, str]]:
-        """Return (line_number, content) for removed lines."""
-        result = []
-        line_num = self.old_start
-        for line in self.lines:
-            if line.startswith("-"):
-                result.append((line_num, line[1:]))
-                line_num += 1
-            elif line.startswith("+"):
-                pass
-            else:
-                line_num += 1
-        return result
-
 
 @dataclass
 class DiffFile:
@@ -85,10 +55,6 @@ class DiffFile:
     hunks: list[DiffHunk] = field(default_factory=list)
     additions: int = 0
     deletions: int = 0
-
-    @property
-    def total_changes(self) -> int:
-        return self.additions + self.deletions
 
 
 @dataclass
@@ -145,13 +111,6 @@ class ReviewResult:
         grouped: dict[str, list[ReviewFinding]] = {}
         for f in self.findings:
             grouped.setdefault(f.severity.value, []).append(f)
-        return grouped
-
-    @property
-    def by_file(self) -> dict[str, list[ReviewFinding]]:
-        grouped: dict[str, list[ReviewFinding]] = {}
-        for f in self.findings:
-            grouped.setdefault(f.file, []).append(f)
         return grouped
 
 

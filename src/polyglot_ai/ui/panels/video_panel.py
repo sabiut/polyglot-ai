@@ -1062,11 +1062,6 @@ class VideoPanel(QWidget):
         prefix = {"ok": "✓ ", "fail": "✗ ", "warn": "! ", "info": "› "}.get(kind, "› ")
         self._status.appendPlainText(f"{prefix}{message}")
 
-    @property
-    def has_ffmpeg(self) -> bool:
-        """Surface ffmpeg availability to the host window's title."""
-        return find_executable("ffmpeg") is not None
-
 
 # ── Top-level window wrapper ───────────────────────────────────────
 

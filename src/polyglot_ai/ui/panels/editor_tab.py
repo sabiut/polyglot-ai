@@ -642,10 +642,6 @@ class EditorTab(QWidget):
             logger.exception("Failed to save file: %s", self._file_path)
             return False
 
-    def get_cursor_position(self) -> tuple[int, int]:
-        line, col = self._editor.getCursorPosition()
-        return line + 1, col + 1  # 1-indexed for display
-
     # ── Test coverage gutter ──────────────────────────────────────
     #
     # Public surface:

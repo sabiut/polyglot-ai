@@ -27,9 +27,7 @@ DEFAULTS = {
     "session.open_tabs": [],
     "session.active_tab_index": 0,
     "session.splitter_sizes": {},
-    "session.active_conversation_id": None,
     "session.window_geometry": {},
-    "session.terminal_cwd": "",
     # AI features
     "editor.ai_completions": True,
     "ai.auto_context": True,

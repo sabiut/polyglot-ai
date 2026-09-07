@@ -41,6 +41,3 @@ class ProjectManager:
             logger.info("Closed project: %s", self._root)
             self._root = None
             self._event_bus.emit(EVT_PROJECT_CLOSED)
-
-    def is_open(self) -> bool:
-        return self._root is not None

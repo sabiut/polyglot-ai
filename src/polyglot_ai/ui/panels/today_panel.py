@@ -447,19 +447,6 @@ class TodayPanel(QWidget):
             )
         return rows
 
-    def _legacy_refresh_attention_unused(self) -> None:
-        """Placeholder replaced by the new entry point above."""
-        return
-
-        cwd = str(self._project_root)
-        thread = threading.Thread(
-            target=self._gh_attention_worker,
-            args=(cwd,),
-            daemon=True,
-            name="today_attention",
-        )
-        thread.start()
-
     def _gh_attention_worker(self, cwd: str) -> None:
         """Background worker — runs gh queries and emits results.
 

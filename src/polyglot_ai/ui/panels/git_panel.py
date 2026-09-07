@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon
+from polyglot_ai.constants import EVT_GIT_COMMITTED
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels.git_dialogs import (
     prompt_branch_name,
@@ -1321,7 +1322,7 @@ class GitPanel(QWidget):
             self._commit_input.clear()
             self._refresh()
             if self._event_bus:
-                self._event_bus.emit("git:committed", message=message)
+                self._event_bus.emit(EVT_GIT_COMMITTED, message=message)
 
             # Record the commit on the active task (if any) so the
             # task timeline reflects the work that just shipped.

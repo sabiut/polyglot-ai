@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
-from PyQt6.QtGui import QColor, QMouseEvent
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from polyglot_ai.core.notifications import Notification, NotificationLevel
@@ -274,8 +274,3 @@ class ToastManager(QObject):
             # it as a no-op rather than a fatal crash.
             return False
         return super().eventFilter(obj, event)
-
-
-def severity_to_qcolor(level: NotificationLevel) -> QColor:
-    """Public helper for callers that want the accent colour directly."""
-    return QColor(tc.get(_ACCENT[level]))

@@ -134,15 +134,3 @@ class DiffViewer(QWidget):
                     cursor.setPosition(block.position())
                     cursor.select(QTextCursor.SelectionType.LineUnderCursor)
                     cursor.setCharFormat(fmt_added)
-
-    def set_command_preview(self, command: str, label: str = "Command to execute:") -> None:
-        """Display a command (or any action body) for approval.
-
-        ``label`` is shown in the left pane and ``command`` in the
-        right. The default label is kept for backwards compatibility
-        with shell-style approvals; pass a tool-specific phrase
-        ("File to delete:", "Directory to create:", etc.) for other
-        tools so the dialog framing matches the action.
-        """
-        self._left_editor.setPlainText(label)
-        self._right_editor.setPlainText(command)

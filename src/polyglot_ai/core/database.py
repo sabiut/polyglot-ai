@@ -265,18 +265,6 @@ class Database:
         await self._conn.commit()
         return cursor
 
-    async def execute_many(self, statements: list[tuple[str, tuple]]) -> None:
-        """Execute multiple trusted statements in a single transaction."""
-        if self._conn is None:
-            raise RuntimeError("Database not initialised — call await db.init() first")
-        try:
-            for sql, params in statements:
-                await self._conn.execute(sql, params)
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            raise
-
     async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
         """Fetch one row from a trusted SQL query."""
         if self._conn is None:
@@ -567,17 +555,6 @@ class Database:
             (name, content, category, 1 if is_builtin else 0),
         )
         return cursor.lastrowid
-
-    async def update_prompt_template(
-        self,
-        template_id: int,
-        name: str,
-        content: str,
-    ) -> None:
-        await self.execute(
-            "UPDATE prompt_templates SET name = ?, content = ?, updated_at = datetime('now') WHERE id = ?",
-            (name, content, template_id),
-        )
 
     async def delete_prompt_template(self, template_id: int) -> None:
         await self.execute(

@@ -37,9 +37,6 @@ class ActionRegistry:
             shortcut=shortcut,
         )
 
-    def unregister(self, action_id: str) -> None:
-        self._actions.pop(action_id, None)
-
     def get_all(self) -> list[Action]:
         return list(self._actions.values())
 

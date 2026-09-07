@@ -81,12 +81,28 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
     # OpenAI OAuth (subscription login)
     from polyglot_ai.core.ai.openai_oauth import OpenAIOAuthClient
 
-    openai_oauth = OpenAIOAuthClient(event_bus)
-    if openai_oauth.is_authenticated:
-        if not provider_manager.get_provider("openai_oauth"):
-            provider_manager.register(openai_oauth)
-    else:
-        provider_manager.unregister("openai_oauth")
+    def _sync_oauth(name: str, fresh_client) -> None:
+        """Register/unregister an OAuth provider, refreshing a live one.
+
+        The settings dialog re-runs this after a login. If the provider
+        was already registered, the *existing* instance kept the old
+        (expired or missing) tokens and the user saw "signed in ✓" but
+        every request still failed until restart. Reload its tokens
+        from disk instead of leaving it stale.
+        """
+        existing = provider_manager.get_provider(name)
+        if existing is not None and hasattr(existing, "reload_tokens"):
+            existing.reload_tokens()
+            if not existing.is_authenticated:
+                provider_manager.unregister(name)
+            return
+        if fresh_client.is_authenticated:
+            provider_manager.register(fresh_client)
+            logger.info("%s registered (subscription auth detected)", name)
+        else:
+            provider_manager.unregister(name)
+
+    _sync_oauth("openai_oauth", OpenAIOAuthClient(event_bus))
 
     # Claude OAuth (subscription login).
     #
@@ -107,11 +123,4 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
     # why the model dropdown's selection is unusable.
     from polyglot_ai.core.ai.claude_oauth import ClaudeOAuthClient
 
-    claude_oauth = ClaudeOAuthClient(event_bus)
-    if claude_oauth.is_authenticated:
-        if not provider_manager.get_provider("claude_oauth"):
-            provider_manager.register(claude_oauth)
-            logger.info("Claude OAuth registered (subscription auth detected)")
-    else:
-        provider_manager.unregister("claude_oauth")
-        logger.debug("Claude OAuth not authenticated — skipping registration")
+    _sync_oauth("claude_oauth", ClaudeOAuthClient(event_bus))

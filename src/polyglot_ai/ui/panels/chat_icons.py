@@ -196,28 +196,6 @@ def make_menu_icon(icon_type: str) -> QIcon:
     return QIcon(pixmap)
 
 
-def create_plus_png() -> str:
-    """Write a white plus PNG to a temp dir and return its path.
-
-    Used by stylesheets that need a file URL (not a QIcon).
-    """
-    cache_dir = tempfile.mkdtemp(prefix="codex_icons_")
-    path = f"{cache_dir}/plus.png"
-    pixmap = QPixmap(16, 16)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor(tc.get("text_heading")))
-    pen.setWidthF(2.0)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(pen)
-    painter.drawLine(8, 3, 8, 13)
-    painter.drawLine(3, 8, 13, 8)
-    painter.end()
-    pixmap.save(path, "PNG")
-    return path
-
-
 def create_arrow_png() -> str:
     """Write a white down-chevron PNG to a temp dir and return its path."""
     cache_dir = tempfile.mkdtemp(prefix="codex_icons_")

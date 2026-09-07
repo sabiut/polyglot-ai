@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from polyglot_ai.constants import APP_NAME, APP_VERSION
+from polyglot_ai.constants import APP_NAME, APP_VERSION, EVT_INDEX_READY
 from polyglot_ai.core.async_utils import safe_task
 from polyglot_ai.startup.services import register_ai_providers
 
@@ -187,7 +187,7 @@ def wire_project_events(
                 try:
                     await indexer.build_index(project_path)
                     window.statusBar().showMessage(f"Project indexed: {path}")
-                    event_bus.emit("index:ready")
+                    event_bus.emit(EVT_INDEX_READY)
                 except Exception as ex:
                     logger.warning("Indexing failed: %s", ex)
 

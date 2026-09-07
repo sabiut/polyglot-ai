@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QPoint, Qt, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
@@ -273,7 +272,6 @@ class ChatPanel(QWidget):
         self._current_plan = None
         self._onboarding_shown = False
         self._drop_overlay: QLabel | None = None
-        self._github_btn: QPushButton | None = None  # Initialized if GitHub connected
         # Task-aware state — populated when set_event_bus() runs after
         # init_task_manager() has bound the global manager.
         self._task_manager = None
@@ -1177,41 +1175,6 @@ class ChatPanel(QWidget):
             window = self.window()
             if hasattr(window, "_plan_panel"):
                 window._plan_panel.update_plan()
-
-    def _connect_github(self) -> None:
-        """Open GitHub connection consent dialog."""
-        from polyglot_ai.ui.dialogs.github_connect_dialog import GitHubConnectDialog
-
-        dialog = GitHubConnectDialog(self)
-        if dialog.exec():
-            token = dialog.get_token()
-            if token:
-                window = self.window()
-                if hasattr(window, "_mcp_client"):
-                    try:
-                        window._mcp_client.install_from_catalog(
-                            "github", {"GITHUB_PERSONAL_ACCESS_TOKEN": token}
-                        )
-                        from polyglot_ai.core.async_utils import safe_task
-
-                        safe_task(window._mcp_client.connect("github"), name="mcp_connect_github")
-                        self._github_btn.setText("⌥ GitHub ✓")
-                        self._github_btn.setStyleSheet(f"""
-                            QPushButton {{
-                                background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
-                                border: 1px solid {tc.get("border_feedback_pos")}; border-radius: {tc.RADIUS_LG}px;
-                                padding: 4px 12px;
-                                font-family: -apple-system, 'Segoe UI', sans-serif;
-                            }}
-                            QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
-                        """)
-                        self._add_system_message(
-                            "GitHub connected! The AI can now access your repositories."
-                        )
-                    except Exception as e:
-                        self._add_system_message(f"Failed to connect GitHub: {e}")
-                else:
-                    self._add_system_message("MCP client not available. Open a project first.")
 
     def _start_stream_task(self) -> None:
         from polyglot_ai.core.async_utils import safe_task
@@ -3491,24 +3454,6 @@ class ChatPanel(QWidget):
 
     def set_mcp_client(self, mcp_client) -> None:
         self._mcp_client = mcp_client
-        # Check if GitHub is already connected. The button is optional
-        # (never built in the current layout) — without the guard this
-        # crashed at startup for anyone with the GitHub MCP server on.
-        if mcp_client and "github" in mcp_client.connected_servers and self._github_btn:
-            self._github_btn.setText("⌥ GitHub ✓")
-            self._github_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {tc.get("bg_feedback_pos")}; color: {tc.get("accent_success_muted")}; font-size: {tc.FONT_MD}px;
-                    border: 1px solid {tc.get("border_feedback_pos")}; border-radius: {tc.RADIUS_LG}px;
-                    padding: 4px 12px;
-                    font-family: -apple-system, 'Segoe UI', sans-serif;
-                }}
-                QPushButton:hover {{ background: {tc.get("bg_feedback_pos_hover")}; }}
-            """)
-
-    @property
-    def model_combo(self) -> QComboBox:
-        return self._model_combo
 
     @property
     def send_button(self) -> QPushButton:

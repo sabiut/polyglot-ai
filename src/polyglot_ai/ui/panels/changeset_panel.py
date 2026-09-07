@@ -366,19 +366,11 @@ class ChangesetPanel(QWidget):
                     pass
             self.add_change(path, original, proposed)
 
-    def is_tracked(self, path: str) -> bool:
-        """Check if a file path is tracked in the changeset."""
-        return path in self._changes
-
     def clear(self) -> None:
         """Remove all changes."""
         self._changes.clear()
         self._refresh_list()
         self._show_empty_state()
-
-    @property
-    def pending_count(self) -> int:
-        return sum(1 for c in self._changes.values() if c.status == "pending")
 
     # ── Internal ─────────────────────────────────────────────────
 

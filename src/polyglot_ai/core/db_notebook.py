@@ -178,13 +178,6 @@ class DBNotebookStore:
             for r in rows
         ]
 
-    def clear_history(self, connection: str) -> None:
-        try:
-            with self._conn() as c:
-                c.execute("DELETE FROM history WHERE connection = ?", (connection,))
-        except sqlite3.Error as e:
-            logger.warning("db_notebook: could not clear history: %s", e)
-
     # ── Snippets ────────────────────────────────────────────────────
 
     def save_snippet(self, connection: str, name: str, sql: str) -> tuple[bool, str]:

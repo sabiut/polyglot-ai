@@ -186,6 +186,21 @@ class ChatMessage(QWidget):
                 self._action_bar.addStretch()
                 self._action_widget = action_widget
                 content_col.addWidget(action_widget)
+            elif role == "user":
+                # Edit & resend. The panel side (``on_edit`` →
+                # ``_edit_and_resend``) has existed all along; the
+                # button that triggers it was never built.
+                action_widget = QWidget()
+                action_widget.setStyleSheet("background: transparent;")
+                self._action_bar = QHBoxLayout(action_widget)
+                self._action_bar.setContentsMargins(0, 2, 0, 0)
+                self._action_bar.setSpacing(1)
+                self._action_bar.addStretch()
+                edit_btn = self._make_icon_btn("edit", "Edit & resend", self._on_edit)
+                edit_btn.setIcon(self._create_edit_icon())
+                self._action_bar.addWidget(edit_btn)
+                self._action_widget = action_widget
+                content_col.addWidget(action_widget)
 
             outer.addLayout(content_col, stretch=1)
 
@@ -215,15 +230,6 @@ class ChatMessage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             QDesktopServices.openUrl(url)
-
-    def _role_display_name(self) -> str:
-        names = {
-            "user": "You",
-            "assistant": "AI Assistant",
-            "tool": "Tool",
-            "system": "System",
-        }
-        return names.get(self._role, self._role.capitalize())
 
     def _set_content(self, content: str) -> None:
         html = self._markdown_to_html(content)

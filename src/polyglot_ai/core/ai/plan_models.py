@@ -84,14 +84,6 @@ class Plan:
         return done / len(self.steps)
 
     @property
-    def current_step_index(self) -> int | None:
-        """Index of the currently executing step, or None."""
-        for s in self.steps:
-            if s.status == PlanStepStatus.IN_PROGRESS:
-                return s.index
-        return None
-
-    @property
     def completed_count(self) -> int:
         return sum(1 for s in self.steps if s.status == PlanStepStatus.COMPLETED)
 

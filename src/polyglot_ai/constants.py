@@ -19,13 +19,11 @@ LEGACY_CONFIG_DIR = Path.home() / ".config" / "codex-desktop"
 COMMAND_TIMEOUT = 30  # seconds
 
 # Event names — AI
-EVT_AI_SEND_MESSAGE = "ai:send_message"
 EVT_AI_STREAM_CHUNK = "ai:stream_chunk"
 EVT_AI_STREAM_DONE = "ai:stream_done"
 EVT_AI_ERROR = "ai:error"
 
 # Event names — Files
-EVT_FILE_OPENED = "file:opened"
 EVT_FILE_SAVED = "file:saved"
 EVT_FILE_CHANGED = "file:changed"
 EVT_FILE_CREATED = "file:created"
@@ -42,15 +40,12 @@ EVT_TERMINAL_EXITED = "terminal:exited"
 # Event names — Approval
 
 # Event names — Git
-EVT_GIT_REFRESH = "git:refresh"
 EVT_GIT_COMMITTED = "git:committed"
 
 # Event names — Conversation
-EVT_CONVERSATION_FORKED = "conversation:forked"
 
 # Event names — Indexing
 EVT_INDEX_READY = "index:ready"
-EVT_INDEX_UPDATED = "index:updated"
 
 # Model cost estimates (per 1K tokens). Kept conservative — actual
 # pricing is set per-provider on their dashboard and may change; the

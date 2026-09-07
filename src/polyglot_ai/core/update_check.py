@@ -26,7 +26,6 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
 
 from polyglot_ai.constants import DATA_DIR
 
@@ -149,8 +148,3 @@ def _save_cache_timestamp() -> None:
         # Read-only filesystem (Flatpak, immutable distro) — skip
         # cache, will re-check next launch. Not a bug.
         logger.debug("update_check: couldn't persist cache timestamp", exc_info=True)
-
-
-def is_updates_path(path: Path) -> bool:
-    """Test helper — exposed for tests that want to clear the cache."""
-    return path == _CACHE_PATH
