@@ -843,12 +843,17 @@ class ChatPanel(QWidget):
                 desc = caps.get("desc", "")
                 full_id = f"{provider_data_map[provider_display]}:{m}"
                 self._model_combo.addItemWithDesc(m, desc, full_id)
-        # Pre-select the global default. Falls through silently if the
-        # default isn't in the dropdown (e.g. user removed the OpenAI
-        # provider) — the combo just stays on its first entry.
-        default_full_id = "openai:gpt-5.5"
+        # Pre-select the user's default (Settings → AI). The setting may
+        # be a bare model name ("gpt-5.5") or provider-qualified
+        # ("openai:gpt-5.5"); accept either. Falls through silently if
+        # the default isn't in the dropdown (e.g. user removed the
+        # OpenAI provider) — the combo just stays on its first entry.
+        default = str(self._setting("ai.default_model") or "openai:gpt-5.5").strip()
         for i in range(self._model_combo.count()):
-            if self._model_combo.itemData(i) == default_full_id:
+            full_id = self._model_combo.itemData(i)
+            if not full_id:
+                continue
+            if full_id == default or full_id.split(":", 1)[-1] == default:
                 self._model_combo.setCurrentIndex(i)
                 break
 
@@ -1529,6 +1534,10 @@ class ChatPanel(QWidget):
         self._current_conversation.model = full_id
 
         system_prompt = None
+        # Settings → AI → System Prompt: appended to the project-aware
+        # prompt, or to the general-assistant default when no project
+        # is open. Was saved by the dialog but never read until now.
+        custom_prompt = str(self._setting("ai.system_prompt") or "").strip()
         if self._context_builder and self._context_builder._project_root:
             # Offload to thread pool — both builders walk the
             # filesystem and read source files, which can block the Qt
@@ -1547,10 +1556,12 @@ class ChatPanel(QWidget):
                 # (budgeted, secret-scanned). Falls back to the plain
                 # prompt internally when the index isn't ready.
                 system_prompt = await run_blocking(
-                    self._context_builder.build_augmented_prompt, user_text
+                    self._context_builder.build_augmented_prompt, user_text, custom_prompt
                 )
             else:
-                system_prompt = await run_blocking(self._context_builder.build_system_prompt)
+                system_prompt = await run_blocking(
+                    self._context_builder.build_system_prompt, custom_prompt
+                )
         if not system_prompt:
             system_prompt = (
                 "You are Polyglot AI, a helpful general-purpose assistant. "
@@ -1559,6 +1570,8 @@ class ChatPanel(QWidget):
                 "use the web_search tool. For general knowledge questions, "
                 "answer directly without using tools."
             )
+            if custom_prompt:
+                system_prompt += "\n\n" + custom_prompt
 
         # Plan mode: instruct AI to use create_plan tool
         if self._plan_mode:
@@ -1623,6 +1636,7 @@ class ChatPanel(QWidget):
                 model=model_id,
                 tools=self._tools,
                 system_prompt=system_prompt,
+                **self._generation_params(),
             ):
                 # Replace thinking indicator with actual message on first content
                 if not first_token_received and (chunk.delta_content or chunk.tool_calls):
@@ -2105,6 +2119,7 @@ class ChatPanel(QWidget):
                 model=model_id,
                 tools=self._tools,
                 system_prompt=system_prompt,
+                **self._generation_params(),
             ):
                 if chunk.delta_content:
                     full_content += chunk.delta_content
@@ -3234,6 +3249,33 @@ class ChatPanel(QWidget):
 
     def set_database(self, db: Database) -> None:
         self._db = db
+
+    def _setting(self, key: str):
+        """Read one app setting via the main window's SettingsManager.
+
+        Headless tests and detached panels have no window settings and
+        get the DEFAULTS value.
+        """
+        from polyglot_ai.core.settings import DEFAULTS
+
+        settings = getattr(self.window(), "_settings", None)
+        if settings is None:
+            return DEFAULTS.get(key)
+        value = settings.get(key)
+        return DEFAULTS.get(key) if value is None else value
+
+    def _generation_params(self) -> dict:
+        """``temperature`` / ``max_tokens`` from Settings → AI, sanitised."""
+        params = {}
+        try:
+            params["temperature"] = float(self._setting("ai.temperature"))
+        except (TypeError, ValueError):
+            pass
+        try:
+            params["max_tokens"] = max(1, int(self._setting("ai.max_tokens")))
+        except (TypeError, ValueError):
+            pass
+        return params
 
     def _auto_context_enabled(self) -> bool:
         """Read ``ai.auto_context`` from the app settings.

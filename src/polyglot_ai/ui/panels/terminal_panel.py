@@ -1002,6 +1002,13 @@ class TerminalPanel(QWidget):
             return None
         return self._emulator.get_all_text()
 
+    def set_font_size(self, size) -> None:
+        """Apply Settings → Terminal → Font size (Ctrl+= / Ctrl+- still zoom from here)."""
+        try:
+            self._terminal_widget._set_font_size(int(size))
+        except (TypeError, ValueError):
+            pass
+
     def start_terminal(
         self,
         event_bus: EventBus,

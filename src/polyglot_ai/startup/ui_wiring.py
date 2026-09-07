@@ -181,6 +181,7 @@ def wire_project_events(
             terminal.start_terminal(
                 event_bus, shell=settings.get("terminal.shell"), cwd=project_path
             )
+            terminal.set_font_size(settings.get("terminal.font_size"))
         logger.info("Tools enabled for project: %s", path)
 
     event_bus.subscribe("project:opened", _on_project_opened)
@@ -201,6 +202,10 @@ def wire_settings_dialog(
             chat.set_provider_manager(provider_manager)
             safe_task(chat.populate_models(), name="populate_models")
             theme_manager.apply_theme(settings.get("theme"))
+            # Editor and terminal preferences apply to what's already
+            # open — no need to reopen files or restart the shell.
+            window.editor_panel.apply_settings()
+            window.terminal_panel.set_font_size(settings.get("terminal.font_size"))
 
     window._action_settings.triggered.connect(open_settings)
     window._action_about.triggered.connect(lambda: AboutDialog(window).exec())

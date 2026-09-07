@@ -437,6 +437,7 @@ def main() -> None:
     # Start terminal
     terminal = window.terminal_panel
     terminal.start_terminal(event_bus, shell=settings.get("terminal.shell"))
+    terminal.set_font_size(settings.get("terminal.font_size"))
 
     # Show window
     window.show()

@@ -33,7 +33,7 @@ class _FakeProvider:
         self._tool_name = tool_name
         self.followup_calls = 0
 
-    async def stream_chat(self, *, messages, model, tools=None, system_prompt=None):
+    async def stream_chat(self, *, messages, model, tools=None, system_prompt=None, **kwargs):
         # First call: emit a single tool call and NO text (the bug's
         # trigger). Subsequent (follow-up) calls: nothing — but the test
         # cancels before we get here.

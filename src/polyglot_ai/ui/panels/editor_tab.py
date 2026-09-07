@@ -306,13 +306,32 @@ class EditorTab(QWidget):
             self._editor.endUndoAction()
         self._find_status.setText(f"Replaced {count}")
 
+    def _editor_font(self) -> QFont:
+        """The user's editor font (Settings → Editor), or the Monospace 11 default."""
+        family, size = "Monospace", 11
+        if self._settings is not None:
+            family = str(self._settings.get("editor.font_family") or family)
+            try:
+                size = int(self._settings.get("editor.font_size") or size)
+            except (TypeError, ValueError):
+                pass
+        font = QFont(family, size)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        return font
+
+    def _tab_width(self) -> int:
+        if self._settings is not None:
+            try:
+                return max(1, int(self._settings.get("editor.tab_size") or 4))
+            except (TypeError, ValueError):
+                pass
+        return 4
+
     def _setup_editor(self) -> None:
         editor = self._editor
 
         # Font
-        font = QFont("Monospace", 11)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        editor.setFont(font)
+        editor.setFont(self._editor_font())
 
         # Line numbers (margin 0)
         editor.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
@@ -343,7 +362,7 @@ class EditorTab(QWidget):
         # Indentation
         editor.setAutoIndent(True)
         editor.setIndentationsUseTabs(False)
-        editor.setTabWidth(4)
+        editor.setTabWidth(self._tab_width())
         editor.setIndentationGuides(True)
         editor.setTabIndents(True)
         editor.setBackspaceUnindents(True)
@@ -392,12 +411,11 @@ class EditorTab(QWidget):
     def _apply_editor_settings(self) -> None:
         """Apply user-configurable editor settings to the QScintilla widget.
 
-        Reads ``editor.word_wrap`` and ``editor.show_line_numbers`` from
-        the injected SettingsManager, falling back to the app defaults
-        when ``self._settings`` hasn't been injected yet (it arrives via
-        ``set_ai_services`` after ``__init__``). Tabs that are already
-        open are not live-updated when settings change; new tabs pick up
-        the new values.
+        Reads the ``editor.*`` keys from the injected SettingsManager,
+        falling back to the app defaults when ``self._settings`` hasn't
+        been injected yet (it arrives via ``set_ai_services`` after
+        ``__init__``). Also re-run on open tabs after the Settings
+        dialog is saved (see ``EditorPanel.apply_settings``).
         """
         if self._settings is not None:
             word_wrap = bool(self._settings.get("editor.word_wrap"))
@@ -405,6 +423,14 @@ class EditorTab(QWidget):
         else:
             word_wrap = False
             show_line_numbers = True
+
+        font = self._editor_font()
+        self._editor.setFont(font)
+        lexer = self._editor.lexer()
+        if lexer is not None:
+            lexer.setDefaultFont(font)
+            lexer.setFont(font)
+        self._editor.setTabWidth(self._tab_width())
 
         self._editor.setWrapMode(
             QsciScintilla.WrapMode.WrapWord if word_wrap else QsciScintilla.WrapMode.WrapNone
@@ -429,10 +455,10 @@ class EditorTab(QWidget):
 
         lexer = lexer_cls(self._editor)
 
-        # Apply dark theme font to lexer
-        font = QFont("Monospace", 11)
-        font.setStyleHint(QFont.StyleHint.Monospace)
+        # Apply the editor font to the lexer
+        font = self._editor_font()
         lexer.setDefaultFont(font)
+        lexer.setFont(font)
         lexer.setDefaultPaper(QColor(tc.get("bg_base")))
         lexer.setDefaultColor(QColor(tc.get("text_primary")))
 

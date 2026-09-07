@@ -358,6 +358,17 @@ class EditorPanel(QTabWidget):
             if isinstance(tab, EditorTab):
                 tab.set_ai_services(provider_manager, settings)
 
+    def apply_settings(self) -> None:
+        """Re-read editor settings (font, tab size, wrap…) into every open tab.
+
+        Called after the Settings dialog is saved so changes show up
+        without reopening files.
+        """
+        for i in range(self.count()):
+            tab = self.widget(i)
+            if isinstance(tab, EditorTab) and tab._settings is not None:
+                tab._apply_editor_settings()
+
     # ── Test coverage gutter ──────────────────────────────────────
 
     def apply_coverage(self, report: "CoverageReport") -> None:
