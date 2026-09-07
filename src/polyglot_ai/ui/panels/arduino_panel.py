@@ -1575,17 +1575,35 @@ class ArduinoPanel(QWidget):
             preferred = next((b for b in boards if b.board is not None), boards[0])
             self._board = preferred.board
             self._port = preferred.port
-            display = preferred.board.display_name if preferred.board else "Unknown board"
-            self._detection_label.setText(
-                f"✓  Found: <b>{display}</b>  "
-                f"<span style='color:{tc.get('text_muted')}; "
-                f"font-size:{tc.FONT_SM}px;'>on {preferred.port}</span>"
-            )
-            self._detection_label.setStyleSheet(
-                f"color: {tc.get('accent_success')}; "
-                f"font-size: {tc.FONT_LG}px; font-weight: 600; "
-                "background: transparent; padding: 6px 4px;"
-            )
+            if preferred.board is not None:
+                self._detection_label.setText(
+                    f"✓  Found: <b>{preferred.board.display_name}</b>  "
+                    f"<span style='color:{tc.get('text_muted')}; "
+                    f"font-size:{tc.FONT_SM}px;'>on {preferred.port}</span>"
+                )
+                self._detection_label.setStyleSheet(
+                    f"color: {tc.get('accent_success')}; "
+                    f"font-size: {tc.FONT_LG}px; font-weight: 600; "
+                    "background: transparent; padding: 6px 4px;"
+                )
+            else:
+                # A USB serial device we couldn't match to the board
+                # catalog. Don't paint it green like a success — say
+                # what we see and point at the manual board picker.
+                desc = preferred.description or "USB serial device"
+                self._detection_label.setText(
+                    f"Found <b>{desc}</b>  "
+                    f"<span style='color:{tc.get('text_muted')}; "
+                    f"font-size:{tc.FONT_SM}px;'>on {preferred.port}</span><br>"
+                    f"<span style='color:{tc.get('text_muted')}; "
+                    f"font-size:{tc.FONT_SM}px;'>We don't recognise this one — "
+                    "pick your board under <b>Advanced</b>.</span>"
+                )
+                self._detection_label.setStyleSheet(
+                    f"color: {tc.get('accent_warning')}; "
+                    f"font-size: {tc.FONT_LG}px; font-weight: 600; "
+                    "background: transparent; padding: 6px 4px;"
+                )
 
         if hasattr(self, "_port_combo"):
             current = self._port_combo.currentText()

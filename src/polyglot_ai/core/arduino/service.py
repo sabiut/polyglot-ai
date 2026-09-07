@@ -432,6 +432,11 @@ class ArduinoService:
             # arduino-cli identifies the board for genuine hardware;
             # the catalog lookup is only a fallback.
             matching = entry.get("matching_boards") or []
+            # Same guard as the pyserial path: a port with no USB IDs
+            # and no board identified by arduino-cli is a legacy UART,
+            # not something plugged in.
+            if not matching and not (vid and pid):
+                continue
             from polyglot_ai.core.arduino.boards import board_for_fqbn
 
             catalog_board = None
@@ -471,6 +476,13 @@ class ArduinoService:
             for info in list_ports.comports():
                 vid = info.vid or 0
                 pid = info.pid or 0
+                # Legacy motherboard UARTs (/dev/ttyS*, COM1) enumerate
+                # with no USB IDs. Every board we can talk to is a USB
+                # device, so skip them — otherwise the panel announces
+                # "Found: Unknown board on /dev/ttyS3" on machines with
+                # nothing plugged in at all.
+                if not (vid and pid):
+                    continue
                 results.append(
                     DetectedBoard(
                         port=info.device,

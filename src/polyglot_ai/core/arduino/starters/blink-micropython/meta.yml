@@ -1,4 +1,5 @@
-name: Blink a light (Python)
+name: Blink a light (MicroPython)
+order: 2
 blurb: Make the little LED flash on and off using MicroPython.
 emoji: 💡
 language: micropython

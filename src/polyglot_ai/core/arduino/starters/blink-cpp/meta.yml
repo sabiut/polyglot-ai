@@ -1,4 +1,5 @@
 name: Blink a light
+order: 1
 blurb: Make the little LED on your Arduino flash on and off.
 emoji: 💡
 language: cpp

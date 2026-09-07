@@ -1,4 +1,5 @@
 name: Blink a light (CircuitPython)
+order: 3
 blurb: Flash the LED with CircuitPython — easiest way to write Python on a board.
 emoji: 💡
 language: circuitpython

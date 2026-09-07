@@ -48,6 +48,10 @@ class Starter:
     # your sensor reading should appear" without needing to read
     # docs first. Empty string when no hint exists.
     post_upload_hint: str = ""
+    # Sort weight — lower comes first in the picker and the panel's
+    # inline tiles. Lets the classic C++ blink lead the row instead
+    # of whatever folder name sorts first alphabetically.
+    order: int = 100
 
     def supports_board(self, board: Board) -> bool:
         if not board.supports(self.language):
@@ -111,8 +115,10 @@ def list_starters() -> list[Starter]:
                 suggested_project_name=str(data.get("suggested_project_name") or folder.name),
                 source_dir=folder,
                 post_upload_hint=str(data.get("post_upload_hint") or ""),
+                order=int(data.get("order") or 100),
             )
         )
+    out.sort(key=lambda s: (s.order, s.name))
     return out
 
 
