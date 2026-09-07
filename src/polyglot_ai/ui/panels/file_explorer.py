@@ -34,8 +34,18 @@ from PyQt6.QtWidgets import (
 
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels import shared_icons
 
 logger = logging.getLogger(__name__)
+
+# Header toolbar glyphs, by tooltip. All painted at the same stroke
+# weight (the old set mixed two painted icons with two text glyphs).
+_HEADER_ICONS = {
+    "New File": shared_icons.draw_new_file_icon,
+    "New Folder": shared_icons.draw_new_folder_icon,
+    "Refresh": shared_icons.draw_refresh_icon,
+    "Collapse All": shared_icons.draw_collapse_all_icon,
+}
 
 HIDDEN_DIRS = {
     "__pycache__",
@@ -428,19 +438,12 @@ class FileExplorer(QWidget):
 
         # Action buttons in header
         self._action_btns: list[QPushButton] = []
-        for tooltip, icon_char in [
-            ("New File", None),
-            ("New Folder", None),
-            ("Refresh", "↻"),
-            ("Collapse All", "⊟"),
-        ]:
+        for tooltip in ("New File", "New Folder", "Refresh", "Collapse All"):
             btn = QPushButton()
             btn.setObjectName("explorerActionBtn")
             btn.setFixedSize(24, 24)
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            if icon_char:
-                btn.setText(icon_char)
             if tooltip == "New File":
                 btn.clicked.connect(self._new_file_at_root)
             elif tooltip == "New Folder":
@@ -549,10 +552,12 @@ class FileExplorer(QWidget):
                     background: {tc.get("bg_hover")}; color: {tc.get("text_primary")};
                 }}
             """)
-            if btn.toolTip() == "New File":
-                btn.setIcon(self._draw_file_icon())
-            elif btn.toolTip() == "New Folder":
-                btn.setIcon(self._draw_folder_icon())
+            # Re-painted on theme change so the strokes pick up the
+            # current text/accent colours.
+            icon = _HEADER_ICONS.get(btn.toolTip())
+            if icon is not None:
+                btn.setIcon(icon())
+                btn.setIconSize(QSize(16, 16))
         self._project_header.setStyleSheet(
             f"#projectHeader {{ background-color: {tc.get('bg_surface')}; "
             f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
@@ -692,73 +697,6 @@ class FileExplorer(QWidget):
     def _new_folder_at_root(self) -> None:
         if self._project_root:
             self._new_folder(self._project_root)
-
-    @staticmethod
-    def _draw_file_icon():
-        """Draw a new-file icon (document with + sign)."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        size = 16
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.3)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        # Document shape
-        p.drawLine(3, 1, 3, 15)
-        p.drawLine(3, 15, 11, 15)
-        p.drawLine(11, 15, 11, 4)
-        p.drawLine(11, 4, 8, 1)
-        p.drawLine(8, 1, 3, 1)
-        # Fold corner
-        p.drawLine(8, 1, 8, 4)
-        p.drawLine(8, 4, 11, 4)
-        # Plus sign
-        pen2 = QPen(QColor(tc.get("text_primary")))
-        pen2.setWidthF(1.5)
-        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen2)
-        p.drawLine(13, 7, 13, 13)
-        p.drawLine(10, 10, 16, 10)
-        p.end()
-        return QIcon(pixmap)
-
-    @staticmethod
-    def _draw_folder_icon():
-        """Draw a new-folder icon (folder with + sign)."""
-        from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-
-        size = 16
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(tc.get("text_primary")))
-        pen.setWidthF(1.3)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        # Folder shape
-        p.drawRoundedRect(1, 5, 12, 9, 1.5, 1.5)
-        # Folder tab
-        p.drawLine(1, 5, 1, 3)
-        p.drawLine(1, 3, 5, 3)
-        p.drawLine(5, 3, 6, 5)
-        # Plus sign
-        pen2 = QPen(QColor(tc.get("text_primary")))
-        pen2.setWidthF(1.5)
-        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen2)
-        p.drawLine(13, 7, 13, 13)
-        p.drawLine(10, 10, 16, 10)
-        p.end()
-        return QIcon(pixmap)
 
     def _refresh(self) -> None:
         """Force refresh the file tree and notify the app."""

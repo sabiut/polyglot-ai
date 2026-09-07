@@ -117,29 +117,34 @@ class ActivityBarButton(QWidget):
         painter.end()
 
     def _draw_files_icon(self, p: QPainter, ox: float, oy: float) -> None:
-        """File explorer — stacked file pages."""
-        # Back page
-        path1 = QPainterPath()
-        path1.moveTo(ox + 6, oy + 2)
-        path1.lineTo(ox + 18, oy + 2)
-        path1.lineTo(ox + 18, oy + 18)
-        path1.lineTo(ox + 6, oy + 18)
-        path1.closeSubpath()
-        p.drawPath(path1)
+        """File explorer — two stacked pages.
 
-        # Front page (offset)
-        path2 = QPainterPath()
-        path2.moveTo(ox + 3, oy + 6)
-        path2.lineTo(ox + 10, oy + 6)
-        path2.lineTo(ox + 14, oy + 10)
-        path2.lineTo(ox + 14, oy + 22)
-        path2.lineTo(ox + 3, oy + 22)
-        path2.closeSubpath()
-        p.drawPath(path2)
+        The back page is drawn only where it peeks out from behind the
+        front one. Drawing it as a full rectangle (as before) ran its
+        outline straight through the front page and looked like a
+        tangle of lines at 24px.
+        """
+        # Front page with a folded top-right corner.
+        front = QPainterPath()
+        front.moveTo(ox + 4.5, oy + 7.5)
+        front.lineTo(ox + 11.5, oy + 7.5)
+        front.lineTo(ox + 15.5, oy + 11.5)
+        front.lineTo(ox + 15.5, oy + 21.5)
+        front.lineTo(ox + 4.5, oy + 21.5)
+        front.closeSubpath()
+        p.drawPath(front)
+        p.drawLine(QPointF(ox + 11.5, oy + 7.5), QPointF(ox + 11.5, oy + 11.5))
+        p.drawLine(QPointF(ox + 11.5, oy + 11.5), QPointF(ox + 15.5, oy + 11.5))
 
-        # Fold corner on front page
-        p.drawLine(QPointF(ox + 10, oy + 6), QPointF(ox + 10, oy + 10))
-        p.drawLine(QPointF(ox + 10, oy + 10), QPointF(ox + 14, oy + 10))
+        # Back page: the visible L-shaped sliver above and to the right.
+        back = QPainterPath()
+        back.moveTo(ox + 8.5, oy + 7.5)
+        back.lineTo(ox + 8.5, oy + 2.5)
+        back.lineTo(ox + 15.5, oy + 2.5)
+        back.lineTo(ox + 19.5, oy + 6.5)
+        back.lineTo(ox + 19.5, oy + 17.5)
+        back.lineTo(ox + 15.5, oy + 17.5)
+        p.drawPath(back)
 
     def _draw_search_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Magnifying glass."""

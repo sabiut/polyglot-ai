@@ -172,6 +172,100 @@ def draw_folder_icon() -> QIcon:
     return QIcon(pm)
 
 
+def _hidpi_canvas(size: int = 16, scale: int = 2) -> tuple[QPixmap, QPainter]:
+    """A transparent ``size``×``size`` logical pixmap rendered at ``scale``×.
+
+    Header glyphs are tiny; painting them at 1× left them soft and
+    ragged on HiDPI screens. The painter is pre-scaled so callers keep
+    drawing in 16px coordinates.
+    """
+    pm = QPixmap(size * scale, size * scale)
+    pm.setDevicePixelRatio(scale)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    return pm, p
+
+
+def _plus_badge(p: QPainter, cx: float, cy: float) -> None:
+    """Small accent "+" in a knocked-out disc at (cx, cy).
+
+    The disc is filled with the header background so the plus never
+    collides with the outline underneath it — the old icons drew the
+    plus straight over the shape's edge, which read as a smudge.
+    """
+    from PyQt6.QtCore import Qt
+
+    p.save()
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(tc.get("bg_surface")))
+    p.drawEllipse(QRectF(cx - 4.5, cy - 4.5, 9, 9))
+    pen = QPen(QColor(tc.get("accent_primary")))
+    pen.setWidthF(1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.drawLine(QRectF(cx - 2.6, cy, 5.2, 0).topLeft(), QRectF(cx - 2.6, cy, 5.2, 0).topRight())
+    p.drawLine(QRectF(cx, cy - 2.6, 0, 5.2).topLeft(), QRectF(cx, cy - 2.6, 0, 5.2).bottomLeft())
+    p.restore()
+
+
+def _outline_pen(width: float = 1.5) -> QPen:
+    from PyQt6.QtCore import Qt
+
+    pen = QPen(QColor(tc.get("text_primary")))
+    pen.setWidthF(width)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    return pen
+
+
+def draw_new_file_icon() -> QIcon:
+    """Document with folded corner and a "+" badge — explorer 'New File'."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen())
+    path = QPainterPath()
+    path.moveTo(3.5, 1.5)
+    path.lineTo(8.5, 1.5)
+    path.lineTo(11.5, 4.5)
+    path.lineTo(11.5, 14.5)
+    path.lineTo(3.5, 14.5)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.drawLine(QRectF(8.5, 1.5, 0, 3).topLeft(), QRectF(8.5, 1.5, 0, 3).bottomLeft())
+    p.drawLine(QRectF(8.5, 4.5, 3, 0).topLeft(), QRectF(8.5, 4.5, 3, 0).topRight())
+    _plus_badge(p, 12.0, 12.0)
+    p.end()
+    return QIcon(pm)
+
+
+def draw_new_folder_icon() -> QIcon:
+    """Folder with tab and a "+" badge — explorer 'New Folder'."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen())
+    path = QPainterPath()
+    path.moveTo(1.5, 4.0)
+    path.lineTo(5.5, 4.0)
+    path.lineTo(7.0, 5.5)
+    path.lineTo(14.5, 5.5)
+    path.lineTo(14.5, 13.5)
+    path.lineTo(1.5, 13.5)
+    path.closeSubpath()
+    p.drawPath(path)
+    _plus_badge(p, 12.0, 12.0)
+    p.end()
+    return QIcon(pm)
+
+
+def draw_collapse_all_icon() -> QIcon:
+    """Square with a minus — 'collapse all' (VS Code's glyph)."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen())
+    p.drawRoundedRect(QRectF(2.5, 2.5, 11, 11), 1.5, 1.5)
+    p.drawLine(QRectF(5.5, 8, 5, 0).topLeft(), QRectF(5.5, 8, 5, 0).topRight())
+    p.end()
+    return QIcon(pm)
+
+
 def draw_copy_icon() -> QIcon:
     """Two overlapping pages — 'copy to clipboard' affordance."""
     pm = QPixmap(16, 16)
