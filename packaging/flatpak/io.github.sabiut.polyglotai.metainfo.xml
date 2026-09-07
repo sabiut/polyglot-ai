@@ -23,6 +23,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.1" date="2026-09-08">
+      <description>
+        <p>Crisper explorer toolbar icons (New File, New Folder, Refresh,
+        Collapse All) and a cleaner Explorer icon in the activity bar.</p>
+      </description>
+    </release>
     <release version="0.18.0" date="2026-09-08">
       <description>
         <p>A large reliability release. The Docker, Kubernetes and CI/CD
