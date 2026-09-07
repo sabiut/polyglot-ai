@@ -126,6 +126,29 @@ _DARK = {
     "cs_applied": "#4ec9b0",
     "cs_rejected": "#e57373",
     "cs_rolledback": "#888888",
+    # Task kinds (tasks panel + task detail dialog)
+    "task_feature": "#4ec9b0",
+    "task_bugfix": "#f48771",
+    "task_incident": "#f44747",
+    "task_refactor": "#9cdcfe",
+    "task_explore": "#e5a00d",
+    "task_chore": "#888888",
+    "timeline_info": "#9cdcfe",
+    # Informational callout card
+    "bg_info": "#1a3a5c",
+    "text_info_heading": "#9fc5e8",
+    "text_info_body": "#d8e8f5",
+    "bg_feedback_neg_hover": "#7a2a2a",
+    # Chart series
+    "chart_1": "#4ec9b0",
+    "chart_2": "#9cdcfe",
+    "chart_3": "#e5a00d",
+    "chart_4": "#c586c0",
+    # Chat send button: a contrasting circle with an arrow (light on
+    # dark theme, dark on light theme)
+    "bg_send_btn": "#ececec",
+    "bg_send_btn_hover": "#ffffff",
+    "fg_send_icon": "#1a1a1a",
 }
 
 # ── Light theme ───────────────────────────────────────────────────
@@ -248,6 +271,28 @@ _LIGHT = {
     "cs_applied": "#22863a",
     "cs_rejected": "#cb2431",
     "cs_rolledback": "#6e6e6e",
+    # Task kinds
+    "task_feature": "#1a8f6f",
+    "task_bugfix": "#c4471f",
+    "task_incident": "#d32f2f",
+    "task_refactor": "#1565c0",
+    "task_explore": "#b26a00",
+    "task_chore": "#6e6e6e",
+    "timeline_info": "#1565c0",
+    # Informational callout card
+    "bg_info": "#e3f0fb",
+    "text_info_heading": "#1c5d99",
+    "text_info_body": "#1f3b57",
+    "bg_feedback_neg_hover": "#f5c6c6",
+    # Chart series
+    "chart_1": "#1a8f6f",
+    "chart_2": "#1565c0",
+    "chart_3": "#b26a00",
+    "chart_4": "#8e24aa",
+    # Chat send button
+    "bg_send_btn": "#1a1a1a",
+    "bg_send_btn_hover": "#333333",
+    "fg_send_icon": "#ffffff",
 }
 
 # ── Runtime state ─────────────────────────────────────────────────
@@ -270,6 +315,26 @@ def current_theme() -> str:
 def get(token: str) -> str:
     """Return the hex value for *token* in the current theme."""
     return _THEMES[_current_theme][token]
+
+
+_TASK_KIND_TOKENS = {
+    "FEATURE": "task_feature",
+    "BUGFIX": "task_bugfix",
+    "INCIDENT": "task_incident",
+    "REFACTOR": "task_refactor",
+    "EXPLORE": "task_explore",
+    "CHORE": "task_chore",
+}
+
+
+def task_kind_color(kind) -> str:
+    """Theme colour for a ``TaskKind`` (enum or its name); neutral for unknown kinds.
+
+    One definition for both the tasks panel and the task detail dialog
+    — they used to carry duplicate hardcoded dark-theme palettes.
+    """
+    name = str(getattr(kind, "name", kind)).upper()
+    return get(_TASK_KIND_TOKENS.get(name, "text_tertiary"))
 
 
 def get_for(theme: str, token: str) -> str:

@@ -792,10 +792,10 @@ class ChatPanel(QWidget):
         """)
         self._send_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #ececec; border: none; border-radius: 16px;
+                background-color: {tc.get("bg_send_btn")}; border: none; border-radius: 16px;
                 padding: 4px;
             }}
-            QPushButton:hover {{ background-color: #ffffff; }}
+            QPushButton:hover {{ background-color: {tc.get("bg_send_btn_hover")}; }}
             QPushButton:pressed {{ background-color: {tc.get("text_primary")}; }}
             QPushButton:disabled {{ background-color: {tc.get("bg_hover")}; }}
         """)

@@ -57,16 +57,6 @@ _GROUP_ORDER: list[tuple[str, list[TaskState]]] = [
 ]
 
 
-_KIND_COLOURS: dict[TaskKind, str] = {
-    TaskKind.FEATURE: "#4ec9b0",
-    TaskKind.BUGFIX: "#f48771",
-    TaskKind.INCIDENT: "#f44747",
-    TaskKind.REFACTOR: "#9cdcfe",
-    TaskKind.EXPLORE: "#e5a00d",
-    TaskKind.CHORE: "#888888",
-}
-
-
 class TasksPanel(QWidget):
     """Sidebar panel listing tasks for the current project."""
 
@@ -618,7 +608,7 @@ class _TaskCard(QWidget):
         title_row.setSpacing(6)
         kind_dot = QLabel("●")
         kind_dot.setStyleSheet(
-            f"color: {_KIND_COLOURS.get(task.kind, tc.get('text_tertiary'))}; "
+            f"color: {tc.task_kind_color(task.kind)}; "
             f"font-size: {tc.FONT_SM}px; "
             f"background: transparent;"
         )
@@ -737,7 +727,7 @@ class _NewTaskDialog(QDialog):
         # is faster than picking from a long list.
         self._kind_combo = QComboBox()
         for kind in (TaskKind.FEATURE, TaskKind.BUGFIX, TaskKind.REFACTOR):
-            colour = _KIND_COLOURS.get(kind, tc.get("text_tertiary"))
+            colour = tc.task_kind_color(kind)
             self._kind_combo.addItem(f"●  {kind.value.capitalize()}", kind)
             self._kind_combo.setItemData(
                 self._kind_combo.count() - 1,

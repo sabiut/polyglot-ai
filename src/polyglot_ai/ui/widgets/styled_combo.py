@@ -132,7 +132,7 @@ class StyledComboBox(QComboBox):
         pal.setColor(QPalette.ColorRole.Midlight, QColor(tc.get("bg_surface_overlay")))
         pal.setColor(QPalette.ColorRole.Mid, QColor(tc.get("border_menu")))
         pal.setColor(QPalette.ColorRole.Dark, QColor(tc.get("bg_surface_overlay")))
-        pal.setColor(QPalette.ColorRole.Shadow, QColor("#1a1a1a"))
+        pal.setColor(QPalette.ColorRole.Shadow, QColor(tc.get("border_menu")))
         self._pal = pal
         self.setPalette(pal)
 

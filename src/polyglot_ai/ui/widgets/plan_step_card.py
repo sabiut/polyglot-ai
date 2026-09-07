@@ -102,7 +102,7 @@ class PlanStepCard(QWidget):
                 _BTN_STYLE.format(
                     bg=tc.get("bg_feedback_pos"),
                     fg=tc.get("accent_success_muted"),
-                    hover="#1a5c3a",
+                    hover=tc.get("bg_feedback_pos_hover"),
                     fs=tc.FONT_SM,
                 )
             )
@@ -129,7 +129,7 @@ class PlanStepCard(QWidget):
                 _BTN_STYLE.format(
                     bg=tc.get("bg_feedback_neg"),
                     fg=tc.get("accent_error"),
-                    hover="#7a2a2a",
+                    hover=tc.get("bg_feedback_neg_hover"),
                     fs=tc.FONT_SM,
                 )
             )
@@ -148,7 +148,7 @@ class PlanStepCard(QWidget):
             for f in step.files_affected[:5]:
                 chip = QLabel(f)
                 chip.setStyleSheet(
-                    f"background: #1a2733; color: {tc.get('accent_info')}; "
+                    f"background: {tc.get('bg_info')}; color: {tc.get('accent_info')}; "
                     f"font-size: {tc.FONT_SM}px; "
                     f"padding: 1px 6px; border-radius: 3px; font-family: monospace;"
                 )

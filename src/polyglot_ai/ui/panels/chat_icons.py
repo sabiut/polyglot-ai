@@ -133,7 +133,7 @@ def make_send_icon() -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#1a1a1a"))
+    pen = QPen(QColor(tc.get("fg_send_icon")))
     pen.setWidthF(2.0)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)

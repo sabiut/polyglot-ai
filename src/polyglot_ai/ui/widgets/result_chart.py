@@ -234,7 +234,7 @@ class ResultChartWidget(QWidget):
         y_name: str,
     ) -> None:
         bar_set = QBarSet(y_name)
-        bar_set.setColor(QColor("#4ec9b0"))
+        bar_set.setColor(QColor(tc.get("chart_1")))
         bar_set.setLabelColor(QColor(tc.get("text_heading")))
         for v in y_floats:
             bar_set.append(v if v is not None else 0.0)
@@ -265,7 +265,7 @@ class ResultChartWidget(QWidget):
     ) -> None:
         series = QLineSeries()
         series.setName(y_name)
-        series.setColor(QColor("#9cdcfe"))
+        series.setColor(QColor(tc.get("chart_2")))
         for i, y in enumerate(y_floats):
             if y is None:
                 continue
@@ -284,7 +284,7 @@ class ResultChartWidget(QWidget):
     ) -> None:
         series = QScatterSeries()
         series.setName(y_name)
-        series.setColor(QColor("#e5a00d"))
+        series.setColor(QColor(tc.get("chart_3")))
         series.setMarkerSize(8.0)
         for i, y in enumerate(y_floats):
             if y is None:
@@ -319,7 +319,7 @@ class ResultChartWidget(QWidget):
             bins[idx] += 1
 
         bar_set = QBarSet(y_name)
-        bar_set.setColor(QColor("#c586c0"))
+        bar_set.setColor(QColor(tc.get("chart_4")))
         for c in bins:
             bar_set.append(c)
         series = QBarSeries()

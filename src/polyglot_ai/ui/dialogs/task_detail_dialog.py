@@ -34,52 +34,33 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.task_manager import TaskManager
-from polyglot_ai.core.tasks import Task, TaskKind, TaskNote, TaskState
+from polyglot_ai.core.tasks import Task, TaskNote, TaskState
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
 
 
-_KIND_COLOURS: dict[TaskKind, str] = {
-    TaskKind.FEATURE: "#4ec9b0",
-    TaskKind.BUGFIX: "#f48771",
-    TaskKind.INCIDENT: "#f44747",
-    TaskKind.REFACTOR: "#9cdcfe",
-    TaskKind.EXPLORE: "#e5a00d",
-    TaskKind.CHORE: "#888888",
-}
-
-
-_STATE_COLOURS: dict[TaskState, str] = {
-    TaskState.PLANNING: "#888888",
-    TaskState.ACTIVE: "#4ec9b0",
-    TaskState.REVIEW: "#9cdcfe",
-    TaskState.BLOCKED: "#e5a00d",
-    TaskState.DONE: "#666666",
-    TaskState.ARCHIVED: "#444444",
-}
-
-
-# Map note kinds → display glyph + colour. Unknown kinds fall back
-# to a neutral bullet.
+# Map note kinds → display glyph + theme token. Unknown kinds fall
+# back to a neutral bullet. Tokens (not hex) so the timeline reads
+# correctly in the light theme too.
 _NOTE_GLYPHS: dict[str, tuple[str, str]] = {
-    "created": ("✦", "#9cdcfe"),
-    "state_changed": ("↯", "#888888"),
-    "branch_created": ("⎇", "#9cdcfe"),
-    "committed": ("✓", "#4ec9b0"),
-    "pushed": ("⇡", "#4ec9b0"),
-    "pr_opened": ("⇧", "#9cdcfe"),
-    "tested": ("●", "#4ec9b0"),
-    "review_clean": ("✓", "#4ec9b0"),
-    "review_findings": ("!", "#e5a00d"),
-    "review_failed": ("✗", "#f48771"),
-    "ci_run": ("●", "#9cdcfe"),
-    "ci_failure_imported": ("!", "#f48771"),
-    "workflow_started": ("●", "#9cdcfe"),
-    "workflow_run": ("●", "#4ec9b0"),
-    "chat_started": ("✎", "#888888"),
-    "ai_response": ("✎", "#888888"),
-    "user_message": ("✎", "#aaaaaa"),
+    "created": ("✦", "timeline_info"),
+    "state_changed": ("↯", "text_tertiary"),
+    "branch_created": ("⎇", "timeline_info"),
+    "committed": ("✓", "accent_success_muted"),
+    "pushed": ("⇡", "accent_success_muted"),
+    "pr_opened": ("⇧", "timeline_info"),
+    "tested": ("●", "accent_success_muted"),
+    "review_clean": ("✓", "accent_success_muted"),
+    "review_findings": ("!", "accent_warning"),
+    "review_failed": ("✗", "task_bugfix"),
+    "ci_run": ("●", "timeline_info"),
+    "ci_failure_imported": ("!", "task_bugfix"),
+    "workflow_started": ("●", "timeline_info"),
+    "workflow_run": ("●", "accent_success_muted"),
+    "chat_started": ("✎", "text_tertiary"),
+    "ai_response": ("✎", "text_tertiary"),
+    "user_message": ("✎", "text_secondary"),
 }
 
 
@@ -137,7 +118,7 @@ class TaskDetailDialog(QDialog):
         title_row.setSpacing(8)
         kind_dot = QLabel("●")
         kind_dot.setStyleSheet(
-            f"color: {_KIND_COLOURS.get(self._task.kind, tc.get('text_tertiary'))}; "
+            f"color: {tc.task_kind_color(self._task.kind)}; "
             f"font-size: {tc.FONT_LG}px; background: transparent;"
         )
         title_row.addWidget(kind_dot)
@@ -392,8 +373,8 @@ class TaskDetailDialog(QDialog):
         """
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background: #1a3a5c; border: 1px solid {tc.get('accent_primary')}; "
-            "border-radius: 6px; }"
+            f"QFrame {{ background: {tc.get('bg_info')}; "
+            f"border: 1px solid {tc.get('accent_primary')}; border-radius: 6px; }}"
         )
         v = QVBoxLayout(card)
         v.setContentsMargins(16, 14, 16, 14)
@@ -401,7 +382,7 @@ class TaskDetailDialog(QDialog):
 
         header_lbl = QLabel("CHECKLIST")
         header_lbl.setStyleSheet(
-            "color: #9fc5e8; font-size: 9px; font-weight: 700; "
+            f"color: {tc.get('text_info_heading')}; font-size: 9px; font-weight: 700; "
             "letter-spacing: 0.6px; background: transparent;"
         )
         v.addWidget(header_lbl)
@@ -410,7 +391,10 @@ class TaskDetailDialog(QDialog):
             "No checklist yet. Let the AI break this task into ordered "
             "steps so you can track progress and scope."
         )
-        blurb.setStyleSheet(f"color: #d8e8f5; font-size: {tc.FONT_MD}px; background: transparent;")
+        blurb.setStyleSheet(
+            f"color: {tc.get('text_info_body')}; font-size: {tc.FONT_MD}px; "
+            "background: transparent;"
+        )
         blurb.setWordWrap(True)
         v.addWidget(blurb)
 
@@ -554,7 +538,8 @@ class TaskDetailDialog(QDialog):
         h.setContentsMargins(0, 2, 0, 2)
         h.setSpacing(10)
 
-        glyph, colour = _NOTE_GLYPHS.get(note.kind, ("·", tc.get("text_tertiary")))
+        glyph, token = _NOTE_GLYPHS.get(note.kind, ("·", "text_tertiary"))
+        colour = tc.get(token)
         icon = QLabel(glyph)
         icon.setFixedWidth(18)
         icon.setStyleSheet(
