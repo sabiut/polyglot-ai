@@ -404,6 +404,11 @@ class TodayPanel(QWidget):
         # Stash the task rows on the instance so the worker can
         # prepend them to whatever gh returns.
         self._pending_task_attention = task_rows
+        # The gh worker can take 20-40s on a slow network; without a
+        # placeholder the Attention card was a blank rectangle until
+        # then, indistinguishable from "nothing to show".
+        if not self._attention_items:
+            self._attention_layout.addWidget(self._empty_label("Checking GitHub for PRs and CI…"))
         thread = threading.Thread(
             target=self._gh_attention_worker,
             args=(cwd,),

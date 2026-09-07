@@ -505,6 +505,18 @@ class K8sPanel(QWidget):
                 0, Qt.ItemDataRole.UserRole, {"type": "service", "name": name, "namespace": ns}
             )
 
+        if not (self._pods or self._deployments or self._services):
+            # Three "(0)" headers over nothing looked like a broken
+            # fetch. Say what it usually means instead.
+            hint = QTreeWidgetItem(self._resource_tree)
+            hint.setText(
+                0,
+                "Nothing found — check the context/namespace above, or that "
+                "kubectl can reach the cluster.",
+            )
+            hint.setForeground(0, QColor(tc.get("text_muted")))
+            hint.setFlags(Qt.ItemFlag.NoItemFlags)
+
         # Update status bar
         ctx = self._current_context or "none"
         self._status_label.setText(

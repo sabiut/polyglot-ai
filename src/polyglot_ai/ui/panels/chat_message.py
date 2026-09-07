@@ -133,6 +133,13 @@ class ChatMessage(QWidget):
             self._bubble = bubble
             outer.addWidget(bubble)
 
+            # Edit & resend, tucked against the bubble. The panel side
+            # (``on_edit`` → ``_edit_and_resend``) has existed all
+            # along; the button that triggers it was never built.
+            edit_btn = self._make_icon_btn("edit", "Edit & resend", self._on_edit)
+            edit_btn.setIcon(self._create_edit_icon())
+            outer.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignBottom)
+
         else:
             # ── AI / System / Tool message: clean left-aligned ──
             content_col = QVBoxLayout()
@@ -184,21 +191,6 @@ class ChatMessage(QWidget):
                     self._make_icon_btn("regenerate", "Regenerate", self._on_regenerate)
                 )
                 self._action_bar.addStretch()
-                self._action_widget = action_widget
-                content_col.addWidget(action_widget)
-            elif role == "user":
-                # Edit & resend. The panel side (``on_edit`` →
-                # ``_edit_and_resend``) has existed all along; the
-                # button that triggers it was never built.
-                action_widget = QWidget()
-                action_widget.setStyleSheet("background: transparent;")
-                self._action_bar = QHBoxLayout(action_widget)
-                self._action_bar.setContentsMargins(0, 2, 0, 0)
-                self._action_bar.setSpacing(1)
-                self._action_bar.addStretch()
-                edit_btn = self._make_icon_btn("edit", "Edit & resend", self._on_edit)
-                edit_btn.setIcon(self._create_edit_icon())
-                self._action_bar.addWidget(edit_btn)
                 self._action_widget = action_widget
                 content_col.addWidget(action_widget)
 

@@ -341,6 +341,17 @@ class DockerPanel(QWidget):
 
     def _populate_containers(self) -> None:
         self._container_tree.clear()
+        if not self._containers:
+            # An empty tree looked identical to "still loading" / "broken".
+            hint = QTreeWidgetItem(self._container_tree)
+            hint.setText(
+                1,
+                "No containers yet — start one with `docker run`, or check that "
+                "the Docker daemon is running.",
+            )
+            hint.setForeground(1, QColor(tc.get("text_muted")))
+            hint.setFlags(Qt.ItemFlag.NoItemFlags)
+            return
         for container in self._containers:
             state = container.get("State", "unknown")
             icon, color_token = _CONTAINER_STATUS.get(state, ("●", "text_muted"))
