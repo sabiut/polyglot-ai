@@ -133,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
-      CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot-ai' }}
+      CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot' }}
     steps:
       - name: Check for Cloudsmith credentials
         id: creds

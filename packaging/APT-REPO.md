@@ -18,7 +18,7 @@ notice and exits green. Nothing breaks by leaving this unconfigured.
 
 2. **Create a repository** named `polyglot-ai` under your account
    (public). One Cloudsmith repo serves both Debian and RPM
-   packages. The workflow's default slug is `opensource-r6tx/polyglot-ai`;
+   packages. The workflow's default slug is `opensource-r6tx/polyglot`;
    if yours differs, set a GitHub Actions **repository variable**
    `CLOUDSMITH_REPO` (Settings → Secrets and variables → Actions →
    Variables) to `<account>/<repo>`.
@@ -40,14 +40,14 @@ Cloudsmith generates a per-repo setup script that registers the
 sources entry and the repo's signing key:
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot-ai/setup.deb.sh' | sudo -E bash
+curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot/setup.deb.sh' | sudo -E bash
 sudo apt install polyglot-ai
 ```
 
 RPM systems:
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot-ai/setup.rpm.sh' | sudo -E bash
+curl -1sLf 'https://dl.cloudsmith.io/public/opensource-r6tx/polyglot/setup.rpm.sh' | sudo -E bash
 sudo dnf install polyglot-ai
 ```
 

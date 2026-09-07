@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
-      CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot-ai' }}
+      CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Require credentials
