@@ -301,6 +301,16 @@ def draw_collapse_icon() -> QIcon:
     return QIcon(pm)
 
 
+def draw_close_icon() -> QIcon:
+    """A small × — 'hide this panel'."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen(1.6))
+    p.drawLine(QRectF(4.5, 4.5, 0, 0).topLeft(), QRectF(11.5, 11.5, 0, 0).topLeft())
+    p.drawLine(QRectF(11.5, 4.5, 0, 0).topLeft(), QRectF(4.5, 11.5, 0, 0).topLeft())
+    p.end()
+    return QIcon(pm)
+
+
 def draw_copy_icon() -> QIcon:
     """Two overlapping pages — 'copy to clipboard' affordance."""
     pm = QPixmap(16, 16)

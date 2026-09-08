@@ -252,6 +252,16 @@ class MainWindow(QMainWindow):
         self._connect_actions()
         self._register_actions()
 
+        # Terminal header buttons: expand needs the splitter (owned
+        # here), close is the same toggle as the activity-bar button.
+        self._terminal_expanded = False
+        self._center_sizes_before_expand: list[int] | None = None
+        self._terminal_panel.expand_requested.connect(self._toggle_terminal_expanded)
+        self._terminal_panel.close_requested.connect(
+            lambda: self._action_toggle_terminal.setChecked(False)
+        )
+        self._action_toggle_terminal.toggled.connect(self._on_terminal_visibility_changed)
+
     def _on_activity_changed(self, view_name: str) -> None:
         """Handle activity bar icon clicks."""
         if view_name == "settings":
@@ -879,6 +889,35 @@ class MainWindow(QMainWindow):
         else:
             self._focus_btn.setIcon(shared_icons.draw_expand_icon())
             self._focus_btn.setToolTip("Expand editor — hide side panels (Ctrl+Shift+X)")
+
+    def _toggle_terminal_expanded(self) -> None:
+        """Give the terminal the whole centre column, or restore the split."""
+        if not self._terminal_expanded:
+            if not self._action_toggle_terminal.isChecked():
+                self._action_toggle_terminal.setChecked(True)
+            sizes = self._center_splitter.sizes()
+            self._center_sizes_before_expand = sizes
+            total = sum(sizes) or self._center_splitter.height()
+            self._center_splitter.setSizes([0, total])
+            self._terminal_expanded = True
+        else:
+            saved = self._center_sizes_before_expand
+            if saved and saved[0] > 0:
+                self._center_splitter.setSizes(saved)
+            else:
+                from polyglot_ai.ui import theme_colors as _tc_split
+
+                self._center_splitter.setSizes(
+                    _tc_split.initial_splitter_sizes(self.width())["center"]
+                )
+            self._terminal_expanded = False
+        self._terminal_panel.set_expanded(self._terminal_expanded)
+
+    def _on_terminal_visibility_changed(self, visible: bool) -> None:
+        # Hiding an expanded terminal must not leave the editor at
+        # zero height when it comes back.
+        if not visible and self._terminal_expanded:
+            self._toggle_terminal_expanded()
 
     def _show_command_palette(self) -> None:
         palette = CommandPalette(self._action_registry, self)

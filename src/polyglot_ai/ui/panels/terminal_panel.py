@@ -960,6 +960,44 @@ class TerminalWidget(QWidget):
         # repaint the pre-paste state.
 
 
+class _TerminalWindow(QWidget):
+    """Top-level home for a popped-out TerminalWidget.
+
+    Owned by the panel; closing the window hands the widget back
+    rather than destroying it.
+    """
+
+    def __init__(self, panel: TerminalPanel) -> None:
+        # Parent to the main window (with the Window flag) so it closes
+        # with the app and stacks sensibly, but is not embedded.
+        super().__init__(panel.window(), Qt.WindowType.Window)
+        self._panel = panel
+        self._docking = False
+        self.setWindowTitle("Terminal — Polyglot AI")
+        self.resize(900, 560)
+        from polyglot_ai.ui import theme_colors as tc
+
+        self.setStyleSheet(f"background-color: {tc.get('bg_terminal')};")
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+
+    def take(self, widget: QWidget) -> None:
+        self._layout.addWidget(widget)
+
+    def release(self, widget: QWidget) -> None:
+        self._docking = True
+        self._layout.removeWidget(widget)
+        widget.setParent(None)
+        self.close()
+
+    def closeEvent(self, event) -> None:
+        if not self._docking:
+            self._docking = True
+            self._panel.dock_back()
+            return
+        super().closeEvent(event)
+
+
 class TerminalPanel(QWidget):
     """Embedded terminal emulator panel."""
 
@@ -970,15 +1008,146 @@ class TerminalPanel(QWidget):
     _pty_output = pyqtSignal(bytes)
     _pty_exited = pyqtSignal()
 
+    #: Header buttons the main window acts on (it owns the splitter
+    #: and the show/hide action).
+    expand_requested = pyqtSignal()
+    close_requested = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self._layout = layout
+
+        layout.addWidget(self._build_header())
 
         self._terminal_widget = TerminalWidget()
         layout.addWidget(self._terminal_widget)
+
+        # Shown in place of the terminal while it lives in its own window.
+        self._popped_placeholder = self._build_popped_placeholder()
+        self._popped_placeholder.hide()
+        layout.addWidget(self._popped_placeholder)
+        self._window: QWidget | None = None
+        self._expanded = False
+
+    # ── Header: title + pop-out / expand / close ────────────────────
+
+    def _build_header(self) -> QWidget:
+        from PyQt6.QtWidgets import QHBoxLayout, QLabel
+
+        from polyglot_ai.ui import theme_colors as tc
+        from polyglot_ai.ui.panels import shared_icons
+        from polyglot_ai.ui.widgets.icon_button import make_icon_button
+
+        header = QWidget()
+        header.setFixedHeight(30)
+        header.setStyleSheet(
+            f"background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')};"
+        )
+        row = QHBoxLayout(header)
+        row.setContentsMargins(12, 0, 6, 0)
+        row.setSpacing(2)
+        title = QLabel("TERMINAL")
+        title.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: 600; color: {tc.get('text_tertiary')}; "
+            "letter-spacing: 0.5px; background: transparent; border: none;"
+        )
+        row.addWidget(title)
+        row.addStretch()
+
+        self._popout_btn = make_icon_button(
+            shared_icons.draw_popout_icon(), "Open terminal in a separate window"
+        )
+        self._popout_btn.clicked.connect(self.pop_out)
+        row.addWidget(self._popout_btn)
+
+        self._expand_btn = make_icon_button(
+            shared_icons.draw_expand_icon(), "Expand terminal to fill the column"
+        )
+        self._expand_btn.clicked.connect(self.expand_requested.emit)
+        row.addWidget(self._expand_btn)
+
+        close_btn = make_icon_button(shared_icons.draw_close_icon(), "Hide terminal (Ctrl+`)")
+        close_btn.clicked.connect(self.close_requested.emit)
+        row.addWidget(close_btn)
+        return header
+
+    def _build_popped_placeholder(self) -> QWidget:
+        from PyQt6.QtWidgets import QLabel, QPushButton
+
+        from polyglot_ai.ui import theme_colors as tc
+
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(16, 16, 16, 16)
+        v.setSpacing(8)
+        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg = QLabel("The terminal is open in its own window.")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setStyleSheet(f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px;")
+        v.addWidget(msg)
+        back = QPushButton("Bring it back here")
+        back.setCursor(Qt.CursorShape.PointingHandCursor)
+        back.setFixedWidth(160)
+        back.clicked.connect(self.dock_back)
+        v.addWidget(back, alignment=Qt.AlignmentFlag.AlignCenter)
+        return box
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Reflect the main window's expand state in the header button."""
+        from polyglot_ai.ui.panels import shared_icons
+
+        self._expanded = expanded
+        if expanded:
+            self._expand_btn.setIcon(shared_icons.draw_collapse_icon())
+            self._expand_btn.setToolTip("Restore terminal to its normal height")
+        else:
+            self._expand_btn.setIcon(shared_icons.draw_expand_icon())
+            self._expand_btn.setToolTip("Expand terminal to fill the column")
+
+    @property
+    def is_popped_out(self) -> bool:
+        return self._window is not None
+
+    def pop_out(self) -> None:
+        """Move the live terminal into its own top-level window.
+
+        The same TerminalWidget (and therefore the same shell, buffer
+        and scrollback) is reparented — nothing restarts. Closing the
+        window docks it back here.
+        """
+        if self._window is not None:
+            self._window.raise_()
+            self._window.activateWindow()
+            return
+        win = _TerminalWindow(self)
+        self._layout.removeWidget(self._terminal_widget)
+        win.take(self._terminal_widget)
+        self._window = win
+        self._popped_placeholder.show()
+        self._popout_btn.setEnabled(False)
+        self._expand_btn.setEnabled(False)
+        win.show()
+        self._terminal_widget.setFocus()
+
+    def dock_back(self) -> None:
+        """Return the terminal from its window to this panel."""
+        win = self._window
+        if win is None:
+            return
+        self._window = None
+        win.release(self._terminal_widget)
+        self._layout.insertWidget(1, self._terminal_widget)
+        self._terminal_widget.show()
+        self._popped_placeholder.hide()
+        self._popout_btn.setEnabled(True)
+        self._expand_btn.setEnabled(True)
+        win.deleteLater()
+        self._terminal_widget.setFocus()
 
         self._event_bus: EventBus | None = None
         self._pty: PtyProcess | None = None
