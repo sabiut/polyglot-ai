@@ -460,7 +460,7 @@ class AnthropicClient(AIProvider):
                     "2. Switch to a different provider in the model dropdown "
                     "for now.\n"
                     "3. If you hit this often, your tier may need a bump — "
-                    "see https://console.anthropic.com/settings/limits."
+                    "see https://platform.claude.com/settings/limits."
                 )
             )
             return
