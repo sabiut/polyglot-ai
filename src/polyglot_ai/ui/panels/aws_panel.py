@@ -418,6 +418,7 @@ class AwsPanel(QWidget):
         hint.setText(0, text)
         hint.setForeground(0, QColor(tc.get("text_muted")))
         hint.setFlags(Qt.ItemFlag.NoItemFlags)
+        hint.setFirstColumnSpanned(True)
 
     def _populate_tree(self) -> None:
         self._tree.clear()
@@ -433,6 +434,7 @@ class AwsPanel(QWidget):
                 err.setText(0, errors[key])
                 err.setForeground(0, QColor(tc.get("accent_warning")))
                 err.setFlags(Qt.ItemFlag.NoItemFlags)
+                err.setFirstColumnSpanned(True)
             return root
 
         lam = section("Lambda", "lambda")
@@ -477,6 +479,7 @@ class AwsPanel(QWidget):
             hint.setText(0, "Nothing found in this region for this profile.")
             hint.setForeground(0, QColor(tc.get("text_muted")))
             hint.setFlags(Qt.ItemFlag.NoItemFlags)
+            hint.setFirstColumnSpanned(True)
 
     # ── Details ─────────────────────────────────────────────────────
 
