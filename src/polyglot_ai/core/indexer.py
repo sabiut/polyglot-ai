@@ -51,7 +51,7 @@ class ProjectIndexer:
         self._doc_count = len(files)
 
         for file_path in files:
-            rel = str(file_path.relative_to(project_root))
+            rel = file_path.relative_to(project_root).as_posix()
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -123,7 +123,7 @@ class ProjectIndexer:
         if not self._project_root:
             return
         try:
-            rel = str(path.relative_to(self._project_root))
+            rel = path.relative_to(self._project_root).as_posix()
         except ValueError:
             return
         if path.is_dir():
@@ -145,7 +145,7 @@ class ProjectIndexer:
         if not self._project_root:
             return
         try:
-            rel = str(path.relative_to(self._project_root))
+            rel = path.relative_to(self._project_root).as_posix()
         except ValueError:
             return
         prefix = rel.rstrip("/") + "/"

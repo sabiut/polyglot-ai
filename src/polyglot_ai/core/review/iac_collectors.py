@@ -63,7 +63,7 @@ def _read_file_safe(path: Path, project_root: Path) -> tuple[str, str] | None:
         logger.warning("IaC scan: cannot read %s: %s", path, e)
         return None
     try:
-        rel = str(path.relative_to(project_root))
+        rel = path.relative_to(project_root).as_posix()
     except ValueError:
         # Symlink escaped the project root — refuse to include.
         logger.warning(

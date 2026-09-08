@@ -262,6 +262,12 @@ def check_secure_file(path: Path) -> tuple[bool, str]:
     except OSError as e:
         return False, f"Cannot stat file: {e}"
 
+    # Windows has no POSIX owner/mode bits to inspect (NTFS ACLs aren't
+    # reflected in st_mode, and os.getuid doesn't exist) — the checks
+    # above (exists, not a symlink) are all we can do there.
+    if not hasattr(os, "getuid"):
+        return True, "OK (permission bits not checked on this platform)"
+
     # Check ownership
     if st.st_uid != os.getuid():
         return False, f"File not owned by current user (owner uid={st.st_uid})"

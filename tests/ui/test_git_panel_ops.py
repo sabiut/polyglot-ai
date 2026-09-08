@@ -197,7 +197,7 @@ class TestDiffDoubleClick:
 
 class TestDiffContentAssembly:
     def test_tracked_modified_unstaged(self, panel: GitPanel, git_repo: Path):
-        (git_repo / "file.txt").write_text("new line\n")
+        (git_repo / "file.txt").write_bytes(b"new line\n")
         old, new = asyncio.run(panel._load_diff_contents("file.txt", "M", staged=False))
         assert old == "old line\n"
         assert new == "new line\n"
@@ -213,7 +213,7 @@ class TestDiffContentAssembly:
         assert new == "staged line\n"
 
     def test_untracked_file_has_empty_old_side(self, panel: GitPanel, git_repo: Path):
-        (git_repo / "brand_new.txt").write_text("hello\n")
+        (git_repo / "brand_new.txt").write_bytes(b"hello\n")
         old, new = asyncio.run(panel._load_diff_contents("brand_new.txt", "?", staged=False))
         assert old == ""
         assert new == "hello\n"

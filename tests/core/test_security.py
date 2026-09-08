@@ -1,7 +1,9 @@
 """Tests for security — secret detection, error sanitization, file permissions, MCP validation."""
 
+import sys
 from pathlib import Path
 
+import pytest
 
 from polyglot_ai.core.security import (
     check_no_symlinks_in_path,
@@ -156,6 +158,7 @@ class TestCheckSecureFile:
         assert secure is False
         assert "does not exist" in reason
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
     def test_secure_file(self, tmp_path):
         f = tmp_path / "secret.key"
         f.write_text("key data")
@@ -163,6 +166,7 @@ class TestCheckSecureFile:
         secure, reason = check_secure_file(f)
         assert secure is True
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
     def test_insecure_permissions(self, tmp_path):
         f = tmp_path / "wide_open.key"
         f.write_text("key data")
@@ -171,6 +175,7 @@ class TestCheckSecureFile:
         assert secure is False
         assert "insecure permissions" in reason
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
     def test_group_readable_rejected(self, tmp_path):
         f = tmp_path / "group.key"
         f.write_text("key data")
