@@ -140,8 +140,17 @@ auto-activates on `cd` thanks to the included `.envrc`.
 
 ### Core
 - Python 3.11+
-- Linux (X11 or Wayland)
+- Linux (X11 or Wayland) — the supported platform
 - Qt 6.6+
+
+### Platform support
+| Platform | Status | How to install |
+|---|---|---|
+| Linux | Supported — packages, AppImage, apt/dnf repos, pipx | see [Install](#install) |
+| macOS | Experimental — no native installer yet | `pipx install polyglot-ai` (needs Python 3.11+) |
+| Windows | Experimental — no native installer yet; the built-in terminal is disabled (no POSIX pty) | `pipx install polyglot-ai` |
+
+On macOS and Windows the app keeps its data under the platform's usual per-user location (`~/Library/Application Support/polyglot-ai`, `%LOCALAPPDATA%\polyglot-ai`). CI runs an informational smoke job on both so portability regressions are visible; native `.dmg` / `.msi` builds are planned but not there yet.
 
 ### Optional runtimes for MCP servers
 Most MCP servers are distributed as Node.js or Python packages. Install whichever runtimes you need for the servers you want to use:

@@ -125,6 +125,11 @@ def setup_platform() -> Path | None:
     icons_dir = Path(__file__).parent.parent / "resources" / "icons"
     primary_icon = icons_dir / "polyglot-ai.png"
 
+    # Desktop entries, hicolor icons and Wayland app IDs are a
+    # freedesktop concept; on macOS / Windows only the window icon applies.
+    if not sys.platform.startswith("linux"):
+        return primary_icon if primary_icon.exists() else None
+
     hicolor_root = Path.home() / ".local" / "share" / "icons" / "hicolor"
     apps_dir = Path.home() / ".local" / "share" / "applications"
     desktop_dst = apps_dir / "polyglot-ai.desktop"

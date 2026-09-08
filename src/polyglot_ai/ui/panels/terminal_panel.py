@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
 from polyglot_ai.constants import EVT_TERMINAL_EXITED, EVT_TERMINAL_OUTPUT
 from polyglot_ai.core.bridge import EventBus
 from polyglot_ai.core.terminal.emulator import TerminalEmulator
-from polyglot_ai.core.terminal.pty_process import PtyProcess
+from polyglot_ai.core.terminal.pty_process import PTY_AVAILABLE, PtyProcess
 from polyglot_ai.ui import theme_colors as tc
 
 logger = logging.getLogger(__name__)
@@ -1216,6 +1216,16 @@ class TerminalPanel(QWidget):
         cols = max(cols, 80)
 
         self._emulator = TerminalEmulator(rows, cols)
+        if not PTY_AVAILABLE:
+            # Windows: no POSIX pty yet. Show why instead of a blank box.
+            self._terminal_widget.set_emulator(self._emulator)
+            self._on_output(
+                b"The built-in terminal isn't available on this platform yet "
+                b"(it needs a POSIX pty).\r\nUse your system terminal for now; "
+                b"everything else in Polyglot AI works.\r\n"
+            )
+            logger.info("Terminal disabled: no pty on this platform")
+            return
         # Pass bound signal emitters as thread-safe callbacks. The signal
         # is connected to GUI-thread slots above, so cross-thread
         # delivery is queued automatically by Qt.

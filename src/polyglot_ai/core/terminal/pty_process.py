@@ -16,18 +16,25 @@ this module to Qt.
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
-import pty
 import select
 import signal
 import struct
-import termios
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+
+try:
+    import fcntl
+    import pty
+    import termios
+
+    PTY_AVAILABLE = True
+except ImportError:  # Windows: no POSIX pty. The module still imports
+    fcntl = pty = termios = None  # type: ignore[assignment]
+    PTY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,8 @@ class PtyProcess:
         cols: int = 80,
     ) -> None:
         """Fork a new PTY process."""
+        if not PTY_AVAILABLE:
+            raise RuntimeError("The built-in terminal needs a POSIX pty (not available here)")
         if self._running:
             return
 

@@ -4,11 +4,25 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
+from pathlib import Path
 from typing import Any
 
 from polyglot_ai.core.database import Database
 
 logger = logging.getLogger(__name__)
+
+
+def default_shell(platform: str = sys.platform, env: dict | None = None) -> str:
+    """Shell for the built-in terminal when the user hasn't chosen one."""
+    env = os.environ if env is None else env
+    if platform == "win32":
+        return env.get("COMSPEC") or "cmd.exe"
+    if Path("/bin/bash").exists():
+        return "/bin/bash"
+    return env.get("SHELL") or "/bin/sh"
+
 
 DEFAULTS = {
     "theme": "dark",
@@ -21,7 +35,7 @@ DEFAULTS = {
     "ai.temperature": 0.7,
     "ai.max_tokens": 4096,
     "ai.system_prompt": "",
-    "terminal.shell": "/bin/bash",
+    "terminal.shell": default_shell(),
     "terminal.font_size": 11,
     # Session restore
     "session.open_tabs": [],

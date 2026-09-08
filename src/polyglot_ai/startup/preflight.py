@@ -59,7 +59,13 @@ def run_preflight() -> None:
     #    QApplication will refuse to start (or print "could not connect
     #    to display"). Catching here lets us recommend Xvfb / SSH -X
     #    / a real desktop session before the user sees a Qt traceback.
-    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+    #    macOS and Windows always have a display server; only Linux
+    #    sessions can be headless in this sense.
+    if (
+        sys.platform.startswith("linux")
+        and not os.environ.get("DISPLAY")
+        and not os.environ.get("WAYLAND_DISPLAY")
+    ):
         # Honour the offscreen platform — that's how CI runs us.
         if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
             _fatal(

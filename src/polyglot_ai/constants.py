@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from polyglot_ai import __version__
@@ -7,15 +8,36 @@ APP_NAME = "Polyglot AI"
 APP_ID = "io.github.sabiut.polyglotai"
 APP_VERSION = __version__
 
-# Directories. POLYGLOT_AI_DATA_DIR relocates the whole data dir
-# (database, logs, single-instance lock) — for startup benchmarks and
-# for running a second, isolated copy alongside the installed app.
-_data_override = os.environ.get("POLYGLOT_AI_DATA_DIR")
-DATA_DIR = (
-    Path(_data_override).expanduser()
-    if _data_override
-    else Path.home() / ".local" / "share" / "polyglot-ai"
-)
+# Platform. Linux is the supported platform; macOS and Windows are
+# experimental (pipx install) — see README "Platform support".
+IS_LINUX = sys.platform.startswith("linux")
+IS_MACOS = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
+
+
+def default_data_dir(platform: str = sys.platform, env: dict | None = None) -> Path:
+    """Per-user data directory for this platform.
+
+    POLYGLOT_AI_DATA_DIR overrides it everywhere — for startup
+    benchmarks and for running a second, isolated copy alongside the
+    installed app (database, logs and the single-instance lock all
+    live under it).
+    """
+    env = os.environ if env is None else env
+    override = env.get("POLYGLOT_AI_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if platform == "win32":
+        base = env.get("LOCALAPPDATA")
+        return (Path(base) if base else Path.home() / "AppData" / "Local") / "polyglot-ai"
+    if platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "polyglot-ai"
+    xdg = env.get("XDG_DATA_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".local" / "share") / "polyglot-ai"
+
+
+# Directories
+DATA_DIR = default_data_dir()
 LOG_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "polyglot.db"
 
