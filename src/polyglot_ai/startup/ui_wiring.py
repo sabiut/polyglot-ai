@@ -254,7 +254,9 @@ def wire_settings_dialog(
             # open — no need to reopen files or restart the shell.
             window.editor_panel.apply_settings()
             window.terminal_panel.set_font_size(settings.get("terminal.font_size"))
+            window.apply_panel_visibility(settings.get("ui.hidden_panels"))
 
+    window.apply_panel_visibility(settings.get("ui.hidden_panels"))
     window._action_settings.triggered.connect(open_settings)
     window._action_about.triggered.connect(lambda: AboutDialog(window).exec())
     window._action_toggle_theme.triggered.connect(lambda: theme_manager.toggle_theme())

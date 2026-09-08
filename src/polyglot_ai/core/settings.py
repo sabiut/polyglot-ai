@@ -37,6 +37,10 @@ DEFAULTS = {
     # the user doesn't need a notification".
     "notifications.enabled": True,
     "notifications.ai_long_response_seconds": 8,
+    # Activity-bar panels hidden by default. The bar had grown to a
+    # dozen icons; the niche ones start hidden and stay reachable via
+    # the View menu / command palette. Settings → Panels toggles them.
+    "ui.hidden_panels": ["arduino", "database"],
 }
 
 

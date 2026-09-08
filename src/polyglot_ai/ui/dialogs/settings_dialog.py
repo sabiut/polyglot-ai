@@ -198,6 +198,7 @@ class SettingsDialog(QDialog):
         sections = [
             ("Accounts", nav_icons.make_accounts_icon()),
             ("Editor", nav_icons.make_editor_icon()),
+            ("Panels", nav_icons.make_panels_icon()),
             ("AI", nav_icons.make_ai_icon()),
             ("Terminal", nav_icons.make_terminal_icon()),
             ("MCP Servers", nav_icons.make_mcp_icon()),
@@ -234,6 +235,7 @@ class SettingsDialog(QDialog):
         self._stack = QStackedWidget()
         self._stack.addWidget(self._create_accounts_section())
         self._stack.addWidget(self._create_editor_section())
+        self._stack.addWidget(self._create_panels_section())
         self._stack.addWidget(self._create_ai_section())
         self._stack.addWidget(self._create_terminal_section())
         self._stack.addWidget(self._create_mcp_section())
@@ -572,6 +574,57 @@ class SettingsDialog(QDialog):
 
         layout.addStretch()
         return page
+
+    # ── Section: Panels ──────────────────────────────────────────
+
+    def _create_panels_section(self) -> QWidget:
+        from polyglot_ai.ui.widgets.activity_bar import HIDEABLE_PANELS
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 24, 28, 24)
+
+        h = QLabel("Panels")
+        h.setStyleSheet(_SECTION_TITLE)
+        layout.addWidget(h)
+        d = QLabel(
+            "Choose which tools appear in the activity bar. Hidden panels stay one "
+            "step away in the View menu, their shortcut, and the command palette "
+            "(Ctrl+Shift+P)."
+        )
+        d.setStyleSheet(_SECTION_DESC)
+        d.setWordWrap(True)
+        layout.addWidget(d)
+
+        card = QGroupBox()
+        card.setStyleSheet(_CARD_STYLE)
+        form = QFormLayout(card)
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        hidden = set(self._settings.get("ui.hidden_panels") or [])
+        self._panel_checks: dict[str, QCheckBox] = {}
+        for key, label, shortcut in HIDEABLE_PANELS:
+            cb = QCheckBox()
+            cb.setStyleSheet(_CHECKBOX_STYLE)
+            cb.setChecked(key not in hidden)
+            cb.setToolTip(f"Show {label} in the activity bar ({shortcut})")
+            form.addRow(f"{label}:", cb)
+            self._panel_checks[key] = cb
+
+        layout.addWidget(card)
+
+        note = QLabel("Explorer, Search and Source Control are always shown.")
+        note.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; color: {tc.get('text_muted')}; margin-top: 6px;"
+        )
+        layout.addWidget(note)
+        layout.addStretch()
+        return page
+
+    def hidden_panels(self) -> list[str]:
+        """Panel names the user has unticked, in bar order."""
+        return [key for key, cb in self._panel_checks.items() if not cb.isChecked()]
 
     # ── Section: AI ──────────────────────────────────────────────
 
@@ -1197,6 +1250,7 @@ class SettingsDialog(QDialog):
         await self._settings.set("editor.show_line_numbers", self._show_line_numbers.isChecked())
         await self._settings.set("editor.ai_completions", self._ai_completions.isChecked())
         await self._settings.set("theme", self._theme_combo.currentText())
+        await self._settings.set("ui.hidden_panels", self.hidden_panels())
         await self._settings.set("ai.default_model", self._default_model.currentText())
         await self._settings.set("ai.temperature", self._temperature.value() / 10.0)
         await self._settings.set("ai.max_tokens", self._max_tokens.value())

@@ -270,6 +270,19 @@ class MainWindow(QMainWindow):
         )
         self._action_toggle_terminal.toggled.connect(self._on_terminal_visibility_changed)
 
+    def apply_panel_visibility(self, hidden) -> None:
+        """Hide/show activity-bar panels per the ``ui.hidden_panels`` setting.
+
+        A panel that's hidden while it's the one showing in the sidebar
+        gives way to the Explorer so the bar's highlight never points at
+        a button that isn't there.
+        """
+        hidden = list(hidden or [])
+        self._activity_bar.set_hidden_panels(hidden)
+        if self._last_sidebar_view in hidden and self._sidebar_visible:
+            self._activity_bar.set_active("files")
+            self._on_activity_changed("files")
+
     def _on_activity_changed(self, view_name: str) -> None:
         """Handle activity bar icon clicks."""
         if view_name == "settings":

@@ -134,6 +134,17 @@ def make_editor_icon() -> QIcon:
     return QIcon(pm)
 
 
+def make_panels_icon() -> QIcon:
+    """Window frame with a narrow sidebar strip — activity-bar panels."""
+    pm, p = _new_painter()
+    p.drawRoundedRect(QRectF(2, 3, 12, 10), 1.5, 1.5)
+    p.drawLine(QPointF(5.5, 3), QPointF(5.5, 13))
+    for y in (5.5, 8, 10.5):
+        p.drawPoint(QPointF(3.75, y))
+    p.end()
+    return QIcon(pm)
+
+
 def make_ai_icon() -> QIcon:
     """Four-point sparkle — AI settings."""
     pm, p = _new_painter()

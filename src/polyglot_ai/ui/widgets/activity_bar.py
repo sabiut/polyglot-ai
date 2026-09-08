@@ -437,6 +437,21 @@ class ActivityBarButton(QWidget):
         p.drawPath(path)
 
 
+#: Panels a user may hide from the bar (Settings → Panels), in bar
+#: order. Explorer, Search and Source Control are always shown.
+HIDEABLE_PANELS: list[tuple[str, str, str]] = [
+    ("today", "Today", "Ctrl+Shift+H"),
+    ("tasks", "Tasks", "Ctrl+Shift+J"),
+    ("mcp", "MCP Servers", "Ctrl+Shift+M"),
+    ("database", "Database Explorer", "Ctrl+Shift+D"),
+    ("docker", "Docker", "Ctrl+Shift+K"),
+    ("kubernetes", "Kubernetes", "Ctrl+Shift+8"),
+    ("aws", "AWS", "Ctrl+Shift+W"),
+    ("tests", "Tests", "Ctrl+Shift+T"),
+    ("arduino", "Arduino", "Ctrl+Shift+A"),
+]
+
+
 class ActivityBar(QWidget):
     """Thin vertical icon bar on the far left — VS Code style."""
 
@@ -516,6 +531,22 @@ class ActivityBar(QWidget):
             btn.active = key == view_name
 
         self.view_changed.emit(view_name)
+
+    def set_hidden_panels(self, hidden) -> None:
+        """Hide the buttons for ``hidden`` panel names; show the rest.
+
+        Unknown names are ignored and the always-on panels (files,
+        search, git, terminal, settings) can't be hidden.
+        """
+        hideable = {key for key, _label, _shortcut in HIDEABLE_PANELS}
+        hidden_set = {name for name in (hidden or []) if name in hideable}
+        for key in hideable:
+            btn = self._buttons.get(key)
+            if btn is not None:
+                btn.setVisible(key not in hidden_set)
+
+    def visible_panels(self) -> list[str]:
+        return [key for key, btn in self._buttons.items() if not btn.isHidden()]
 
     def set_terminal_active(self, visible: bool) -> None:
         """Highlight the terminal button while the terminal panel is shown."""
