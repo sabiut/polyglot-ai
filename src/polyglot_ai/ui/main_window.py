@@ -34,6 +34,7 @@ from polyglot_ai.ui.panels.git_panel import GitPanel
 from polyglot_ai.ui.panels.search_panel import SearchPanel
 from polyglot_ai.ui.panels.terminal_panel import TerminalPanel, TerminalWidget
 from polyglot_ai.ui.panels.arduino_panel import ArduinoPanel, ArduinoWindow
+from polyglot_ai.ui.panels.aws_panel import AwsPanel
 from polyglot_ai.ui.panels.video_panel import VideoPanel, VideoWindow
 from polyglot_ai.ui.panels.tasks_panel import TasksPanel
 from polyglot_ai.ui.panels.test_panel import TestPanel
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
         self._database_panel = DatabasePanel()
         self._docker_panel = DockerPanel()
         self._k8s_panel = K8sPanel()
+        self._aws_panel = AwsPanel()
         self._test_panel = TestPanel()
         self._tasks_panel = TasksPanel()
         self._today_panel = TodayPanel()
@@ -143,6 +145,7 @@ class MainWindow(QMainWindow):
         self._sidebar_stack.addWidget(self._test_panel)  # 7: tests
         self._sidebar_stack.addWidget(self._tasks_panel)  # 8: tasks
         self._sidebar_stack.addWidget(self._today_panel)  # 9: today
+        self._sidebar_stack.addWidget(self._aws_panel)  # 10: aws
         # Note: ``_arduino_panel`` is intentionally NOT added to the
         # sidebar stack. The chip icon and Ctrl+Shift+A pop it as a
         # standalone window via ``_show_arduino_window`` — the four-
@@ -302,6 +305,7 @@ class MainWindow(QMainWindow):
             "tests": 7,
             "tasks": 8,
             "today": 9,
+            "aws": 10,
         }
         index = view_map.get(view_name, 0)
 
@@ -598,6 +602,11 @@ class MainWindow(QMainWindow):
         self._action_toggle_k8s.setShortcut(QKeySequence("Ctrl+Shift+8"))
         self._action_toggle_k8s.triggered.connect(lambda: self._on_activity_changed("kubernetes"))
         view_menu.addAction(self._action_toggle_k8s)
+
+        self._action_toggle_aws = QAction("A&WS", self)
+        self._action_toggle_aws.setShortcut(QKeySequence("Ctrl+Shift+W"))
+        self._action_toggle_aws.triggered.connect(lambda: self._on_activity_changed("aws"))
+        view_menu.addAction(self._action_toggle_aws)
 
         self._action_toggle_tests = QAction("&Tests", self)
         self._action_toggle_tests.setShortcut(QKeySequence("Ctrl+Shift+T"))
@@ -1038,6 +1047,13 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+8",
         )
         reg.register(
+            "view.aws",
+            "Show AWS",
+            lambda: self._on_activity_changed("aws"),
+            "View",
+            "Ctrl+Shift+W",
+        )
+        reg.register(
             "view.terminal",
             "Toggle Terminal",
             lambda: self._action_toggle_terminal.toggle(),
@@ -1440,6 +1456,10 @@ class MainWindow(QMainWindow):
     @property
     def k8s_panel(self) -> K8sPanel:
         return self._k8s_panel
+
+    @property
+    def aws_panel(self) -> AwsPanel:
+        return self._aws_panel
 
     @property
     def test_panel(self) -> TestPanel:

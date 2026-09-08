@@ -2051,6 +2051,8 @@ class ChatPanel(QWidget):
                 "dir_create": "Created directory",
                 "dir_delete": "Deleted directory",
                 "git_commit": "Committed changes",
+                "aws_cli": "Ran AWS command",
+                "aws_logs_tail": "Fetched CloudWatch logs",
             }
             done_label = _tool_done_labels.get(
                 tool_call.function_name, f"Ran {tool_call.function_name}"

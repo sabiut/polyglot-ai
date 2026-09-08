@@ -124,6 +124,11 @@ class ApprovalDialog(QDialog):
             return self._build_diff_body(args, current_content)
         if tool_name == "shell_exec":
             return self._build_shell_body(args)
+        if tool_name == "aws_cli":
+            shown = dict(args)
+            shown["command"] = "aws " + str(args.get("command", ""))
+            shown.setdefault("workdir", "your AWS account")
+            return self._build_shell_body(shown)
         if tool_name == "file_delete":
             return self._build_file_delete_body(args, current_content)
         if tool_name == "dir_create":

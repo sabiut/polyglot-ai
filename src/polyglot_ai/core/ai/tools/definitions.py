@@ -640,6 +640,66 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "aws_cli",
+            "description": (
+                "Run an AWS CLI command using the user's own credentials/profile. "
+                "Give the command WITHOUT the leading 'aws', e.g. "
+                "'ec2 describe-instances --max-items 5' or 'lambda list-functions'. "
+                "Output is JSON unless you pass --output. Read-only calls "
+                "(describe-*, list-*, get-*, s3 ls, logs tail) run immediately; anything "
+                "that changes state asks the user for approval first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "AWS CLI arguments, without 'aws'",
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": "AWS profile name (optional; default profile otherwise)",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "AWS region, e.g. us-east-1 (optional)",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "aws_logs_tail",
+            "description": (
+                "Fetch recent CloudWatch Logs from a log group, e.g. "
+                "'/aws/lambda/my-function'. Read-only. Use it to diagnose Lambda, "
+                "ECS or API Gateway errors."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "log_group": {"type": "string", "description": "Log group name"},
+                    "since": {
+                        "type": "string",
+                        "description": "How far back, e.g. 10m, 1h, 2d (default 1h)",
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "CloudWatch filter pattern, e.g. ERROR (optional)",
+                    },
+                    "profile": {"type": "string", "description": "AWS profile (optional)"},
+                    "region": {"type": "string", "description": "AWS region (optional)"},
+                },
+                "required": ["log_group"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "k8s_restart_deployment",
             "description": "Trigger a rolling restart of a deployment (graceful pod replacement).",
             "parameters": {
@@ -1014,6 +1074,10 @@ AUTO_APPROVE = {
     "arduino_get_state",
     "arduino_list_boards",
     "arduino_list_starters",
+    # AWS — CloudWatch log fetch only reads. (``aws_cli`` is in
+    # REQUIRES_APPROVAL; the registry auto-approves its read-only
+    # sub-commands per call, see ToolRegistry._is_aws_read_only.)
+    "aws_logs_tail",
 }
 REQUIRES_APPROVAL = {
     # ``shell_exec`` and ``git_commit`` stay on approval because they
@@ -1048,6 +1112,9 @@ REQUIRES_APPROVAL = {
     # subprocesses and should be confirmed.
     "arduino_compile",
     "arduino_upload",
+    # AWS — anything that can change cloud state. Read-only calls are
+    # auto-approved per invocation by the registry.
+    "aws_cli",
     # Scaffold tools — they mutate the filesystem, so the user
     # should see exactly what's about to be created.
     "arduino_load_starter",

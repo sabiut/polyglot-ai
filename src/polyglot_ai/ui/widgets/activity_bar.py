@@ -111,6 +111,8 @@ class ActivityBarButton(QWidget):
             self._draw_arduino_icon(painter, ox, oy)
         elif self._icon_type == "video":
             self._draw_video_icon(painter, ox, oy)
+        elif self._icon_type == "aws":
+            self._draw_aws_icon(painter, ox, oy)
         elif self._icon_type == "terminal":
             self._draw_terminal_icon(painter, ox, oy)
         elif self._icon_type == "settings":
@@ -366,6 +368,18 @@ class ActivityBarButton(QWidget):
         path.closeSubpath()
         p.fillPath(path, p.pen().color())
 
+    def _draw_aws_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """AWS — a cloud outline with a small 'smile' arc underneath."""
+        cloud = QPainterPath()
+        cloud.moveTo(ox + 6, oy + 16)
+        cloud.cubicTo(ox + 2, oy + 16, ox + 2, oy + 10, ox + 6.5, oy + 10)
+        cloud.cubicTo(ox + 7, oy + 5, ox + 14, oy + 4, ox + 15.5, oy + 8.5)
+        cloud.cubicTo(ox + 21, oy + 7.5, ox + 22.5, oy + 15, ox + 18, oy + 16)
+        cloud.closeSubpath()
+        p.drawPath(cloud)
+        # The underline "smile" the AWS mark is known for.
+        p.drawArc(QRectF(ox + 4, oy + 13, 16, 9), 200 * 16, 140 * 16)
+
     def _draw_terminal_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Terminal — rounded frame with a ``>_`` prompt."""
         p.drawRoundedRect(QRectF(ox + 2.5, oy + 4.5, 19, 15), 2.5, 2.5)
@@ -454,6 +468,7 @@ class ActivityBar(QWidget):
             ("database", "Database Explorer (Ctrl+Shift+D)"),
             ("docker", "Docker (Ctrl+Shift+K)"),
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
+            ("aws", "AWS (Ctrl+Shift+W)"),
             ("tests", "Tests (Ctrl+Shift+T)"),
             ("arduino", "Arduino (Ctrl+Shift+A)"),
             # The video editor is deliberately not here: it's the one

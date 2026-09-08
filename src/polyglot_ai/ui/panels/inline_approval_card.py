@@ -51,6 +51,8 @@ def _describe(tool_name: str, args: dict) -> tuple[str, str, str]:
         return "SHELL", "Run command", args.get("command", "")
     if tool_name == "git_commit":
         return "GIT", "Commit", args.get("message", "")
+    if tool_name == "aws_cli":
+        return "AWS", "Run AWS command", "aws " + str(args.get("command", ""))
     return "TOOL", f"Run {tool_name}", ""
 
 
@@ -95,6 +97,10 @@ class InlineApprovalCard(QFrame):
             from polyglot_ai.core.sandbox import Sandbox
 
             self._dangerous = Sandbox.is_dangerous_command(args.get("command") or "")
+        elif tool_name == "aws_cli":
+            from polyglot_ai.core import aws_cli
+
+            self._dangerous = aws_cli.classify(str(args.get("command") or "")) == "destructive"
 
         self.setObjectName("approvalCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

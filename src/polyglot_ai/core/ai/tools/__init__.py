@@ -110,6 +110,8 @@ class ToolRegistry:
         """
         if self._is_bootstrap_approved(tool_name, args):
             return False
+        if self._is_aws_read_only(tool_name, args):
+            return False
         return tool_name not in AUTO_APPROVE
 
     def is_auto_approved(self, tool_name: str, args: dict | None = None) -> bool:
@@ -120,7 +122,20 @@ class ToolRegistry:
         """
         if self._is_bootstrap_approved(tool_name, args):
             return True
+        if self._is_aws_read_only(tool_name, args):
+            return True
         return tool_name in AUTO_APPROVE
+
+    @staticmethod
+    def _is_aws_read_only(tool_name: str, args: dict | None) -> bool:
+        """``aws_cli`` is approval-gated as a tool, but describe/list/get
+        style calls only read state and run without a prompt. The
+        classifier is conservative: unknown verbs count as mutations."""
+        if tool_name != "aws_cli":
+            return False
+        from .aws_tools import is_read_only
+
+        return is_read_only(args)
 
     def _is_bootstrap_approved(self, tool_name: str, args: dict | None = None) -> bool:
         """Return True if bootstrap mode approves this specific invocation.
@@ -453,6 +468,14 @@ class ToolRegistry:
                 from .k8s_tools import k8s_delete_pod
 
                 return await k8s_delete_pod(args)
+            elif tool_name == "aws_cli":
+                from .aws_tools import aws_cli_tool
+
+                return await aws_cli_tool(args)
+            elif tool_name == "aws_logs_tail":
+                from .aws_tools import aws_logs_tail
+
+                return await aws_logs_tail(args)
             elif tool_name == "k8s_restart_deployment":
                 from .k8s_tools import k8s_restart_deployment
 

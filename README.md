@@ -45,6 +45,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **CI/CD panel** — GitHub Actions workflow runs, job status, live log streaming
 - **Docker panel** — Containers, images, logs, start/stop/restart/remove with approval
 - **Kubernetes panel** — Pods, deployments, services, logs, scale/delete/apply with approval
+- **AWS panel** — Lambda, EC2, ECS and S3 at a glance via your own `aws` CLI; CloudWatch log tail, invoke/start/stop with confirmation, and AI tools that run read-only calls freely and gate anything mutating behind approval
 - **Database panel** — Direct PostgreSQL / MySQL / SQLite connections with schema explorer and SQL runner
 
 ### MCP (Model Context Protocol)
@@ -161,6 +162,7 @@ These are only needed if you want to use the corresponding panel:
 | `gh` (GitHub CLI) | [cli.github.com](https://cli.github.com/) | CI/CD panel (GitHub Actions) |
 | `docker` | [docs.docker.com](https://docs.docker.com/engine/install/) | Docker panel |
 | `kubectl` | [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) | Kubernetes panel |
+| `aws` | [aws.amazon.com/cli](https://aws.amazon.com/cli/) | AWS panel and `aws_cli` AI tool |
 | `arduino-cli` | [arduino.github.io/arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | Arduino panel (C++ build & upload) |
 | `mpremote` | `pip install --user mpremote` | Arduino panel (MicroPython upload) |
 

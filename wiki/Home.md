@@ -3,7 +3,7 @@
 Welcome to the **Polyglot AI** wiki. Polyglot AI is an AI-native desktop
 workbench for software, infrastructure, and data teams. It bundles a
 multi-provider AI chat, a code editor, a terminal, and first-class panels
-for git, tests, CI/CD, Docker, Kubernetes, databases, MCP servers, and
+for git, tests, CI/CD, Docker, Kubernetes, AWS, databases, MCP servers, and
 diff review — all stitched together with a task-based workflow so your
 work stays in context.
 
@@ -27,7 +27,7 @@ This wiki is the full user guide. Pick a section below.
 - **[Tests](Tests-and-Review#tests)** — pytest explorer with live output and AI fix
 
 ### Infrastructure
-- **[CI / Docker / Kubernetes](CI-Docker-Kubernetes)** — inspect runs, containers, and clusters
+- **[CI / Docker / Kubernetes / AWS](CI-Docker-Kubernetes)** — inspect runs, containers, clusters, and your AWS account
 - **[Database](Database)** — multi-engine explorer, query runner, schema browser
 
 ### Workflow
@@ -137,7 +137,7 @@ For a deeper walkthrough, start with **[Getting Started](Getting-Started)**.
 
 - **Activity bar** (far left): switches which panel is showing in the sidebar.
 - **Sidebar**: the currently selected panel (Today, Tasks, Files, Search,
-  Git, MCP, Database, Docker, Kubernetes, Tests).
+  Git, MCP, Database, Docker, Kubernetes, AWS, Tests).
 - **Editor**: tabbed code editor + previews + notebook.
 - **Terminal**: integrated shell at the bottom. Toggle with `` Ctrl+` ``.
 - **Chat**: always-available AI panel on the right. Toggle with `Ctrl+Shift+A`.
