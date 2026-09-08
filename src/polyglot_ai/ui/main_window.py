@@ -256,6 +256,11 @@ class MainWindow(QMainWindow):
         # here), close is the same toggle as the activity-bar button.
         self._terminal_expanded = False
         self._center_sizes_before_expand: list[int] | None = None
+        # Last height the terminal had while visible. A hidden pane
+        # reports 0 to the splitter; saving/restoring that zero left the
+        # terminal invisible when it was next toggled on.
+        self._terminal_height_hint: int | None = None
+        self._center_splitter.splitterMoved.connect(lambda *_: self._remember_terminal_height())
         self._terminal_panel.expand_requested.connect(self._toggle_terminal_expanded)
         self._terminal_panel.close_requested.connect(
             lambda: self._action_toggle_terminal.setChecked(False)
@@ -913,11 +918,43 @@ class MainWindow(QMainWindow):
             self._terminal_expanded = False
         self._terminal_panel.set_expanded(self._terminal_expanded)
 
+    _MIN_TERMINAL_HEIGHT = 60
+
+    def _remember_terminal_height(self) -> None:
+        if self._terminal_expanded or not self._action_toggle_terminal.isChecked():
+            return
+        sizes = self._center_splitter.sizes()
+        if len(sizes) == 2 and sizes[1] >= self._MIN_TERMINAL_HEIGHT:
+            self._terminal_height_hint = sizes[1]
+
+    def _sane_center_sizes(self, sizes: list[int]) -> list[int]:
+        """Return ``sizes`` with a usable terminal height (index 1)."""
+        total = sum(sizes) or max(self._center_splitter.height(), 400)
+        if len(sizes) == 2 and sizes[1] >= self._MIN_TERMINAL_HEIGHT:
+            return list(sizes)
+        height = self._terminal_height_hint or max(180, int(total * 0.28))
+        height = min(height, max(total - 120, self._MIN_TERMINAL_HEIGHT))
+        return [total - height, height]
+
+    def _ensure_terminal_has_height(self) -> None:
+        if self._terminal_expanded or not self._action_toggle_terminal.isChecked():
+            return
+        sizes = self._center_splitter.sizes()
+        if len(sizes) == 2 and sizes[1] < self._MIN_TERMINAL_HEIGHT:
+            self._center_splitter.setSizes(self._sane_center_sizes(sizes))
+
     def _on_terminal_visibility_changed(self, visible: bool) -> None:
         # Hiding an expanded terminal must not leave the editor at
         # zero height when it comes back.
         if not visible and self._terminal_expanded:
             self._toggle_terminal_expanded()
+        if visible:
+            # A pane that was hidden when the session was saved (or
+            # collapsed by a drag) comes back at zero height — the
+            # button lights up but nothing appears. Give it room.
+            self._ensure_terminal_has_height()
+        else:
+            self._remember_terminal_height()
 
     def _show_command_palette(self) -> None:
         palette = CommandPalette(self._action_registry, self)
@@ -1288,12 +1325,19 @@ class MainWindow(QMainWindow):
             if hasattr(tab, "file_path") and tab.file_path:
                 open_tabs.append(str(tab.file_path))
 
+        center = self._center_splitter.sizes()
+        if not self._action_toggle_terminal.isChecked() or self._terminal_expanded:
+            # Don't persist a hidden (0) or expanded (editor 0) split —
+            # record the last normal one so the next show is sane.
+            center = self._sane_center_sizes(
+                self._center_sizes_before_expand or [sum(center) or 0, 0]
+            )
         return {
             "session.open_tabs": open_tabs,
             "session.active_tab_index": self._editor_panel.currentIndex(),
             "session.splitter_sizes": {
                 "main": self._main_splitter.sizes(),
-                "center": self._center_splitter.sizes(),
+                "center": center,
             },
             "session.window_geometry": {
                 "x": self.x(),
@@ -1336,6 +1380,9 @@ class MainWindow(QMainWindow):
             if main_sizes and len(main_sizes) == 3:
                 self._main_splitter.setSizes(main_sizes)
             if center_sizes and len(center_sizes) == 2:
+                center_sizes = self._sane_center_sizes([int(s) for s in center_sizes])
+                if center_sizes[1] >= self._MIN_TERMINAL_HEIGHT:
+                    self._terminal_height_hint = center_sizes[1]
                 self._center_splitter.setSizes(center_sizes)
 
         # Open tabs

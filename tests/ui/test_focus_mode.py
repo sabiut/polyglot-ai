@@ -96,6 +96,25 @@ class TestOnDemandTerminal:
         assert not window._action_toggle_terminal.isChecked()
         assert not window._activity_bar._buttons["terminal"].active
 
+    def test_shown_terminal_always_gets_a_usable_height(self, window, qapp):
+        # A session saved while the terminal was hidden recorded a 0
+        # height; toggling the terminal on then lit the button but
+        # showed nothing.
+        window.restore_session({"session.splitter_sizes": {"center": [750, 0]}})
+        window._action_toggle_terminal.setChecked(True)
+        qapp.processEvents()
+        assert window._center_splitter.sizes()[1] >= window._MIN_TERMINAL_HEIGHT
+        assert window._terminal_panel.height() >= window._MIN_TERMINAL_HEIGHT
+
+    def test_saved_split_never_records_a_hidden_terminal_as_zero(self, window, qapp):
+        window._action_toggle_terminal.setChecked(True)
+        window._center_splitter.setSizes([500, 200])
+        qapp.processEvents()
+        window._action_toggle_terminal.setChecked(False)
+        qapp.processEvents()
+        center = window.save_session()["session.splitter_sizes"]["center"]
+        assert center[1] >= window._MIN_TERMINAL_HEIGHT
+
     def test_visibility_is_not_persisted(self, window):
         # Closing the app with the terminal open must not bring it
         # back on the next launch — it's hidden by default, always.
