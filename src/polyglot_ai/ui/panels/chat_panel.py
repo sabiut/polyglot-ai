@@ -419,9 +419,26 @@ class ChatPanel(QWidget):
 
         # Category filter buttons
         self._cat_widget = QWidget()
-        cat_layout = QHBoxLayout(self._cat_widget)
-        cat_layout.setContentsMargins(4, 2, 4, 2)
+        cat_column = QVBoxLayout(self._cat_widget)
+        cat_column.setContentsMargins(4, 2, 4, 2)
+        cat_column.setSpacing(2)
+        cat_layout = QHBoxLayout()
+        cat_layout.setContentsMargins(0, 0, 0, 0)
         cat_layout.setSpacing(2)
+        cat_column.addLayout(cat_layout)
+        # Project scope: on by default so the list shows this project's
+        # chats (plus unscoped ones); off = every project's history.
+        self._scope_project_only = True
+        self._scope_btn = QPushButton("This project")
+        self._scope_btn.setCheckable(True)
+        self._scope_btn.setChecked(True)
+        self._scope_btn.setFixedHeight(20)
+        self._scope_btn.setToolTip(
+            "Show only conversations started in the current project "
+            "(plus ones started with no project open). Click to show all projects."
+        )
+        self._scope_btn.clicked.connect(self._toggle_project_scope)
+        cat_column.addWidget(self._scope_btn)
         self._active_category = "all"
         self._cat_buttons = {}
         for cat_name in ("All", "Work", "Personal", "Research"):
@@ -692,6 +709,7 @@ class ChatPanel(QWidget):
         """
         for btn in self._cat_buttons.values():
             btn.setStyleSheet(_cat_pill)
+        self._scope_btn.setStyleSheet(_cat_pill)
         self._conv_list.setStyleSheet(f"""
             QListWidget {{
                 font-size: {tc.FONT_MD}px;
@@ -2240,7 +2258,10 @@ class ChatPanel(QWidget):
                 task_title = getattr(self._active_task, "title", "")
                 if task_title:
                     title = f"[{task_title[:30]}] {title}"[:80]
-            conv.id = await self._db.create_conversation(title, conv.model)
+            root = self._get_project_root()
+            conv.id = await self._db.create_conversation(
+                title, conv.model, project_root=str(root) if root else None
+            )
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, conv.id)
             item.setToolTip(title)
@@ -2407,6 +2428,20 @@ class ChatPanel(QWidget):
 
         safe_task(self.populate_conversations(), name="populate_conversations")
 
+    def _toggle_project_scope(self, checked: bool) -> None:
+        self._scope_project_only = bool(checked)
+        self._scope_btn.setText("This project" if checked else "All projects")
+        from polyglot_ai.core.async_utils import safe_task
+
+        safe_task(self.populate_conversations(), name="populate_conversations")
+
+    def _history_scope_root(self) -> str | None:
+        """Project root to scope the history list to, or None for all."""
+        if not getattr(self, "_scope_project_only", True):
+            return None
+        root = self._get_project_root()
+        return str(root) if root else None
+
     def _on_conversation_search(self, query: str) -> None:
         """Keystroke handler: instant title filter + debounced content search."""
         conv_list_actions.filter_by_search(self._conv_list, query)
@@ -2425,7 +2460,9 @@ class ChatPanel(QWidget):
         if not query or not self._db:
             return
         try:
-            rows = await self._db.search_conversations(query)
+            rows = await self._db.search_conversations(
+                query, project_root=self._history_scope_root()
+            )
         except Exception:
             logger.exception("conversation content search failed")
             return
@@ -2460,7 +2497,9 @@ class ChatPanel(QWidget):
             return
         self._conv_list.clear()
         category = getattr(self, "_active_category", "all")
-        conversations = await self._db.list_conversations(category=category)
+        conversations = await self._db.list_conversations(
+            category=category, project_root=self._history_scope_root()
+        )
         for conv in conversations:
             raw_title = (conv["title"] or "").strip() or "Untitled"
             # Collapse internal whitespace so multi-line titles render

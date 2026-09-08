@@ -6,7 +6,36 @@ import pytest
 @pytest.mark.asyncio
 async def test_schema_created(db):
     row = await db.fetchone("SELECT MAX(version) as v FROM schema_version")
-    assert row["v"] == 5
+    assert row["v"] == 6
+
+
+@pytest.mark.asyncio
+async def test_project_scoped_listing_and_search(db):
+    a = await db.create_conversation("Alpha work", "m", project_root="/p/alpha")
+    b = await db.create_conversation("Beta work", "m", project_root="/p/beta")
+    general = await db.create_conversation("General chat", "m")
+    await db.insert_message(b, "user", content="needle in beta")
+
+    ids = {c["id"] for c in await db.list_conversations(project_root="/p/alpha")}
+    assert ids == {a, general}, "scoped list = this project's chats + unscoped chats"
+    ids = {c["id"] for c in await db.list_conversations()}
+    assert ids == {a, b, general}
+
+    hits = {c["id"] for c in await db.search_conversations("needle", project_root="/p/alpha")}
+    assert hits == set()
+    hits = {c["id"] for c in await db.search_conversations("needle", project_root="/p/beta")}
+    assert hits == {b}
+    hits = {c["id"] for c in await db.search_conversations("work")}
+    assert hits == {a, b}
+
+
+@pytest.mark.asyncio
+async def test_fork_keeps_project_root(db):
+    conv = await db.create_conversation("Root", "m", project_root="/p/x")
+    msg = await db.insert_message(conv, "user", content="hi")
+    forked = await db.fork_conversation(conv, msg)
+    row = await db.fetchone("SELECT project_root FROM conversations WHERE id = ?", (forked,))
+    assert row["project_root"] == "/p/x"
 
 
 @pytest.mark.asyncio

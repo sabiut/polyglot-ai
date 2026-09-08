@@ -133,6 +133,8 @@ def wire_project_events(
         # MCP tools actually become available from the very next message.
         all_tools = tool_registry.get_tool_definitions() + mcp_client.get_tool_definitions()
         chat.set_tools(all_tools, registry=tool_registry)
+        # History is scoped per project — re-list for the one just opened.
+        safe_task(chat.populate_conversations(), name="populate_conversations")
 
         # Wire MCP → chat tool-list refresh and sidebar refresh. Register
         # the listener exactly once per app lifetime so reopening projects

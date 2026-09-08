@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS prompt_templates (
 """
 
 # Latest schema version
-LATEST_VERSION = 5
+LATEST_VERSION = 6
 
 
 class Database:
@@ -108,6 +108,7 @@ class Database:
             3: self._migrate_v3,
             4: self._migrate_v4,
             5: self._migrate_v5,
+            6: self._migrate_v6,
         }
         assert max(migration_steps) == LATEST_VERSION, (
             f"LATEST_VERSION ({LATEST_VERSION}) != max migration ({max(migration_steps)})"
@@ -200,6 +201,27 @@ class Database:
             if not await self._column_exists(table, column):
                 await self._conn.execute(stmt)
 
+    # ``project_root`` scopes a conversation to the project folder that
+    # was open when it started, so the history sidebar can show only
+    # this project's chats. NULL = started with no project open (or
+    # before this column existed); those show under every project.
+    _V6_ALTERS = [
+        (
+            "conversations",
+            "project_root",
+            "ALTER TABLE conversations ADD COLUMN project_root TEXT",
+        ),
+    ]
+
+    async def _migrate_v6(self) -> None:
+        """Add conversations.project_root for per-project chat history."""
+        for table, column, stmt in self._V6_ALTERS:
+            if not await self._column_exists(table, column):
+                await self._conn.execute(stmt)
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_root)"
+        )
+
     # Tables and columns that may be referenced in _column_exists().
     # Only these identifiers are allowed in the PRAGMA query.
     _VALID_TABLES = frozenset(
@@ -221,6 +243,7 @@ class Database:
             "fork_point_message_id",
             "category",
             "reasoning_content",
+            "project_root",
         }
     )
 
@@ -295,20 +318,45 @@ class Database:
         title: str,
         model: str,
         category: str = "all",
+        project_root: str | None = None,
     ) -> int:
         cursor = await self.execute(
-            "INSERT INTO conversations (title, model, category) VALUES (?, ?, ?)",
-            (title, model, category),
+            "INSERT INTO conversations (title, model, category, project_root) VALUES (?, ?, ?, ?)",
+            (title, model, category, project_root),
         )
         return cursor.lastrowid
 
-    async def list_conversations(self, category: str | None = None) -> list[dict]:
+    @staticmethod
+    def _project_scope_clause(project_root: str | None) -> tuple[str, tuple]:
+        """SQL fragment limiting rows to ``project_root`` plus unscoped chats.
+
+        ``None`` means "all projects" — no restriction. Conversations
+        with no project (standalone mode, or older than the column)
+        always show, so scoping never hides history the user knows exists.
+        """
+        if project_root is None:
+            return "", ()
+        return "(project_root = ? OR project_root IS NULL)", (project_root,)
+
+    async def list_conversations(
+        self,
+        category: str | None = None,
+        project_root: str | None = None,
+    ) -> list[dict]:
+        clauses: list[str] = []
+        params: list = []
         if category and category != "all":
-            return await self.fetchall(
-                "SELECT * FROM conversations WHERE category = ? ORDER BY updated_at DESC",
-                (category,),
-            )
-        return await self.fetchall("SELECT * FROM conversations ORDER BY updated_at DESC")
+            clauses.append("category = ?")
+            params.append(category)
+        scope_sql, scope_params = self._project_scope_clause(project_root)
+        if scope_sql:
+            clauses.append(scope_sql)
+            params.extend(scope_params)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return await self.fetchall(
+            f"SELECT * FROM conversations{where} ORDER BY updated_at DESC",
+            tuple(params),
+        )
 
     async def insert_message(
         self,
@@ -366,15 +414,17 @@ class Database:
         # Messages and attachments are deleted via ON DELETE CASCADE
         await self.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
 
-    async def search_conversations(self, query: str) -> list[dict]:
+    async def search_conversations(self, query: str, project_root: str | None = None) -> list[dict]:
         # Escape LIKE wildcards to prevent unintended pattern matching
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        scope_sql, scope_params = self._project_scope_clause(project_root)
+        scope = f" AND {scope_sql.replace('project_root', 'c.project_root')}" if scope_sql else ""
         return await self.fetchall(
-            """SELECT DISTINCT c.* FROM conversations c
+            f"""SELECT DISTINCT c.* FROM conversations c
                LEFT JOIN messages m ON m.conversation_id = c.id
-               WHERE c.title LIKE ? ESCAPE '\\' OR m.content LIKE ? ESCAPE '\\'
+               WHERE (c.title LIKE ? ESCAPE '\\' OR m.content LIKE ? ESCAPE '\\'){scope}
                ORDER BY c.updated_at DESC""",
-            (f"%{escaped}%", f"%{escaped}%"),
+            (f"%{escaped}%", f"%{escaped}%", *scope_params),
         )
 
     async def pin_conversation(self, conv_id: int, pinned: bool = True) -> None:
@@ -459,7 +509,7 @@ class Database:
         if self._conn is None:
             raise RuntimeError("Database not initialised — call await db.init() first")
         conv = await self.fetchone(
-            "SELECT title, model FROM conversations WHERE id = ?",
+            "SELECT title, model, project_root FROM conversations WHERE id = ?",
             (conv_id,),
         )
         if not conv:
@@ -489,9 +539,15 @@ class Database:
             # Create forked conversation
             cursor = await self._conn.execute(
                 """INSERT INTO conversations
-                   (title, model, parent_conversation_id, fork_point_message_id)
-                   VALUES (?, ?, ?, ?)""",
-                (f"{conv['title']} (fork)", conv["model"], conv_id, fork_message_id),
+                   (title, model, parent_conversation_id, fork_point_message_id, project_root)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    f"{conv['title']} (fork)",
+                    conv["model"],
+                    conv_id,
+                    fork_message_id,
+                    conv["project_root"],
+                ),
             )
             new_conv_id = cursor.lastrowid
 
