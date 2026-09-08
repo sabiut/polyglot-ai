@@ -28,6 +28,13 @@ ChatGPT Plus/Pro/Business/Enterprise and Claude Pro/Max/Team plans).
 
 Editor changes apply to tabs opened after saving.
 
+#### Panels
+One checkbox per activity-bar panel (Today, Tasks, MCP, Database,
+Docker, Kubernetes, AWS, Tests, Arduino). Unticked panels leave the bar
+but stay reachable from the View menu, their shortcut and the command
+palette. Arduino and Database are hidden by default; Explorer, Search
+and Source Control are always shown.
+
 #### Terminal
 - **Shell** — path to your preferred shell (`/bin/bash`, `/usr/bin/zsh`, …).
 - **Font size**.
@@ -61,6 +68,18 @@ shows token spend, backed by the usage table in the main app DB.
   their own repos, and for test suites. The manual
   **Help → Check for Updates…** action still works either way — it
   forces a fresh check and always reports back with a dialog.
+- **`POLYGLOT_AI_DATA_DIR`** — relocates the data directory (database,
+  logs, single-instance lock). Handy for running a second, isolated copy
+  next to the installed app, or for benchmarks.
+- **`POLYGLOT_AI_STARTUP_TIMING=1`** — prints a per-phase startup
+  timing report once the window is up (it's also written to the log at
+  INFO level). **`POLYGLOT_AI_EXIT_AFTER_STARTUP=1`** quits right after
+  the report and skips the first-run dialogs, so a cold start can be
+  measured from a script:
+
+  ```bash
+  POLYGLOT_AI_DATA_DIR=/tmp/pg-bench POLYGLOT_AI_STARTUP_TIMING=1 POLYGLOT_AI_EXIT_AFTER_STARTUP=1 polyglot-ai
+  ```
 
 ---
 
@@ -95,6 +114,7 @@ shows token spend, backed by the usage table in the main app DB.
 | `Ctrl+W` | Close tab |
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Replace |
+| `F8` | Go to next problem (diagnostics) |
 | `Ctrl+N` | New file (explorer focused) |
 
 ### Chat

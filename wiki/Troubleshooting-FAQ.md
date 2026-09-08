@@ -40,6 +40,16 @@ on the new machine.
 - Check Python version: must be 3.11+.
 - Check PyQt6 installed: `pip show PyQt6`.
 
+### The app is slow to start
+
+Run it with `POLYGLOT_AI_STARTUP_TIMING=1` to get a per-phase report
+(see [Settings & Shortcuts → Environment variables](Settings-and-Shortcuts#environment-variables)).
+On a typical machine the window appears well under a second; the AI
+provider SDKs load in the background afterwards and the model list
+fills in when they're ready. Anything much slower usually points at
+the keyring (a slow Secret Service / KWallet) or a network-mounted
+home directory — the report says which phase.
+
 ### "No module named 'polyglot_ai'"
 
 You're running from outside the virtualenv. Activate it:
@@ -140,10 +150,13 @@ task manager scope. Chat conversations are shared across windows.
 
 ### Does it work on Windows / macOS?
 
-The app targets Linux first but uses PyQt6 (cross-platform) and avoids
-Linux-only APIs where possible. Terminal, Docker, and Kubernetes panels
-are lightly tested on macOS. Windows support is best-effort — some panels
-may need path adjustments.
+Linux is the supported platform. macOS and Windows are **experimental**:
+install with `pipx install polyglot-ai` (Python 3.11+). The app keeps
+its data in the platform's usual per-user location and skips the
+Linux-only setup (desktop files, display checks). On Windows the
+built-in terminal is disabled — it needs a POSIX pty — everything else
+works. CI runs an informational smoke job on both so regressions are
+visible; native `.dmg` / `.msi` installers are planned.
 
 ### Where do I file bugs or feature requests?
 

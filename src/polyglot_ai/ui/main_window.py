@@ -687,6 +687,11 @@ class MainWindow(QMainWindow):
         self._terminal_panel.setVisible(False)
         view_menu.addAction(self._action_toggle_terminal)
 
+        self._action_ssh_session = QAction("New &SSH Session...", self)
+        self._action_ssh_session.triggered.connect(lambda: self.open_ssh_session())
+        self._terminal_panel.ssh_requested.connect(lambda: self.open_ssh_session())
+        view_menu.addAction(self._action_ssh_session)
+
         self._action_toggle_chat = QAction("&AI Chat", self)
         self._action_toggle_chat.setCheckable(True)
         self._action_toggle_chat.setChecked(True)
@@ -1021,6 +1026,47 @@ class MainWindow(QMainWindow):
         height = min(height, max(total - 120, self._MIN_TERMINAL_HEIGHT))
         return [total - height, height]
 
+    # ── Terminal: SSH sessions ──────────────────────────────────────
+
+    def run_in_terminal(self, command: str) -> bool:
+        """Show the terminal and type ``command`` into its shell."""
+        if not self._action_toggle_terminal.isChecked():
+            self._action_toggle_terminal.setChecked(True)
+        self._ensure_terminal_has_height()
+        sent = self._terminal_panel.send_command(command)
+        if not sent:
+            self.statusBar().showMessage(
+                "The terminal has no running shell — restart it to run commands.", 6000
+            )
+        return sent
+
+    def open_ssh_session(self, prefill=None, *, ask: bool = True) -> None:
+        """Open an SSH session in the terminal (first cut of remote projects).
+
+        ``prefill`` seeds the dialog (e.g. an EC2 instance's address);
+        ``ask=False`` connects straight away without showing it.
+        """
+        from polyglot_ai.core.async_utils import safe_task
+        from polyglot_ai.core.ssh import config_hosts
+
+        settings = getattr(self, "_settings", None)
+        recents = list((settings.get("ssh.recent_targets") if settings else None) or [])
+        target = prefill
+        if ask or target is None:
+            from polyglot_ai.ui.dialogs.ssh_dialog import SshConnectDialog
+
+            dlg = SshConnectDialog(recents, config_hosts(), self, prefill=prefill)
+            if not dlg.exec():
+                return
+            target = dlg.target()
+        if target is None:
+            return
+        if settings is not None:
+            key = target.to_string()
+            recents = [key] + [r for r in recents if r != key]
+            safe_task(settings.set("ssh.recent_targets", recents[:10]), name="save_ssh_recent")
+        self.run_in_terminal(target.command())
+
     def _ensure_terminal_has_height(self) -> None:
         if self._terminal_expanded or not self._action_toggle_terminal.isChecked():
             return
@@ -1128,6 +1174,12 @@ class MainWindow(QMainWindow):
             lambda: self._action_toggle_terminal.toggle(),
             "View",
             "Ctrl+`",
+        )
+        reg.register(
+            "terminal.ssh",
+            "New SSH Session…",
+            lambda: self.open_ssh_session(),
+            "Terminal",
         )
         reg.register(
             "view.chat",

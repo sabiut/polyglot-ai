@@ -68,6 +68,23 @@ def draw_plus_icon() -> QIcon:
     return QIcon(pm)
 
 
+def draw_remote_icon() -> QIcon:
+    """Terminal prompt with a link dot — 'connect over SSH'."""
+    pm = QPixmap(16, 16)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(tc.get("text_primary")))
+    pen.setWidthF(1.5)
+    p.setPen(pen)
+    p.drawRoundedRect(QRectF(1.5, 2.5, 13, 11), 1.5, 1.5)
+    p.drawLine(4, 6, 7, 8)
+    p.drawLine(7, 8, 4, 10)
+    p.drawLine(8, 11, 12, 11)
+    p.end()
+    return QIcon(pm)
+
+
 def draw_popout_icon() -> QIcon:
     """Box-with-arrow ↗ glyph — 'open in a separate window' affordance."""
     pm = QPixmap(16, 16)

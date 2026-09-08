@@ -546,6 +546,32 @@ class AwsPanel(QWidget):
                 json_output=False,
             )
 
+    # ── Connect to instances (terminal) ─────────────────────────────
+
+    @staticmethod
+    def ssh_target_for(instance: dict):
+        """Seed for the SSH dialog: the instance's address, default EC2 user."""
+        from polyglot_ai.core.ssh import SshTarget
+
+        return SshTarget(host=instance.get("ip", ""), user="ec2-user")
+
+    def ssm_command_for(self, instance_id: str) -> str:
+        from polyglot_ai.core.ssh import ssm_command
+
+        return ssm_command(instance_id, profile=self._profile, region=self._region)
+
+    def _connect_ssh(self, instance: dict) -> None:
+        window = self.window()
+        opener = getattr(window, "open_ssh_session", None)
+        if opener is not None:
+            opener(self.ssh_target_for(instance))
+
+    def _connect_ssm(self, instance_id: str) -> None:
+        window = self.window()
+        runner = getattr(window, "run_in_terminal", None)
+        if runner is not None:
+            runner(self.ssm_command_for(instance_id))
+
     # ── Context menu ────────────────────────────────────────────────
 
     def _show_context_menu(self, pos) -> None:
@@ -584,6 +610,14 @@ class AwsPanel(QWidget):
             menu.addAction("Describe").triggered.connect(lambda: self._on_item_selected(item, None))
             menu.addSeparator()
             if data["state"] == "running":
+                if data.get("ip"):
+                    menu.addAction("Connect via SSH…").triggered.connect(
+                        lambda: self._connect_ssh(data)
+                    )
+                menu.addAction("Connect via Session Manager (SSM)").triggered.connect(
+                    lambda: self._connect_ssm(iid)
+                )
+                menu.addSeparator()
                 menu.addAction("Stop instance…").triggered.connect(
                     lambda: self._ec2_action("stop-instances", iid, "Stop")
                 )

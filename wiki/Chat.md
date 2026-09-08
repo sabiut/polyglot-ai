@@ -196,7 +196,14 @@ Every message exchange is part of a **conversation** that is persisted in
 the main app database. The sidebar on the left of the chat panel lists your
 conversations, grouped by category.
 
+Conversations remember the project they were started in. The sidebar
+defaults to **This project** — the current project's chats plus any
+started with no project open — and the button under the category
+filter toggles to **All projects**. Search follows the same scope, and
+forked conversations keep their project.
+
 ### Sidebar actions
+- **This project / All projects** — scope the list (see above).
 - **Search** — case-insensitive substring search over conversation
   titles and message contents. Titles filter instantly on each
   keystroke; content matches fill in after a brief typing pause.

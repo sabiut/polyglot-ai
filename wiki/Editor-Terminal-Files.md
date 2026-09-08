@@ -39,6 +39,27 @@ provider as you pause typing. The suggestion is shown as an annotation
 below the current line; automatic insertion isn't implemented yet —
 `Tab` dismisses the annotation.
 
+### Diagnostics
+
+Python buffers are linted by **ruff** as you type (about 0.7 s after
+you pause), and JSON / YAML files get parse errors. Problems show as
+squiggles — red for errors (syntax errors, undefined names), amber for
+warnings — and the message appears when you hover the line. The status
+bar shows a count ("2 errors · 1 warning"); click it or press `F8` to
+jump to the next problem.
+
+Right-click a squiggled line for:
+
+- **Fix with AI: <problem>** — pre-fills the chat with the file, line,
+  message and the surrounding code so you can send it as-is.
+- **Apply ruff auto-fixes** — applies ruff's safe fixes (unused
+  imports, etc.) to the buffer; undo reverts it.
+- **Go to next problem**.
+
+ruff is installed with the app. If it isn't found on `PATH` or in the
+app's environment, Python diagnostics are simply off; JSON/YAML still
+work. Files with other suffixes aren't checked at all.
+
 ### Refactoring preview
 
 Ask the AI to refactor a file (via chat) and you get a diff preview in a
@@ -50,6 +71,23 @@ shows the old and new content side by side.
 An integrated terminal at the bottom of the window. Toggle with `` Ctrl+` ``.
 It's a real PTY-backed shell (uses `pty.fork()`), so interactive programs
 like vim, ssh, htop, and `docker attach` work.
+
+### SSH sessions
+
+**View → New SSH Session…**, the terminal header's SSH button, or the
+command palette opens a small dialog: host (or `user@host:port`, or a
+`~/.ssh/config` alias — both recent targets and config aliases are
+suggested), user, port and an optional identity file. Connect types the
+`ssh …` command into the terminal, so what runs is exactly what you
+see; the last ten targets are remembered.
+
+The AWS panel hooks into this: right-click a running EC2 instance for
+**Connect via SSH…** (pre-filled with its address) or **Connect via
+Session Manager (SSM)**, which runs `aws ssm start-session` — no open
+port 22 needed.
+
+This is the first cut of remote projects: the terminal is the remote
+surface. Editing remote files in the editor isn't there yet.
 
 ### Basics
 - **Shell** — configurable in **Settings → Terminal**; defaults to

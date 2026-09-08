@@ -9,7 +9,9 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 ### Core
 - **Multi-provider AI chat** — OpenAI, Anthropic (Claude), Google (Gemini), DeepSeek with streaming responses
 - **Integrated code editor** — Syntax highlighting via QScintilla, multi-tab editing
-- **Built-in terminal** — Full PTY terminal with mouse text selection, copy/paste, and right-click context menu
+- **Inline diagnostics** — ruff lints Python as you type (JSON/YAML parse errors too): squiggles, hover messages, a problems count in the status bar, F8 to jump, right-click "Fix with AI" or apply ruff's auto-fixes
+- **Built-in terminal** — Full PTY terminal with mouse text selection, copy/paste, right-click context menu, and one-click SSH sessions (recent targets + `~/.ssh/config` aliases)
+- **Per-project chat history** — the conversation sidebar shows the current project's chats by default, with an "All projects" toggle
 - **AI tool calling** — File read/write/search, shell execution, git operations
 - **Command palette** — Quick actions with Ctrl+Shift+P
 - **Plan mode** — Structured step-by-step development plans
@@ -45,7 +47,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **CI/CD panel** — GitHub Actions workflow runs, job status, live log streaming
 - **Docker panel** — Containers, images, logs, start/stop/restart/remove with approval
 - **Kubernetes panel** — Pods, deployments, services, logs, scale/delete/apply with approval
-- **AWS panel** — Lambda, EC2, ECS and S3 at a glance via your own `aws` CLI; CloudWatch log tail, invoke/start/stop with confirmation, and AI tools that run read-only calls freely and gate anything mutating behind approval
+- **AWS panel** — Lambda, EC2, ECS and S3 at a glance via your own `aws` CLI; CloudWatch log tail, invoke/start/stop with confirmation, connect to EC2 over SSH or Session Manager in the terminal, and AI tools that run read-only calls freely and gate anything mutating behind approval
 - **Database panel** — Direct PostgreSQL / MySQL / SQLite connections with schema explorer and SQL runner
 
 ### MCP (Model Context Protocol)

@@ -1033,6 +1033,8 @@ class TerminalPanel(QWidget):
     #: and the show/hide action).
     expand_requested = pyqtSignal()
     close_requested = pyqtSignal()
+    #: Header "New SSH session…" button; the main window owns the dialog.
+    ssh_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1098,6 +1100,10 @@ class TerminalPanel(QWidget):
         )
         row.addWidget(title)
         row.addStretch()
+
+        self._ssh_btn = make_icon_button(shared_icons.draw_remote_icon(), "New SSH session…")
+        self._ssh_btn.clicked.connect(self.ssh_requested.emit)
+        row.addWidget(self._ssh_btn)
 
         self._popout_btn = make_icon_button(
             shared_icons.draw_popout_icon(), "Open terminal in a separate window"
@@ -1274,6 +1280,18 @@ class TerminalPanel(QWidget):
         self.stop_terminal()
         if self._event_bus:
             self.start_terminal(self._event_bus, shell, cwd)
+
+    def send_command(self, command: str) -> bool:
+        """Type ``command`` into the running shell and press Enter.
+
+        The line is visible in the terminal exactly as if the user had
+        typed it, so there's nothing hidden about what runs. Returns
+        False when no shell is running (terminal unavailable / exited).
+        """
+        if not self._pty or not self._pty.is_running:
+            return False
+        self._pty.write((command.rstrip("\n") + "\n").encode("utf-8"))
+        return True
 
     def cd_to(self, path: Path | str) -> None:
         """Send a ``cd <path>`` to the running shell without restarting.

@@ -151,8 +151,11 @@ so use the refresh button when you want fresh data.
 
 - **Lambda** — *Tail logs (last hour)* from CloudWatch, *Configuration*,
   *Invoke…* with a JSON payload (asks for confirmation)
-- **EC2** — *Describe*; *Stop* / *Reboot* a running instance or *Start*
-  a stopped one (each asks for confirmation)
+- **EC2** — *Describe*; *Connect via SSH…* (opens the SSH dialog
+  pre-filled with the instance address) and *Connect via Session
+  Manager (SSM)* (runs `aws ssm start-session` in the terminal — no
+  open port 22 needed) for a running instance; *Stop* / *Reboot* a
+  running instance or *Start* a stopped one (each asks for confirmation)
 - **ECS** — *Describe*, *Recent events*, *Force new deployment…*
 - **S3** — *List top-level objects*, *Copy s3:// URI*
 

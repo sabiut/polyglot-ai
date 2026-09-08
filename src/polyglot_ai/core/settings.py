@@ -55,6 +55,8 @@ DEFAULTS = {
     # dozen icons; the niche ones start hidden and stay reachable via
     # the View menu / command palette. Settings → Panels toggles them.
     "ui.hidden_panels": ["arduino", "database"],
+    # Terminal → New SSH Session…: last targets, most recent first.
+    "ssh.recent_targets": [],
 }
 
 
