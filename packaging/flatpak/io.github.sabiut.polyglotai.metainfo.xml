@@ -23,6 +23,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.11" date="2026-09-08">
+      <description>
+        <p>Inline diagnostics in the editor (ruff squiggles, hover
+        messages, Fix with AI, auto-fixes, F8), a trimmed activity bar
+        with a Settings → Panels page, per-project chat history, SSH
+        sessions from the terminal and the AWS panel (SSH / Session
+        Manager), a startup timer plus fixes that show the window about
+        three times sooner, and macOS/Windows portability groundwork.</p>
+      </description>
+    </release>
     <release version="0.18.10" date="2026-09-08">
       <description>
         <p>The video editor moves off the activity bar to View → Video
