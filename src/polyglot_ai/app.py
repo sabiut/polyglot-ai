@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -128,6 +129,16 @@ def main() -> None:
     # is a static method that latches the name into the registration
     # used by the upcoming QApplication. Set it here.
     QGuiApplication.setDesktopFileName("polyglot-ai")
+
+    # Window decorations on Wayland. GNOME doesn't draw server-side
+    # decorations, so Qt paints its own title bar. The default
+    # "bradient" plugin uses a fixed light gradient that ignores the
+    # app palette — a white title bar over a dark UI. The "adwaita"
+    # plugin ships with the same wheels, looks like GNOME's own
+    # windows, and follows the desktop's dark/light preference.
+    # Respect an explicit user choice via the env var.
+    if os.environ.get("WAYLAND_DISPLAY") and "QT_WAYLAND_DECORATION" not in os.environ:
+        os.environ["QT_WAYLAND_DECORATION"] = "adwaita"
 
     # Qt application
     app = QApplication(sys.argv)

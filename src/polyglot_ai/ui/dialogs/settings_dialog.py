@@ -213,7 +213,9 @@ class SettingsDialog(QDialog):
         sidebar_layout.addStretch()
 
         # Version label
-        ver = QLabel("v0.1.0")
+        from polyglot_ai.constants import APP_VERSION
+
+        ver = QLabel(f"v{APP_VERSION}")
         ver.setStyleSheet(
             f"color: {tc.get('border_input')}; font-size: {tc.FONT_XS}px; padding: 8px 16px;"
         )

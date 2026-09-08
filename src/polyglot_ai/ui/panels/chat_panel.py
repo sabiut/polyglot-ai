@@ -847,13 +847,30 @@ class ChatPanel(QWidget):
         # the default isn't in the dropdown (e.g. user removed the
         # OpenAI provider) — the combo just stays on its first entry.
         default = str(self._setting("ai.default_model") or "openai:gpt-5.5").strip()
+        exact = None
+        by_name: list[int] = []
         for i in range(self._model_combo.count()):
             full_id = self._model_combo.itemData(i)
             if not full_id:
                 continue
-            if full_id == default or full_id.split(":", 1)[-1] == default:
-                self._model_combo.setCurrentIndex(i)
+            if full_id == default:
+                exact = i
                 break
+            if full_id.split(":", 1)[-1] == default:
+                by_name.append(i)
+        if exact is None and by_name:
+            # The same model name is often listed under both a
+            # subscription (OAuth) provider and the API-key provider.
+            # Prefer the API-key entry: far higher rate limits, and the
+            # OAuth path is throttled for third-party clients.
+            by_name.sort(
+                key=lambda i: str(self._model_combo.itemData(i)).startswith(
+                    ("claude_oauth:", "openai_oauth:")
+                )
+            )
+            exact = by_name[0]
+        if exact is not None:
+            self._model_combo.setCurrentIndex(exact)
 
     def _on_model_changed(self, index: int) -> None:
         """Update capability label when model changes."""
