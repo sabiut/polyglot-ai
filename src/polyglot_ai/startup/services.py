@@ -26,6 +26,37 @@ def create_core_services():
     return event_bus, db, settings, keyring_store, audit, bridge
 
 
+#: SDK-backed client modules, keyed by the keyring entries that need them.
+_SDK_MODULES_BY_KEY = {
+    "openai": "polyglot_ai.core.ai.client",
+    "deepseek": "polyglot_ai.core.ai.client",
+    "anthropic": "polyglot_ai.core.ai.anthropic_client",
+    "google": "polyglot_ai.core.ai.google_client",
+}
+
+
+def preload_provider_sdks(keyring_store) -> list[str]:
+    """Import the SDK modules the configured keys will need; return their names.
+
+    Safe to run on a worker thread (no Qt): the openai / anthropic /
+    google-genai imports cost 0.3–1.4 s each, and doing them here lets
+    the window paint first while :func:`register_ai_providers` then
+    finds them already in ``sys.modules``.
+    """
+    import importlib
+
+    wanted: list[str] = []
+    for key, module in _SDK_MODULES_BY_KEY.items():
+        if module not in wanted and keyring_store.get_key(key):
+            wanted.append(module)
+    for module in wanted:
+        try:
+            importlib.import_module(module)
+        except Exception:
+            logger.exception("Could not preload %s", module)
+    return wanted
+
+
 def register_ai_providers(provider_manager, keyring_store, event_bus):
     """Register/unregister AI providers based on current API keys."""
 
@@ -39,19 +70,28 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
         else:
             provider_manager.unregister(name)
 
-    from polyglot_ai.core.ai.client import OpenAIClient
+    # The SDK modules are imported inside the factories, only for
+    # providers that actually have a key: importing openai, anthropic
+    # and google-genai together costs over a second of startup, and
+    # most users have configured one or two of them, not all.
+    def _openai_client(key, **kwargs):
+        from polyglot_ai.core.ai.client import OpenAIClient
 
-    _sync_provider("openai", keyring_store.get_key("openai"), lambda k: OpenAIClient(k, event_bus))
+        return OpenAIClient(key, event_bus, **kwargs)
 
-    from polyglot_ai.core.ai.anthropic_client import AnthropicClient
+    def _anthropic_client(key):
+        from polyglot_ai.core.ai.anthropic_client import AnthropicClient
 
-    _sync_provider(
-        "anthropic", keyring_store.get_key("anthropic"), lambda k: AnthropicClient(k, event_bus)
-    )
+        return AnthropicClient(key, event_bus)
 
-    from polyglot_ai.core.ai.google_client import GoogleClient
+    def _google_client(key):
+        from polyglot_ai.core.ai.google_client import GoogleClient
 
-    _sync_provider("google", keyring_store.get_key("google"), lambda k: GoogleClient(k, event_bus))
+        return GoogleClient(key, event_bus)
+
+    _sync_provider("openai", keyring_store.get_key("openai"), _openai_client)
+    _sync_provider("anthropic", keyring_store.get_key("anthropic"), _anthropic_client)
+    _sync_provider("google", keyring_store.get_key("google"), _google_client)
 
     # DeepSeek — OpenAI-compatible endpoint at api.deepseek.com.
     # V4 lineup is two models: ``deepseek-v4-pro`` (flagship) and
@@ -65,9 +105,8 @@ def register_ai_providers(provider_manager, keyring_store, event_bus):
     _sync_provider(
         "deepseek",
         keyring_store.get_key("deepseek"),
-        lambda k: OpenAIClient(
+        lambda k: _openai_client(
             k,
-            event_bus,
             base_url="https://api.deepseek.com/v1",
             provider_name="deepseek",
             provider_display_name="DeepSeek",

@@ -114,7 +114,11 @@ class MainWindow(QMainWindow):
         self._test_panel = TestPanel()
         self._tasks_panel = TasksPanel()
         self._today_panel = TodayPanel()
-        self._arduino_panel = ArduinoPanel()
+        # The Arduino panel is the heaviest child (~70 ms) and lives in
+        # its own window that most sessions never open — built on first
+        # use via the ``arduino_panel`` property.
+        self._arduino_panel: ArduinoPanel | None = None
+        self._arduino_project_root: Path | None = None
         self._editor_panel = EditorPanel()
         # Wire the editor panel into the test panel so coverage runs
         # paint hit/miss bars in the editor gutter. This is the only
@@ -397,8 +401,17 @@ class MainWindow(QMainWindow):
         the user would see no window at all.
         """
         if not _window_is_alive(self._arduino_window):
-            self._arduino_window = ArduinoWindow(self._arduino_panel, self)
+            self._arduino_window = ArduinoWindow(self.arduino_panel, self)
         self._arduino_window.show_and_raise()
+
+    @property
+    def arduino_panel(self) -> ArduinoPanel:
+        """The Arduino panel, constructed on first access."""
+        if self._arduino_panel is None:
+            self._arduino_panel = ArduinoPanel()
+            if self._arduino_project_root is not None:
+                self._arduino_panel.set_project_root(self._arduino_project_root)
+        return self._arduino_panel
 
     def _show_video_window(self) -> None:
         """Open the Video editor as a standalone top-level window.
@@ -912,7 +925,9 @@ class MainWindow(QMainWindow):
             return
         self._file_explorer.set_root(path)
         self._search_panel.set_project_root(path)
-        self._arduino_panel.set_project_root(path)
+        self._arduino_project_root = path
+        if self._arduino_panel is not None:
+            self._arduino_panel.set_project_root(path)
         self.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
         self.statusBar().showMessage(f"Project: {path}")
 

@@ -1470,8 +1470,19 @@ class ArduinoPanel(QWidget):
 
     # ── Board detection (timer-driven) ─────────────────────────────
 
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt override
+        super().showEvent(event)
+        # The panel lives in a window that's hidden until the user asks
+        # for it; scan as soon as it appears rather than waiting a tick.
+        QTimer.singleShot(0, self._kick_detect)
+
     def _kick_detect(self) -> None:
         if getattr(self, "_detecting", False):
+            return
+        # Board detection shells out to arduino-cli (~1 s) and walks
+        # serial ports. Nobody sees the result while the panel is
+        # hidden — which is the state at startup — so skip it.
+        if not self.isVisible():
             return
         # Refresh the toolchain footer on every detection tick so a
         # newly-installed tool flips its chip from red to green

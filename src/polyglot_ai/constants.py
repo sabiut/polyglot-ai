@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from polyglot_ai import __version__
@@ -6,8 +7,15 @@ APP_NAME = "Polyglot AI"
 APP_ID = "io.github.sabiut.polyglotai"
 APP_VERSION = __version__
 
-# Directories
-DATA_DIR = Path.home() / ".local" / "share" / "polyglot-ai"
+# Directories. POLYGLOT_AI_DATA_DIR relocates the whole data dir
+# (database, logs, single-instance lock) — for startup benchmarks and
+# for running a second, isolated copy alongside the installed app.
+_data_override = os.environ.get("POLYGLOT_AI_DATA_DIR")
+DATA_DIR = (
+    Path(_data_override).expanduser()
+    if _data_override
+    else Path.home() / ".local" / "share" / "polyglot-ai"
+)
 LOG_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "polyglot.db"
 

@@ -12,10 +12,14 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator
 
-from anthropic import AsyncAnthropic, BadRequestError
+if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
 
+# ``anthropic`` is imported where it's used: this module loads at
+# every startup (to check for subscription credentials) and the SDK
+# import alone costs ~0.5 s.
 from polyglot_ai.constants import (
     EVT_AI_ERROR,
     EVT_AI_STREAM_CHUNK,
@@ -146,6 +150,14 @@ class ClaudeOAuthClient(AIProvider):
     def is_authenticated(self) -> bool:
         return self._access_token is not None
 
+    def _ensure_client(self):
+        """Return the SDK client, creating it on first use; None if logged out."""
+        if self._client is None and self._access_token:
+            from anthropic import AsyncAnthropic
+
+            self._client = AsyncAnthropic(auth_token=self._access_token)
+        return self._client
+
     def _load_tokens(self) -> None:
         """Load OAuth tokens from Claude Code's credentials file."""
         if not CLAUDE_CREDENTIALS_FILE.exists():
@@ -188,7 +200,10 @@ class ClaudeOAuthClient(AIProvider):
                 self._expires_at = oauth.get("expiresAt")
                 self._subscription_type = oauth.get("subscriptionType")
             if self._access_token:
-                self._client = AsyncAnthropic(auth_token=self._access_token)
+                # The SDK client is built on first use (_ensure_client):
+                # constructing it here would pull in ``anthropic`` at
+                # every startup for subscription users.
+                self._client = None
                 logger.info(
                     "Loaded Claude auth from ~/.claude/.credentials.json (subscription: %s)",
                     self._subscription_type or "unknown",
@@ -262,7 +277,7 @@ class ClaudeOAuthClient(AIProvider):
         if self._cached_models and (now - self._models_cached_at) < _MODEL_CACHE_TTL:
             return list(self._cached_models)
 
-        if not self._client:
+        if not self._ensure_client():
             return list(DEFAULT_MODELS)
         try:
             response = await self._client.models.list(limit=100)
@@ -284,7 +299,7 @@ class ClaudeOAuthClient(AIProvider):
         max_tokens: int = 4096,
         system_prompt: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        if not self._access_token or not self._client:
+        if not self._access_token or not self._ensure_client():
             yield StreamChunk(
                 delta_content="\n\n**Error:** Not logged in to Claude. "
                 "Run 'Sign in with Claude' in Settings."
@@ -301,6 +316,8 @@ class ClaudeOAuthClient(AIProvider):
                 return
 
         # Rebuild client with fresh token before each request
+        from anthropic import AsyncAnthropic, BadRequestError
+
         self._client = AsyncAnthropic(auth_token=self._access_token)
 
         try:
@@ -519,7 +536,7 @@ class ClaudeOAuthClient(AIProvider):
             yield StreamChunk(delta_content=f"\n\n**Error:** {error_msg[:200]}")
 
     async def test_connection(self) -> tuple[bool, str]:
-        if not self._access_token or not self._client:
+        if not self._access_token or not self._ensure_client():
             return False, "Not logged in"
         try:
             await self._client.models.list(limit=1)

@@ -8,6 +8,9 @@ import os
 import sys
 from pathlib import Path
 
+# First project import on purpose: it timestamps "before Qt loads".
+from polyglot_ai.startup.timing import exit_after_startup, startup_timer
+
 from PyQt6.QtCore import QLockFile
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QApplication
@@ -94,6 +97,7 @@ def _install_excepthook(log_path: "Path") -> None:
 
 
 def main() -> None:
+    startup_timer.mark("imports (Qt, main window, panels)")
     setup_logging()
     logger.info("Starting %s", APP_NAME)
 
@@ -115,6 +119,7 @@ def main() -> None:
     from polyglot_ai.startup.platform import setup_platform
 
     icon_path = setup_platform()
+    startup_timer.mark("preflight, migration, platform setup")
 
     # Set the desktop file name *before* QApplication is constructed.
     # On Wayland the QApplication ctor registers an XDG portal app
@@ -142,6 +147,7 @@ def main() -> None:
 
     # Qt application
     app = QApplication(sys.argv)
+    startup_timer.mark("QApplication")
     app.setApplicationName(APP_NAME)
     if icon_path:
         from PyQt6.QtGui import QIcon
@@ -241,6 +247,7 @@ def main() -> None:
         logger.info("Core services initialized")
 
     loop.run_until_complete(init_services())
+    startup_timer.mark("lock, core services, database + settings load")
 
     # Load custom fonts if available
     from PyQt6.QtGui import QFontDatabase
@@ -263,10 +270,13 @@ def main() -> None:
     context_builder = ContextBuilder()
     indexer = ProjectIndexer()
     context_builder.set_indexer(indexer)
-    register_ai_providers(provider_manager, keyring_store, event_bus)
+    # Providers are registered after the window is up (post_show_init):
+    # the SDK imports behind them are the single biggest startup cost.
+    startup_timer.mark("fonts, theme")
 
     # Main window
     window = MainWindow()
+    startup_timer.mark("MainWindow construction")
     window.event_bus = event_bus
     window.db = db
     window.settings = settings
@@ -445,14 +455,22 @@ def main() -> None:
         event_bus,
     )
 
+    startup_timer.mark("notifications, MCP config, panel wiring")
+
     # Start terminal
     terminal = window.terminal_panel
     terminal.start_terminal(event_bus, shell=settings.get("terminal.shell"))
     terminal.set_font_size(settings.get("terminal.font_size"))
+    startup_timer.mark("terminal start")
 
     # Show window
     window.show()
+    startup_timer.mark("window.show()")
     audit.log("app_started")
+
+    # Measurement mode (POLYGLOT_AI_EXIT_AFTER_STARTUP): no modal
+    # first-run dialogs, since nobody is there to dismiss them.
+    measuring = exit_after_startup()
 
     # Missing-dependency check — warn the user once about runtimes
     # (Node.js, uv, docker, kubectl, gh) that are needed for optional
@@ -464,7 +482,7 @@ def main() -> None:
         from polyglot_ai.core.dependency_check import missing_dependencies
         from polyglot_ai.ui.dialogs.dependency_dialog import DependencyDialog
 
-        if not settings.get("dependency_check.dismissed"):
+        if not settings.get("dependency_check.dismissed") and not measuring:
             missing = missing_dependencies()
             if missing:
                 dlg = DependencyDialog(missing, parent=window)
@@ -485,8 +503,7 @@ def main() -> None:
         except Exception:
             pass
 
-    # Onboarding
-    run_onboarding(window, settings, keyring_store, provider_manager, event_bus)
+    startup_timer.mark("dependency check")
 
     # Restore session
     session_data = {
@@ -504,6 +521,7 @@ def main() -> None:
         restore_last_project(window, settings)
     except Exception:
         logger.exception("restore_last_project failed")
+    startup_timer.mark("session + last project restore")
 
     # Post-show initialization
     from polyglot_ai.core.async_utils import safe_task
@@ -511,8 +529,29 @@ def main() -> None:
     async def post_show_init():
         await chat.populate_conversations()
         await chat._init_builtin_templates()
+        startup_timer.mark("post-show: conversations + templates")
+
+        # AI providers. The SDK imports (openai / anthropic / google-genai)
+        # are the biggest single startup cost, so they run on a worker
+        # thread while the freshly shown window stays responsive;
+        # registration itself is then cheap.
+        from polyglot_ai.startup.services import preload_provider_sdks
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, preload_provider_sdks, keyring_store
+            )
+        except Exception:
+            logger.exception("Provider SDK preload failed — importing inline")
+        register_ai_providers(provider_manager, keyring_store, event_bus)
+        startup_timer.mark("post-show: AI providers (SDK import + keyring)")
+
+        if not measuring:
+            run_onboarding(window, settings, keyring_store, provider_manager, event_bus)
+
         if provider_manager.has_providers:
             await chat.populate_models()
+            startup_timer.mark("post-show: model list")
         else:
             # No providers configured — user either skipped
             # onboarding or has no keys / OAuth tokens. Without
@@ -541,6 +580,9 @@ def main() -> None:
                     )
             except Exception:
                 logger.exception("post_show_init: could not show no-provider hint")
+        startup_timer.emit_report()
+        if measuring:
+            app.quit()
 
     safe_task(post_show_init(), name="post_show_init")
 
