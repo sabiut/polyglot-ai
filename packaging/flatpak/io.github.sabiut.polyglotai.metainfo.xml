@@ -23,6 +23,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.4" date="2026-09-08">
+      <description>
+        <p>Focus mode: expand the editor to the whole window from the tab
+        bar or Ctrl+Shift+X. Tool approvals are now proper cards showing
+        the exact command or file, with a warning for destructive
+        commands, and the activity log says what actually ran.</p>
+      </description>
+    </release>
     <release version="0.18.3" date="2026-09-08">
       <description>
         <p>GNOME-style window title bars on Wayland that follow the
