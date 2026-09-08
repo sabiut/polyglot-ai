@@ -456,7 +456,9 @@ class ActivityBar(QWidget):
             ("kubernetes", "Kubernetes (Ctrl+Shift+8)"),
             ("tests", "Tests (Ctrl+Shift+T)"),
             ("arduino", "Arduino (Ctrl+Shift+A)"),
-            ("video", "Video Editor (Ctrl+Shift+V)"),
+            # The video editor is deliberately not here: it's the one
+            # tool that isn't about code, and the bar was crowded. It
+            # stays one step away — View → Video Editor… / the palette.
         ]
 
         for icon_type, tooltip in top_items:

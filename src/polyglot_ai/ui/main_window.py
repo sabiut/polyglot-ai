@@ -623,6 +623,13 @@ class MainWindow(QMainWindow):
         self._action_toggle_arduino.triggered.connect(lambda: self._on_activity_changed("arduino"))
         view_menu.addAction(self._action_toggle_arduino)
 
+        # Demoted from the activity bar (see ActivityBar) — still one
+        # step away here and in the command palette. No shortcut:
+        # Ctrl+Shift+V is the terminal's paste.
+        self._action_video = QAction("&Video Editor…", self)
+        self._action_video.triggered.connect(self._show_video_window)
+        view_menu.addAction(self._action_video)
+
         view_menu.addSeparator()
 
         self._action_toggle_terminal = QAction("&Terminal", self)
@@ -1128,6 +1135,12 @@ class MainWindow(QMainWindow):
             lambda: self._action_focus_mode.toggle(),
             "View",
             "Ctrl+Shift+X",
+        )
+        reg.register(
+            "view.video",
+            "Open Video Editor",
+            self._show_video_window,
+            "View",
         )
         reg.register(
             "help.shortcuts",
