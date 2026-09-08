@@ -266,6 +266,41 @@ def draw_collapse_all_icon() -> QIcon:
     return QIcon(pm)
 
 
+def draw_expand_icon() -> QIcon:
+    """Four corner arrows pointing outward — 'give this the whole window'."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen(1.6))
+    for cx, cy, dx, dy in (
+        (2.5, 2.5, 1, 1),
+        (13.5, 2.5, -1, 1),
+        (2.5, 13.5, 1, -1),
+        (13.5, 13.5, -1, -1),
+    ):
+        # corner bracket + diagonal toward the centre
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx + 4 * dx, cy, 0, 0).topLeft())
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx, cy + 4 * dy, 0, 0).topLeft())
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx + 3 * dx, cy + 3 * dy, 0, 0).topLeft())
+    p.end()
+    return QIcon(pm)
+
+
+def draw_collapse_icon() -> QIcon:
+    """Four corner arrows pointing inward — 'restore the side panels'."""
+    pm, p = _hidpi_canvas()
+    p.setPen(_outline_pen(1.6))
+    for cx, cy, dx, dy in (
+        (6.5, 6.5, -1, -1),
+        (9.5, 6.5, 1, -1),
+        (6.5, 9.5, -1, 1),
+        (9.5, 9.5, 1, 1),
+    ):
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx + 3.5 * dx, cy, 0, 0).topLeft())
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx, cy + 3.5 * dy, 0, 0).topLeft())
+        p.drawLine(QRectF(cx, cy, 0, 0).topLeft(), QRectF(cx + 4 * dx, cy + 4 * dy, 0, 0).topLeft())
+    p.end()
+    return QIcon(pm)
+
+
 def draw_copy_icon() -> QIcon:
     """Two overlapping pages — 'copy to clipboard' affordance."""
     pm = QPixmap(16, 16)

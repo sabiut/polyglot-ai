@@ -241,6 +241,10 @@ class MainWindow(QMainWindow):
 
         # Action registry & command palette
         self._action_registry = ActionRegistry()
+        # Focus mode: editor gets the whole window; the panels it hid
+        # are remembered so leaving focus mode restores exactly them.
+        self._focus_mode = False
+        self._focus_saved: dict[str, bool] = {}
         self._command_palette: CommandPalette | None = None
 
         self._setup_menus()
@@ -617,6 +621,26 @@ class MainWindow(QMainWindow):
         self._action_toggle_chat.toggled.connect(self._right_tabs.setVisible)
         view_menu.addAction(self._action_toggle_chat)
 
+        self._action_focus_mode = QAction("&Focus Mode (expand editor)", self)
+        self._action_focus_mode.setCheckable(True)
+        self._action_focus_mode.setShortcut(QKeySequence("Ctrl+Shift+X"))
+        self._action_focus_mode.setToolTip(
+            "Hide the sidebar, chat and terminal so the editor fills the window"
+        )
+        self._action_focus_mode.toggled.connect(self._set_focus_mode)
+        view_menu.addAction(self._action_focus_mode)
+
+        # The same toggle as a button in the editor's tab-bar corner,
+        # where a user looking at a cramped file will find it.
+        from polyglot_ai.ui.panels import shared_icons
+        from polyglot_ai.ui.widgets.icon_button import make_icon_button
+
+        self._focus_btn = make_icon_button(
+            shared_icons.draw_expand_icon(), "Expand editor — hide side panels (Ctrl+Shift+X)"
+        )
+        self._focus_btn.clicked.connect(self._action_focus_mode.toggle)
+        self._editor_panel.setCornerWidget(self._focus_btn, Qt.Corner.TopRightCorner)
+
         view_menu.addSeparator()
 
         self._action_toggle_theme = QAction("Toggle &Dark/Light Theme", self)
@@ -807,6 +831,45 @@ class MainWindow(QMainWindow):
 
     # ── Command palette ────────────────────────────────────────────
 
+    def _set_focus_mode(self, enable: bool) -> None:
+        """Give the editor the whole window (or hand the panels back)."""
+        enable = bool(enable)
+        if enable == self._focus_mode:
+            return
+        self._focus_mode = enable
+        if enable:
+            self._focus_saved = {
+                "sidebar": self._sidebar_visible,
+                "terminal": self._action_toggle_terminal.isChecked(),
+                "chat": self._action_toggle_chat.isChecked(),
+            }
+            self._sidebar_stack.hide()
+            self._sidebar_visible = False
+            self._action_toggle_terminal.setChecked(False)
+            self._action_toggle_chat.setChecked(False)
+        else:
+            saved = self._focus_saved
+            if saved.get("sidebar", True):
+                self._sidebar_stack.show()
+                self._sidebar_visible = True
+            self._action_toggle_terminal.setChecked(saved.get("terminal", True))
+            self._action_toggle_chat.setChecked(saved.get("chat", True))
+
+        # Keep the menu action, the corner button and the status bar in
+        # step regardless of which of them triggered the change.
+        self._action_focus_mode.blockSignals(True)
+        self._action_focus_mode.setChecked(enable)
+        self._action_focus_mode.blockSignals(False)
+        from polyglot_ai.ui.panels import shared_icons
+
+        if enable:
+            self._focus_btn.setIcon(shared_icons.draw_collapse_icon())
+            self._focus_btn.setToolTip("Restore side panels (Ctrl+Shift+X)")
+            self.statusBar().showMessage("Focus mode — Ctrl+Shift+X to restore panels", 4000)
+        else:
+            self._focus_btn.setIcon(shared_icons.draw_expand_icon())
+            self._focus_btn.setToolTip("Expand editor — hide side panels (Ctrl+Shift+X)")
+
     def _show_command_palette(self) -> None:
         palette = CommandPalette(self._action_registry, self)
         palette.show()
@@ -972,6 +1035,13 @@ class MainWindow(QMainWindow):
             self._show_command_palette,
             "View",
             "Ctrl+Shift+P",
+        )
+        reg.register(
+            "view.focus_mode",
+            "Toggle Focus Mode (expand editor)",
+            lambda: self._action_focus_mode.toggle(),
+            "View",
+            "Ctrl+Shift+X",
         )
         reg.register(
             "help.shortcuts",
