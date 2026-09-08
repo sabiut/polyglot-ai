@@ -23,6 +23,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.8" date="2026-09-08">
+      <description>
+        <p>"Send selection to AI" and "Restart terminal" now work from the
+        popped-out terminal window.</p>
+      </description>
+    </release>
     <release version="0.18.7" date="2026-09-08">
       <description>
         <p>Fixes the terminal appearing blank in 0.18.6, keeps its content
