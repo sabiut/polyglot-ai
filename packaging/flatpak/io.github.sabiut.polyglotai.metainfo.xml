@@ -23,6 +23,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.3" date="2026-09-08">
+      <description>
+        <p>GNOME-style window title bars on Wayland that follow the
+        desktop's dark/light preference; the default model prefers the
+        API-key provider over the throttled subscription login; the
+        Settings dialog shows the real version; and error messages point
+        at the correct Settings section and console URL.</p>
+      </description>
+    </release>
     <release version="0.18.2" date="2026-09-08">
       <description>
         <p>Fixes Claude models failing on every message with the newer
