@@ -27,13 +27,17 @@ def test_activity_bar_has_no_video_entry(qapp):
 
 
 def test_menu_and_palette_still_open_it(qapp, monkeypatch):
-    w = MainWindow()
     opened = []
-    monkeypatch.setattr(w, "_show_video_window", lambda: opened.append(1))
+    # Patch on the class *before* construction: the menu action binds
+    # the method at connect time, so an instance patch is too late.
+    monkeypatch.setattr(MainWindow, "_show_video_window", lambda self: opened.append("menu"))
+    w = MainWindow()
     assert w._action_video.text().startswith("&Video Editor")
     w._action_video.trigger()
-    assert opened == [1]
+    assert opened == ["menu"]
 
     ids = {a.action_id: a for a in w.action_registry.get_all()}
     assert "view.video" in ids
+    ids["view.video"].callback()
+    assert opened == ["menu", "menu"]
     w.close()
