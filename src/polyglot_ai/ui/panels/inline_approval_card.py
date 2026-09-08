@@ -1,14 +1,14 @@
-"""Inline tool-approval row rendered directly in the chat stream.
+"""Inline tool-approval card rendered directly in the chat stream.
 
-A minimalist row that matches the existing tool-status label style:
-one short italic gray description (e.g. ``Delete file: app.py``)
-and two small Approve / Reject buttons next to it. No frame, no
-border, no body preview — just enough for the user to see what
-the AI wants to do and click yes or no without leaving the chat.
+A framed card with a coloured edge so a pending decision stands out
+from the surrounding transcript: what the AI wants to do (title), the
+exact command or path (monospace), a one-line hint, and the
+Details… / Reject / Approve buttons. Dangerous shell commands get a
+warning edge and hint.
 
-After the decision, the buttons are replaced with a small status
-suffix (``— Approved`` / ``— Rejected``) so the transcript still
-records what happened.
+After the decision the buttons and hint collapse away and the card
+becomes a compact record — "Approved" / "Rejected" with the same
+detail line — so the transcript still shows what happened.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -30,43 +32,35 @@ from polyglot_ai.ui import theme_colors as tc
 logger = logging.getLogger(__name__)
 
 
-# Per-tool wording for the inline description. Keep it short — this
-# is a single italic gray line, not a card. Anything not listed here
-# falls through to the generic ``Run <tool_name>`` form.
-def _describe(tool_name: str, args: dict) -> str:
+# Per-tool wording: (kind badge, title, detail). ``detail`` is the
+# command / path shown in monospace under the title.
+def _describe(tool_name: str, args: dict) -> tuple[str, str, str]:
     path = args.get("path", "")
     if tool_name == "file_write":
-        return f"Write file: {path}" if path else "Write file"
+        return "FILE", "Write file", path
     if tool_name == "file_patch":
-        return f"Patch file: {path}" if path else "Patch file"
+        return "FILE", "Patch file", path
     if tool_name == "file_delete":
-        return f"Delete file: {path}" if path else "Delete file"
+        return "FILE", "Delete file", path
     if tool_name == "dir_create":
-        return f"Create directory: {path}" if path else "Create directory"
+        return "FILE", "Create directory", path
     if tool_name == "dir_delete":
         recursive = args.get("recursive", False)
-        verb = "Delete directory (recursive)" if recursive else "Delete directory"
-        return f"{verb}: {path}" if path else verb
+        return "FILE", "Delete directory (recursive)" if recursive else "Delete directory", path
     if tool_name == "shell_exec":
-        command = args.get("command", "")
-        if len(command) > 80:
-            command = command[:77] + "…"
-        return f"Run: {command}" if command else "Run command"
+        return "SHELL", "Run command", args.get("command", "")
     if tool_name == "git_commit":
-        message = args.get("message", "")
-        if len(message) > 60:
-            message = message[:57] + "…"
-        return f"Commit: {message}" if message else "Commit"
-    return f"Run {tool_name}"
+        return "GIT", "Commit", args.get("message", "")
+    return "TOOL", f"Run {tool_name}", ""
 
 
-class InlineApprovalCard(QWidget):
-    """A tiny inline approval row that lives in the chat stream.
+def _elide(text: str, limit: int = 160) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
-    The class name is kept for backwards compat with the chat panel
-    wiring even though this is no longer a "card" — just a single
-    horizontal row.
-    """
+
+class InlineApprovalCard(QFrame):
+    """An inline approval card that lives in the chat stream."""
 
     #: Emitted exactly once with the user's decision (True=approve).
     decided = pyqtSignal(bool)
@@ -91,37 +85,79 @@ class InlineApprovalCard(QWidget):
         except json.JSONDecodeError:
             args = {"raw": arguments}
 
-        description = _describe(tool_name, args)
+        kind, title, detail = _describe(tool_name, args)
 
         # Shell commands that the sandbox classifies as dangerous get
-        # a warning-coloured description so the risk is visible at a
-        # glance in the transcript.
+        # a warning edge, title and hint so the risk is visible at a
+        # glance before the user clicks.
         self._dangerous = False
         if tool_name == "shell_exec":
             from polyglot_ai.core.sandbox import Sandbox
 
             self._dangerous = Sandbox.is_dangerous_command(args.get("command") or "")
 
+        self.setObjectName("approvalCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._apply_frame(tc.get("accent_warning") if self._dangerous else tc.get("accent_primary"))
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(2, 2, 2, 2)
-        row.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 8, 10, 8)
+        outer.setSpacing(4)
 
-        label_colour = tc.get("accent_warning") if self._dangerous else tc.get("text_tertiary")
-        self._label = QLabel(f"  {description}")
-        self._label.setStyleSheet(
-            f"color: {label_colour}; font-size: {tc.FONT_MD}px; font-style: italic; "
-            "padding: 2px 0; background: transparent;"
+        # ── Header: badge + title ──
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(8)
+
+        badge = QLabel(kind)
+        badge.setStyleSheet(
+            f"color: {tc.get('text_tertiary')}; background: {tc.get('bg_surface_overlay')}; "
+            f"border: 1px solid {tc.get('border_secondary')}; border-radius: 3px; "
+            f"padding: 0 5px; font-size: {tc.FONT_XS}px; font-weight: 700; letter-spacing: 0.5px;"
         )
-        self._label.setWordWrap(True)
-        row.addWidget(self._label, 1)
+        head.addWidget(badge)
 
-        # Compact buttons styled to fit the chat aesthetic — small,
-        # subtle, no frame around them.
+        title_colour = tc.get("accent_warning") if self._dangerous else tc.get("text_heading")
+        self._label = QLabel(title)
+        self._label.setStyleSheet(
+            f"color: {title_colour}; font-size: {tc.FONT_MD}px; font-weight: 600; "
+            "background: transparent;"
+        )
+        head.addWidget(self._label, 1)
+        outer.addLayout(head)
+
+        # ── Detail: the command / path in monospace ──
+        self._detail = QLabel(_elide(detail))
+        self._detail.setStyleSheet(
+            f"color: {tc.get('text_primary')}; background: {tc.get('bg_inline_code')}; "
+            f"border-radius: 3px; padding: 3px 6px; font-size: {tc.FONT_SM}px; "
+            "font-family: 'JetBrains Mono', 'Fira Code', monospace;"
+        )
+        self._detail.setWordWrap(True)
+        self._detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._detail.setVisible(bool(detail))
+        outer.addWidget(self._detail)
+
+        # ── Footer: hint + buttons ──
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 2, 0, 0)
+        foot.setSpacing(6)
+
+        hint_text = (
+            "Potentially destructive — review before approving."
+            if self._dangerous
+            else "Needs your approval."
+        )
+        self._hint = QLabel(hint_text)
+        self._hint.setStyleSheet(
+            f"color: {tc.get('accent_warning') if self._dangerous else tc.get('text_muted')}; "
+            f"font-size: {tc.FONT_XS}px; background: transparent;"
+        )
+        foot.addWidget(self._hint, 1)
+
         btn_style = (
             "QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {border}; "
-            f"border-radius: 3px; padding: 2px 10px; font-size: {tc.FONT_SM}px; "
+            f"border-radius: 4px; padding: 3px 12px; font-size: {tc.FONT_SM}px; "
             "font-weight: 600; }}"
             "QPushButton:hover {{ background: {hover}; }}"
         )
@@ -138,7 +174,7 @@ class InlineApprovalCard(QWidget):
             )
         )
         self._details_btn.clicked.connect(self._show_details)
-        row.addWidget(self._details_btn)
+        foot.addWidget(self._details_btn)
 
         self._reject_btn = QPushButton("Reject")
         self._reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -151,7 +187,7 @@ class InlineApprovalCard(QWidget):
             )
         )
         self._reject_btn.clicked.connect(lambda: self._finalise(False))
-        row.addWidget(self._reject_btn)
+        foot.addWidget(self._reject_btn)
 
         self._approve_btn = QPushButton("Approve")
         self._approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -165,15 +201,23 @@ class InlineApprovalCard(QWidget):
             )
         )
         self._approve_btn.clicked.connect(lambda: self._finalise(True))
-        row.addWidget(self._approve_btn)
+        foot.addWidget(self._approve_btn)
+        outer.addLayout(foot)
+
+    def _apply_frame(self, edge_colour: str, *, muted: bool = False) -> None:
+        bg = tc.get("bg_surface") if muted else tc.get("bg_card")
+        self.setStyleSheet(
+            f"#approvalCard {{ background: {bg}; border: 1px solid {tc.get('border_card')}; "
+            f"border-left: 3px solid {edge_colour}; border-radius: 6px; }}"
+        )
 
     # ── Decision plumbing ──────────────────────────────────────────
 
     def _show_details(self) -> None:
         """Escalate to the rich ApprovalDialog (diff / command preview).
 
-        The dialog's Approve/Reject buttons resolve this row too;
-        merely closing the preview leaves the row pending.
+        The dialog's Approve/Reject buttons resolve this card too;
+        merely closing the preview leaves the card pending.
         """
         if self._decided_already:
             return
@@ -185,23 +229,25 @@ class InlineApprovalCard(QWidget):
             self._finalise(dlg.approved)
 
     def _finalise(self, approved: bool) -> None:
-        """Hide the buttons and append a status suffix to the label."""
+        """Collapse to a compact decision record."""
         if self._decided_already:
             return
         self._decided_already = True
         self._approve_btn.hide()
         self._reject_btn.hide()
         self._details_btn.hide()
-        suffix_colour = tc.get("accent_success_muted") if approved else tc.get("accent_error")
-        suffix = "Approved" if approved else "Rejected"
-        # Re-render the label with the existing description plus a
-        # coloured suffix so the transcript still shows what was
-        # decided after the fact.
-        existing = self._label.text().strip()
-        self._label.setText(f"  {existing} — <span style='color: {suffix_colour};'>{suffix}</span>")
-        self._label.setTextFormat(Qt.TextFormat.RichText)
+        self._hint.hide()
+        colour = tc.get("accent_success_muted") if approved else tc.get("accent_error")
+        mark = "✓" if approved else "✗"
+        word = "Approved" if approved else "Rejected"
+        self._label.setText(f"{mark} {word} — {self._label.text()}")
+        self._label.setStyleSheet(
+            f"color: {colour}; font-size: {tc.FONT_MD}px; font-weight: 600; "
+            "background: transparent;"
+        )
+        self._apply_frame(colour, muted=True)
         self.decided.emit(approved)
 
     def force_decision(self, approved: bool) -> None:
-        """Programmatically resolve the row (e.g. on conversation switch)."""
+        """Programmatically resolve the card (e.g. on conversation switch)."""
         self._finalise(approved)

@@ -7,6 +7,8 @@ import logging
 from pathlib import Path  # noqa: F401 — still used by downstream methods we haven't touched
 from typing import TYPE_CHECKING
 
+import json
+
 from PyQt6.QtCore import QPoint, Qt, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
@@ -247,6 +249,43 @@ def _auto_title_from_messages(messages: list, max_len: int = 60) -> str:
             if content:
                 return _normalize(content)
     return "New Chat"
+
+
+def format_tool_activity(label: str, arguments: str, result: str) -> tuple[str, bool]:
+    """Rich-text for a finished tool call: ``✓ Ran command  <code>ls -la</code>``.
+
+    Returns ``(html, failed)``. ``failed`` is True when the tool's
+    result reads as an error, in which case the line says so instead
+    of implying success.
+    """
+    import html as _html
+
+    try:
+        args = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    if not isinstance(args, dict):
+        args = {}
+    detail = ""
+    for key in ("command", "path", "message", "query", "pattern"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            detail = " ".join(value.split())
+            break
+    if len(detail) > 100:
+        detail = detail[:99] + "…"
+
+    failed = isinstance(result, str) and result.lstrip().lower().startswith("error")
+    mark = "✗" if failed else "✓"
+    text = f"{mark} {_html.escape(label)}"
+    if failed:
+        text += " — failed"
+    if detail:
+        text += (
+            f"&nbsp; <span style='font-family: monospace; background: {tc.get('bg_inline_code')}; "
+            f"padding: 0 4px; border-radius: 3px;'>{_html.escape(detail)}</span>"
+        )
+    return text, failed
 
 
 class ChatPanel(QWidget):
@@ -1669,6 +1708,12 @@ class ChatPanel(QWidget):
             self._current_conversation.messages.append(assistant_msg)
             assistant_committed = True
 
+            # A tool-only turn has no text: without this the transcript
+            # showed an empty assistant bubble (with copy/regenerate
+            # icons) above the approval card.
+            if tool_calls_list and not full_content and self._current_assistant_msg:
+                self._current_assistant_msg.hide()
+
             if tool_calls_list:
                 logger.info(
                     "Executing %d tool call(s): %s",
@@ -2010,14 +2055,7 @@ class ChatPanel(QWidget):
             done_label = _tool_done_labels.get(
                 tool_call.function_name, f"Ran {tool_call.function_name}"
             )
-            # Show compact inline status — not the raw tool output
-            from PyQt6.QtWidgets import QLabel
-
-            status_label = QLabel(f"  {done_label}")
-            status_label.setStyleSheet(
-                f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_MD}px; font-style: italic; padding: 2px 0;"
-            )
-            self._message_layout.addWidget(status_label)
+            self._add_tool_activity(done_label, tool_call.arguments, result)
 
             self._current_conversation.messages.append(
                 Message(role="tool", content=result, tool_call_id=tool_call.id)
@@ -2138,6 +2176,9 @@ class ChatPanel(QWidget):
             # Turn is now in conversation.messages; a later cancel (e.g.
             # during the nested tool execution below) must not re-append it.
             followup_committed = True
+
+            if tool_calls_list and not full_content and self._current_assistant_msg:
+                self._current_assistant_msg.hide()
 
             # Execute any tool calls and recurse
             if tool_calls_list:
@@ -2900,6 +2941,25 @@ class ChatPanel(QWidget):
             widget.on_edit = lambda w, c: self._edit_and_resend(w, c)
         self._message_layout.addWidget(widget)
         self._scroll_to_bottom()
+
+    def _add_tool_activity(self, label: str, arguments: str, result: str) -> None:
+        """Append a compact activity line for a finished tool call.
+
+        Shows *what* ran (the command / path in monospace) and whether
+        it failed — the old plain "Ran command" gave no way to tell
+        which of several calls a line referred to.
+        """
+        html, failed = format_tool_activity(label, arguments, result)
+        line = QLabel(html)
+        line.setTextFormat(Qt.TextFormat.RichText)
+        line.setWordWrap(True)
+        line.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        colour = tc.get("accent_error") if failed else tc.get("text_tertiary")
+        line.setStyleSheet(
+            f"color: {colour}; font-size: {tc.FONT_SM}px; padding: 1px 0 1px 6px; "
+            "background: transparent;"
+        )
+        self._message_layout.addWidget(line)
 
     def _add_system_message(self, text: str) -> None:
         if self._message_layout.count() > 1:
