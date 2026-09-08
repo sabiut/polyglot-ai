@@ -70,6 +70,11 @@ dependencies = [
     # working app but no MCP tools at all. Hard dep so a fresh
     # ``pip install -e .`` brings everything in one step.
     "mcp>=1.0",
+    # Editor diagnostics: ruff lints Python buffers as you type (squiggles,
+    # hover messages, auto-fix). Shipped as a runtime dep so the packaged
+    # app's venv has the ``ruff`` binary; the dev extra pins the exact
+    # version used for formatting checks.
+    "ruff>=0.5",
 ]
 
 [project.optional-dependencies]

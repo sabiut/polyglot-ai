@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.core.coverage import FileCoverage
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -95,6 +95,14 @@ _LOG_EXTENSIONS = frozenset({".log"})
 class EditorTab(QWidget):
     """A single code editor tab with QScintilla."""
 
+    #: (errors, warnings) after each diagnostics pass on this tab.
+    diagnostics_changed = pyqtSignal(int, int)
+
+    # Scintilla indicator slots for squiggles (0-7 are lexer-reserved).
+    _INDIC_ERROR = 8
+    _INDIC_WARNING = 9
+    _DIAG_DEBOUNCE_MS = 700
+
     def __init__(
         self,
         file_path: Path | None = None,
@@ -135,6 +143,16 @@ class EditorTab(QWidget):
         self._setup_editor()
         if file_path:
             self._setup_lexer(file_path.suffix.lower())
+
+        # Diagnostics: squiggles from ruff / JSON / YAML, debounced as
+        # you type, with hover tooltips and a right-click "Fix with AI".
+        self._diagnostics: list = []
+        self._diag_request = 0
+        self._diag_timer = QTimer(self)
+        self._diag_timer.setSingleShot(True)
+        self._diag_timer.setInterval(self._DIAG_DEBOUNCE_MS)
+        self._diag_timer.timeout.connect(self._run_diagnostics)
+        self._setup_diagnostics()
 
         self._editor.modificationChanged.connect(self._on_modification_changed)
         self._editor.textChanged.connect(self._on_text_changed)
@@ -624,6 +642,7 @@ class EditorTab(QWidget):
         self._is_modified = False
         self._setup_lexer(path.suffix.lower())
         logger.info("Loaded file: %s", path)
+        self._run_diagnostics()
 
     def save(self) -> bool:
         if self._file_path is None:
@@ -739,6 +758,7 @@ class EditorTab(QWidget):
     def _on_text_changed(self) -> None:
         """Restart completion timer on text change."""
         self._clear_completion_annotation()
+        self._diag_timer.start()
         if self._completion_task and not self._completion_task.done():
             self._completion_task.cancel()
         if self._settings and self._settings.get("editor.ai_completions"):
@@ -876,6 +896,222 @@ class EditorTab(QWidget):
         else:
             self._editor.setCursorPosition(line + len(inserted_lines) - 1, len(inserted_lines[-1]))
 
+    # ── Diagnostics ───────────────────────────────────────────────
+
+    def _setup_diagnostics(self) -> None:
+        editor = self._editor
+        for indic, token in (
+            (self._INDIC_ERROR, "accent_error"),
+            (self._INDIC_WARNING, "accent_warning"),
+        ):
+            editor.indicatorDefine(QsciScintilla.IndicatorStyle.SquiggleIndicator, indic)
+            editor.setIndicatorForegroundColor(QColor(tc.get(token)), indic)
+            editor.setIndicatorDrawUnder(True, indic)
+        editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        editor.customContextMenuRequested.connect(self._show_editor_menu)
+
+    @property
+    def diagnostics(self) -> list:
+        return list(self._diagnostics)
+
+    def _run_diagnostics(self) -> None:
+        from polyglot_ai.core import diagnostics as diag
+
+        filename = self._file_path
+        if not diag.supported(filename):
+            if self._diagnostics:
+                self._apply_diagnostics([])
+            return
+        text = self._editor.text()
+        self._diag_request += 1
+        request = self._diag_request
+        from polyglot_ai.ui.thread_bridge import run_in_thread
+
+        def done(results):
+            if request == self._diag_request:
+                self._apply_diagnostics(results)
+
+        run_in_thread(
+            lambda: diag.collect(filename, text),
+            done,
+            lambda exc: logger.debug("diagnostics failed: %s", exc),
+            owner=self,
+            name="diagnostics",
+        )
+
+    def _apply_diagnostics(self, diags: list) -> None:
+        editor = self._editor
+        last_line = max(editor.lines() - 1, 0)
+        last_col = editor.lineLength(last_line)
+        for indic in (self._INDIC_ERROR, self._INDIC_WARNING):
+            editor.clearIndicatorRange(0, 0, last_line, last_col, indic)
+
+        self._diagnostics = sorted(diags, key=lambda d: (d.line, d.col))
+        errors = warnings = 0
+        for d in self._diagnostics:
+            line = max(d.line - 1, 0)
+            col = max(d.col - 1, 0)
+            end_line = max(d.end_line - 1, line)
+            end_col = max(d.end_col - 1, 0)
+            if end_line == line and end_col <= col:
+                # Zero-width range (syntax errors often) — underline
+                # to the end of the line so there's something to see.
+                end_col = max(editor.lineLength(line) - 1, col + 1)
+            indic = self._INDIC_ERROR if d.severity == "error" else self._INDIC_WARNING
+            editor.fillIndicatorRange(line, col, end_line, end_col, indic)
+            if d.severity == "error":
+                errors += 1
+            else:
+                warnings += 1
+        self.diagnostics_changed.emit(errors, warnings)
+
+    def _diagnostics_on_line(self, line: int) -> list:
+        """Diagnostics touching 0-based ``line``."""
+        return [d for d in self._diagnostics if d.line - 1 <= line <= d.end_line - 1]
+
+    def _line_at_widget_pos(self, pos) -> int | None:
+        editor = self._editor
+        position = editor.SendScintilla(editor.SCI_POSITIONFROMPOINTCLOSE, pos.x(), pos.y())
+        if position < 0:
+            return None
+        line, _index = editor.lineIndexFromPosition(position)
+        return line
+
+    def _show_diagnostic_tooltip(self, event) -> bool:
+        from PyQt6.QtWidgets import QToolTip
+
+        line = self._line_at_widget_pos(event.pos())
+        if line is None:
+            return False
+        hits = self._diagnostics_on_line(line)
+        if not hits:
+            QToolTip.hideText()
+            return False
+        lines = []
+        for d in hits[:4]:
+            mark = "✗" if d.severity == "error" else "△"
+            lines.append(f"{mark} {d.title}")
+        if len(hits) > 4:
+            lines.append(f"… and {len(hits) - 4} more")
+        QToolTip.showText(event.globalPos(), "\n".join(lines), self._editor)
+        return True
+
+    def goto_next_problem(self) -> bool:
+        """Move the cursor to the next diagnostic after the cursor (wrapping)."""
+        if not self._diagnostics:
+            return False
+        cur_line, cur_col = self._editor.getCursorPosition()
+        after = [d for d in self._diagnostics if (d.line - 1, d.col - 1) > (cur_line, cur_col)]
+        target = after[0] if after else self._diagnostics[0]
+        self._editor.setCursorPosition(target.line - 1, max(target.col - 1, 0))
+        self._editor.ensureLineVisible(target.line - 1)
+        self._editor.setFocus()
+        return True
+
+    def _show_editor_menu(self, pos) -> None:
+        from PyQt6.QtWidgets import QMenu
+
+        editor = self._editor
+        menu = QMenu(editor)
+        menu.setStyleSheet(
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; font-size: {tc.FONT_SM}px; }}"
+            f"QMenu::item {{ padding: 4px 20px; }}"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
+            f"QMenu::item:disabled {{ color: {tc.get('text_disabled')}; }}"
+        )
+
+        line = self._line_at_widget_pos(pos)
+        hits = self._diagnostics_on_line(line) if line is not None else []
+        if hits:
+            for d in hits[:3]:
+                label = d.title if len(d.title) <= 60 else d.title[:57] + "…"
+                menu.addAction(f"Fix with AI: {label}").triggered.connect(
+                    lambda _c=False, diag=d: self._fix_with_ai(diag)
+                )
+            menu.addSeparator()
+        if any(d.fixable for d in self._diagnostics):
+            menu.addAction("Apply ruff auto-fixes").triggered.connect(self._apply_autofix)
+        if self._diagnostics:
+            menu.addAction("Go to next problem").triggered.connect(self.goto_next_problem)
+        if hits or self._diagnostics:
+            menu.addSeparator()
+
+        undo = menu.addAction("Undo")
+        undo.setEnabled(editor.isUndoAvailable())
+        undo.triggered.connect(editor.undo)
+        redo = menu.addAction("Redo")
+        redo.setEnabled(editor.isRedoAvailable())
+        redo.triggered.connect(editor.redo)
+        menu.addSeparator()
+        has_sel = editor.hasSelectedText()
+        cut = menu.addAction("Cut")
+        cut.setEnabled(has_sel)
+        cut.triggered.connect(editor.cut)
+        copy = menu.addAction("Copy")
+        copy.setEnabled(has_sel)
+        copy.triggered.connect(editor.copy)
+        menu.addAction("Paste").triggered.connect(editor.paste)
+        menu.addSeparator()
+        menu.addAction("Select All").triggered.connect(editor.selectAll)
+        menu.exec(editor.mapToGlobal(pos))
+
+    def _fix_with_ai(self, diag) -> None:
+        """Hand the problem plus surrounding code to the chat."""
+        window = self.window()
+        chat = getattr(window, "chat_panel", None)
+        if chat is None or not hasattr(chat, "prefill_input"):
+            return
+        editor = self._editor
+        first = max(diag.line - 1 - 6, 0)
+        last = min(diag.line - 1 + 6, editor.lines() - 1)
+        snippet = "\n".join(
+            f"{n + 1:>4}  {editor.text(n).rstrip(chr(10))}" for n in range(first, last + 1)
+        )
+        name = self._file_path.name if self._file_path else "this file"
+        suffix = self._file_path.suffix.lstrip(".") if self._file_path else ""
+        prompt = (
+            f"Fix this problem in {name} (line {diag.line}):\n\n"
+            f"{diag.severity}: {diag.title}\n\n"
+            f"Context:\n```{suffix}\n{snippet}\n```\n\n"
+            "Explain the cause briefly and apply the fix to the file."
+        )
+        chat.prefill_input(prompt)
+        right_tabs = getattr(window, "_right_tabs", None)
+        if right_tabs is not None:
+            idx = right_tabs.indexOf(chat)
+            if idx >= 0:
+                right_tabs.setCurrentIndex(idx)
+            toggle = getattr(window, "_action_toggle_chat", None)
+            if toggle is not None and not toggle.isChecked():
+                toggle.setChecked(True)
+
+    def _apply_autofix(self) -> None:
+        """Apply ruff's safe auto-fixes to the buffer, keeping the cursor put."""
+        from polyglot_ai.core import diagnostics as diag
+        from polyglot_ai.ui.thread_bridge import run_in_thread
+
+        filename = self._file_path
+        if not filename:
+            return
+        text = self._editor.text()
+
+        def done(fixed):
+            if fixed is None or fixed == self._editor.text():
+                return
+            editor = self._editor
+            line, col = editor.getCursorPosition()
+            first_visible = editor.firstVisibleLine()
+            editor.beginUndoAction()
+            editor.setText(fixed)
+            editor.endUndoAction()
+            editor.setModified(True)
+            editor.setCursorPosition(min(line, max(editor.lines() - 1, 0)), col)
+            editor.setFirstVisibleLine(first_visible)
+            self._run_diagnostics()
+
+        run_in_thread(lambda: diag.ruff_autofix(text, filename), done, owner=self)
+
     def eventFilter(self, obj, event) -> bool:
         """Accept (Tab) or dismiss (Esc) a pending completion.
 
@@ -885,6 +1121,9 @@ class EditorTab(QWidget):
         """
         from PyQt6.QtCore import QEvent, Qt
 
+        if obj is self._editor and event.type() == QEvent.Type.ToolTip:
+            if self._show_diagnostic_tooltip(event):
+                return True
         if obj is self._editor and event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Tab and self._can_accept_completion():
                 # Insert the suggestion, clear the annotation, and

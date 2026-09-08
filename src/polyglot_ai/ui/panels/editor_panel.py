@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from polyglot_ai.core.coverage import CoverageReport
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QFileDialog,
@@ -68,6 +68,9 @@ def _ensure_close_icons() -> str:
 
 class EditorPanel(QTabWidget):
     """Multi-tab code editor container."""
+
+    #: (errors, warnings) for the *current* tab whenever they change.
+    problems_changed = pyqtSignal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -159,6 +162,9 @@ class EditorPanel(QTabWidget):
             tab.editor.modificationChanged.connect(
                 lambda _: self._update_tab_title(self.indexOf(tab))
             )
+            tab.diagnostics_changed.connect(
+                lambda errors, warnings, t=tab: self._on_tab_diagnostics(t, errors, warnings)
+            )
             # If a coverage report is already in memory from a previous
             # test run, apply it to this freshly-opened tab so the
             # user doesn't have to re-run tests after every navigation.
@@ -236,6 +242,22 @@ class EditorPanel(QTabWidget):
             return True
         self._report_save_failures([tab])
         return False
+
+    def _on_tab_diagnostics(self, tab, errors: int, warnings: int) -> None:
+        if tab is self.currentWidget():
+            self.problems_changed.emit(errors, warnings)
+
+    def current_problem_counts(self) -> tuple[int, int]:
+        tab = self.currentWidget()
+        if not isinstance(tab, EditorTab):
+            return 0, 0
+        diags = tab.diagnostics
+        errors = sum(1 for d in diags if d.severity == "error")
+        return errors, len(diags) - errors
+
+    def goto_next_problem(self) -> bool:
+        tab = self.currentWidget()
+        return isinstance(tab, EditorTab) and tab.goto_next_problem()
 
     def reload_from_disk(self, path: Path | str) -> bool:
         """Re-read ``path`` into its open tab, if one exists and has no unsaved edits.

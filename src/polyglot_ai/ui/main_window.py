@@ -558,6 +558,12 @@ class MainWindow(QMainWindow):
         self._action_replace.setShortcut(QKeySequence("Ctrl+H"))
         edit_menu.addAction(self._action_replace)
 
+        edit_menu.addSeparator()
+        self._action_next_problem = QAction("Go to Next &Problem", self)
+        self._action_next_problem.setShortcut(QKeySequence("F8"))
+        self._action_next_problem.triggered.connect(self._editor_panel.goto_next_problem)
+        edit_menu.addAction(self._action_next_problem)
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -729,6 +735,39 @@ class MainWindow(QMainWindow):
 
     def _setup_statusbar(self) -> None:
         self.statusBar().showMessage("Ready")
+        # Problems indicator for the current editor tab (ruff / JSON /
+        # YAML diagnostics). Clicking it jumps to the next problem.
+        from PyQt6.QtWidgets import QPushButton
+
+        self._problems_btn = QPushButton("")
+        self._problems_btn.setFlat(True)
+        self._problems_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._problems_btn.setToolTip(
+            "Problems in the current file — click to jump to the next one (F8)"
+        )
+        self._problems_btn.clicked.connect(self._editor_panel.goto_next_problem)
+        self._problems_btn.hide()
+        self.statusBar().addPermanentWidget(self._problems_btn)
+
+    def _update_problems_label(self, errors: int, warnings: int) -> None:
+        from polyglot_ai.ui import theme_colors as _tc
+
+        if not errors and not warnings:
+            self._problems_btn.hide()
+            return
+        parts = []
+        if errors:
+            parts.append(f"{errors} error{'s' if errors != 1 else ''}")
+        if warnings:
+            parts.append(f"{warnings} warning{'s' if warnings != 1 else ''}")
+        colour = _tc.get("accent_error") if errors else _tc.get("accent_warning")
+        self._problems_btn.setText(("✗ " if errors else "△ ") + " · ".join(parts))
+        self._problems_btn.setStyleSheet(
+            f"QPushButton {{ color: {colour}; background: transparent; border: none; "
+            f"padding: 0 8px; font-size: {_tc.FONT_XS}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ text-decoration: underline; }}"
+        )
+        self._problems_btn.show()
 
     def _connect_actions(self) -> None:
         self._action_new.triggered.connect(self._editor_panel.new_file)
@@ -758,6 +797,7 @@ class MainWindow(QMainWindow):
         self._action_paste.triggered.connect(self._forward_paste)
 
         self._editor_panel.currentChanged.connect(self._on_editor_tab_changed)
+        self._editor_panel.problems_changed.connect(self._update_problems_label)
 
     def _get_edit_widget(self):
         """Get the active text editor widget from current tab (EditorTab or DocumentTab)."""
@@ -869,6 +909,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(str(tab.file_path))
         else:
             self.statusBar().showMessage("Ready")
+        self._update_problems_label(*self._editor_panel.current_problem_counts())
 
     # ── Command palette ────────────────────────────────────────────
 
@@ -1085,6 +1126,13 @@ class MainWindow(QMainWindow):
             "Clear Conversation History…",
             lambda: self._action_clear_history.trigger(),
             "AI",
+        )
+        reg.register(
+            "edit.next_problem",
+            "Go to Next Problem",
+            self._editor_panel.goto_next_problem,
+            "Edit",
+            "F8",
         )
         reg.register("edit.undo", "Undo", self._forward_undo, "Edit", "Ctrl+Z")
         reg.register("edit.redo", "Redo", self._forward_redo, "Edit", "Ctrl+Shift+Z")
