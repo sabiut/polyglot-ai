@@ -191,8 +191,68 @@ class TerminalEmulator:
         return len(self._screen.history.top)
 
     def resize(self, rows: int, cols: int) -> None:
-        """Resize the terminal screen."""
-        self._screen.resize(rows, cols)
+        """Resize the terminal screen, keeping what's on it.
+
+        pyte's own ``Screen.resize`` deletes lines from the *top* when
+        the screen gets shorter — so a terminal that started hidden
+        (sized 24×80 while the widget had no geometry) lost its prompt
+        the moment it was shown and shrunk to fit. Behave like a real
+        terminal instead: lines that no longer fit scroll off the top
+        into history, and growing pulls them back.
+        """
+        screen = self._screen
+        rows = max(1, rows)
+        cols = max(1, cols)
+        if rows == screen.lines and cols == screen.columns:
+            return
+
+        buffer = screen.buffer
+        cursor = screen.cursor
+
+        if rows < screen.lines:
+            # Rows actually in use: through the cursor line, or the
+            # last row with any character on it — whichever is lower.
+            last_used = cursor.y
+            for y in range(screen.lines - 1, -1, -1):
+                if any(ch.data != " " for ch in buffer[y].values()):
+                    last_used = max(last_used, y)
+                    break
+            push = max(0, (last_used + 1) - rows)
+            for y in range(push):
+                screen.history.top.append(buffer[y])
+            if push:
+                for y in range(rows):
+                    src = y + push
+                    if src in buffer:
+                        buffer[y] = buffer.pop(src)
+                    else:
+                        buffer.pop(y, None)
+                cursor.y = max(0, cursor.y - push)
+            for y in list(buffer):
+                if y >= rows:
+                    del buffer[y]
+        elif rows > screen.lines:
+            # Pull lines back out of history so growing the window
+            # reveals scrollback instead of blank rows.
+            pull = min(rows - screen.lines, len(screen.history.top))
+            if pull:
+                for y in sorted(buffer, reverse=True):
+                    buffer[y + pull] = buffer.pop(y)
+                for y in range(pull - 1, -1, -1):
+                    buffer[y] = screen.history.top.pop()
+                cursor.y += pull
+
+        if cols < screen.columns:
+            for line in buffer.values():
+                for x in list(line):
+                    if x >= cols:
+                        del line[x]
+
+        screen.lines, screen.columns = rows, cols
+        cursor.y = min(cursor.y, rows - 1)
+        cursor.x = min(cursor.x, cols - 1)
+        screen.set_margins()
+        screen.dirty.update(range(rows))
         self._dirty = True
 
     def get_all_text(self) -> str:

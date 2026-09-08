@@ -494,7 +494,6 @@ def main() -> None:
         "session.active_tab_index": settings.get("session.active_tab_index"),
         "session.splitter_sizes": settings.get("session.splitter_sizes"),
         "session.window_geometry": settings.get("session.window_geometry"),
-        "session.terminal_visible": settings.get("session.terminal_visible"),
     }
     window.restore_session(session_data)
 

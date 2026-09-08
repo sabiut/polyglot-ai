@@ -1016,6 +1016,25 @@ class TerminalPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+        self._event_bus: EventBus | None = None
+        self._pty: PtyProcess | None = None
+        self._emulator: TerminalEmulator | None = None
+
+        # GUI-thread slots for the cross-thread PTY signals. These
+        # MUST be connected here: 0.18.6 shipped with them displaced
+        # into dock_back(), so a freshly started shell's output never
+        # reached the emulator and the terminal looked dead.
+        self._pty_output.connect(self._on_output)
+        self._pty_exited.connect(self._on_exited)
+
+        # Let the AI's ``terminal_read`` tool see the buffer. A lazy
+        # reader (not a pushed snapshot) because terminal output churns
+        # on every PTY write; the bound method survives shell restarts
+        # since it always reads whatever emulator is current.
+        from polyglot_ai.core import panel_state
+
+        panel_state.set_terminal_reader(self._read_buffer_for_ai)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1148,22 +1167,6 @@ class TerminalPanel(QWidget):
         self._expand_btn.setEnabled(True)
         win.deleteLater()
         self._terminal_widget.setFocus()
-
-        self._event_bus: EventBus | None = None
-        self._pty: PtyProcess | None = None
-        self._emulator: TerminalEmulator | None = None
-
-        # GUI-thread slots for the cross-thread PTY signals.
-        self._pty_output.connect(self._on_output)
-        self._pty_exited.connect(self._on_exited)
-
-        # Let the AI's ``terminal_read`` tool see the buffer. A lazy
-        # reader (not a pushed snapshot) because terminal output churns
-        # on every PTY write; the bound method survives shell restarts
-        # since it always reads whatever emulator is current.
-        from polyglot_ai.core import panel_state
-
-        panel_state.set_terminal_reader(self._read_buffer_for_ai)
 
     def _read_buffer_for_ai(self) -> str | None:
         """Return the full terminal buffer, or None when no shell is running."""

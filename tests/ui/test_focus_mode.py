@@ -96,13 +96,12 @@ class TestOnDemandTerminal:
         assert not window._action_toggle_terminal.isChecked()
         assert not window._activity_bar._buttons["terminal"].active
 
-    def test_session_round_trip(self, window):
+    def test_visibility_is_not_persisted(self, window):
+        # Closing the app with the terminal open must not bring it
+        # back on the next launch — it's hidden by default, always.
         window._action_toggle_terminal.setChecked(True)
-        data = window.save_session()
-        assert data["session.terminal_visible"] is True
+        assert "session.terminal_visible" not in window.save_session()
 
         window._action_toggle_terminal.setChecked(False)
-        window.restore_session({"session.terminal_visible": True})
-        assert window._action_toggle_terminal.isChecked()
-        window.restore_session({"session.terminal_visible": False})
+        window.restore_session({"session.terminal_visible": True})  # stale key from old builds
         assert not window._action_toggle_terminal.isChecked()

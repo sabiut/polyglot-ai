@@ -1301,7 +1301,6 @@ class MainWindow(QMainWindow):
                 "w": self.width(),
                 "h": self.height(),
             },
-            "session.terminal_visible": self._action_toggle_terminal.isChecked(),
         }
 
     def restore_session(self, session_data: dict) -> None:
@@ -1352,10 +1351,10 @@ class MainWindow(QMainWindow):
         if isinstance(active_idx, int) and 0 <= active_idx < self._editor_panel.count():
             self._editor_panel.setCurrentIndex(active_idx)
 
-        # Terminal visibility (hidden by default; remembered if opened)
-        terminal_visible = session_data.get("session.terminal_visible")
-        if isinstance(terminal_visible, bool):
-            self._action_toggle_terminal.setChecked(terminal_visible)
+        # The terminal always starts hidden — it's opened on demand.
+        # (An earlier build remembered it across sessions, which meant
+        # closing the app with the terminal open brought it back on
+        # every launch — the opposite of "out of the way by default".)
 
     # Public accessors for panels
     @property
