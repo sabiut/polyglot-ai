@@ -488,7 +488,7 @@ class ClaudeOAuthClient(AIProvider):
                         "**To keep using Claude:**\n\n"
                         "**Add an Anthropic API key.** Open **Settings → AI "
                         "Providers → Anthropic** and paste a key from "
-                        "https://console.anthropic.com/settings/keys. Pick a "
+                        "https://platform.claude.com/settings/keys. Pick a "
                         "Claude model from the dropdown again and all the "
                         "IDE features (tool calls, MCP, workflows) keep "
                         "working. API-key access uses a different billing "
@@ -509,9 +509,9 @@ class ClaudeOAuthClient(AIProvider):
                         "**Options:**\n\n"
                         "1. **Wait ~1 minute and retry.** The cap resets on a "
                         "rolling window.\n"
-                        "2. **Switch to an API key** — Settings → AI Providers "
+                        "2. **Switch to an API key** — Settings → Accounts "
                         "→ Anthropic, paste a key from "
-                        "https://console.anthropic.com/settings/keys. API-key "
+                        "https://platform.claude.com/settings/keys. API-key "
                         "rate limits are much higher than subscription OAuth."
                     )
                 )

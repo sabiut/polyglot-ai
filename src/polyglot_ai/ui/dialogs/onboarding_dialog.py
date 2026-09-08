@@ -28,7 +28,7 @@ _PROVIDER_CHOICES: list[tuple[str, str, str, str]] = [
         "Anthropic (Claude)",
         "anthropic",
         "sk-ant-...",
-        "https://console.anthropic.com/settings/keys",
+        "https://platform.claude.com/settings/keys",
     ),
     ("Google (Gemini)", "google", "AIza...", "https://aistudio.google.com/apikey"),
     ("DeepSeek", "deepseek", "sk-...", "https://platform.deepseek.com/api_keys"),

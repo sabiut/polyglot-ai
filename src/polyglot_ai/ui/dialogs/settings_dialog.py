@@ -47,7 +47,7 @@ PROVIDERS = [
         "name": "anthropic",
         "display": "Anthropic",
         "placeholder": "sk-ant-...",
-        "url": "console.anthropic.com/settings/keys",
+        "url": "platform.claude.com/settings/keys",
     },
     {
         "name": "google",

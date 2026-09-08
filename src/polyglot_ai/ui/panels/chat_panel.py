@@ -2569,15 +2569,15 @@ class ChatPanel(QWidget):
         """
         m = (display_model or "").lower()
         if "claude" in m:
-            who, where = "Claude", "Settings → AI Providers → Claude"
+            who, where = "Claude", "Settings → Accounts → Claude"
         elif m.startswith(("gpt-", "o1", "o3", "o4")):
-            who, where = "OpenAI / ChatGPT", "Settings → AI Providers → OpenAI"
+            who, where = "OpenAI / ChatGPT", "Settings → Accounts → OpenAI"
         elif "gemini" in m:
-            who, where = "Google Gemini", "Settings → AI Providers → Google"
+            who, where = "Google Gemini", "Settings → Accounts → Google"
         elif "deepseek" in m:
-            who, where = "DeepSeek", "Settings → AI Providers → DeepSeek"
+            who, where = "DeepSeek", "Settings → Accounts → DeepSeek"
         else:
-            who, where = display_model, "Settings → AI Providers"
+            who, where = display_model, "Settings → Accounts"
         return (
             f"No {who} provider is registered, so '{display_model}' can't run.\n\n"
             f"Open {where} and either sign in via OAuth or paste an "
