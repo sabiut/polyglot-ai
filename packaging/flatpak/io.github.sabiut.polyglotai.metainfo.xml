@@ -23,6 +23,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.9" date="2026-09-08">
+      <description>
+        <p>Fixes the terminal opening with no height (button lit, nothing
+        shown) after a session was saved with it hidden.</p>
+      </description>
+    </release>
     <release version="0.18.8" date="2026-09-08">
       <description>
         <p>"Send selection to AI" and "Restart terminal" now work from the
