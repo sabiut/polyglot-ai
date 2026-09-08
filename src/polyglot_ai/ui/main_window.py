@@ -258,6 +258,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_action_settings"):
                 self._action_settings.trigger()
             return
+        if view_name == "terminal":
+            self._action_toggle_terminal.toggle()
+            return
 
         # Arduino is the one panel that lives in its own window
         # rather than the sidebar — the wizard layout needs the
@@ -609,9 +612,16 @@ class MainWindow(QMainWindow):
 
         self._action_toggle_terminal = QAction("&Terminal", self)
         self._action_toggle_terminal.setCheckable(True)
-        self._action_toggle_terminal.setChecked(True)
+        # Hidden by default: the terminal is opened on demand from the
+        # activity bar, Ctrl+`, or this menu — it no longer takes a
+        # third of the editor column on every launch. The shell still
+        # starts in the background so it's instant when summoned, and
+        # the last state is remembered across sessions.
+        self._action_toggle_terminal.setChecked(False)
         self._action_toggle_terminal.setShortcut(QKeySequence("Ctrl+`"))
         self._action_toggle_terminal.toggled.connect(self._terminal_panel.setVisible)
+        self._action_toggle_terminal.toggled.connect(self._activity_bar.set_terminal_active)
+        self._terminal_panel.setVisible(False)
         view_menu.addAction(self._action_toggle_terminal)
 
         self._action_toggle_chat = QAction("&AI Chat", self)
@@ -1252,6 +1262,7 @@ class MainWindow(QMainWindow):
                 "w": self.width(),
                 "h": self.height(),
             },
+            "session.terminal_visible": self._action_toggle_terminal.isChecked(),
         }
 
     def restore_session(self, session_data: dict) -> None:
@@ -1301,6 +1312,11 @@ class MainWindow(QMainWindow):
         active_idx = session_data.get("session.active_tab_index", 0)
         if isinstance(active_idx, int) and 0 <= active_idx < self._editor_panel.count():
             self._editor_panel.setCurrentIndex(active_idx)
+
+        # Terminal visibility (hidden by default; remembered if opened)
+        terminal_visible = session_data.get("session.terminal_visible")
+        if isinstance(terminal_visible, bool):
+            self._action_toggle_terminal.setChecked(terminal_visible)
 
     # Public accessors for panels
     @property

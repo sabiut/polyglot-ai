@@ -111,6 +111,8 @@ class ActivityBarButton(QWidget):
             self._draw_arduino_icon(painter, ox, oy)
         elif self._icon_type == "video":
             self._draw_video_icon(painter, ox, oy)
+        elif self._icon_type == "terminal":
+            self._draw_terminal_icon(painter, ox, oy)
         elif self._icon_type == "settings":
             self._draw_settings_icon(painter, ox, oy)
 
@@ -364,6 +366,15 @@ class ActivityBarButton(QWidget):
         path.closeSubpath()
         p.fillPath(path, p.pen().color())
 
+    def _draw_terminal_icon(self, p: QPainter, ox: float, oy: float) -> None:
+        """Terminal — rounded frame with a ``>_`` prompt."""
+        p.drawRoundedRect(QRectF(ox + 2.5, oy + 4.5, 19, 15), 2.5, 2.5)
+        # ">" chevron
+        p.drawLine(QPointF(ox + 7, oy + 9), QPointF(ox + 10.5, oy + 12))
+        p.drawLine(QPointF(ox + 10.5, oy + 12), QPointF(ox + 7, oy + 15))
+        # "_" cursor
+        p.drawLine(QPointF(ox + 12.5, oy + 15.5), QPointF(ox + 17.5, oy + 15.5))
+
     def _draw_settings_icon(self, p: QPainter, ox: float, oy: float) -> None:
         """Settings — gear/cog icon."""
         cx, cy = ox + 12, oy + 12
@@ -456,7 +467,13 @@ class ActivityBar(QWidget):
 
         layout.addStretch()
 
-        # Bottom icon: settings
+        # Bottom icons: terminal toggle (hidden by default — opened on
+        # demand, like Claude Code's toolbar) and settings.
+        terminal_btn = ActivityBarButton("terminal", "Toggle Terminal (Ctrl+`)")
+        terminal_btn.clicked.connect(lambda: self._on_click("terminal"))
+        layout.addWidget(terminal_btn)
+        self._buttons["terminal"] = terminal_btn
+
         settings_btn = ActivityBarButton("settings", "Settings (Ctrl+,)")
         settings_btn.clicked.connect(lambda: self._on_click("settings"))
         layout.addWidget(settings_btn)
@@ -469,17 +486,29 @@ class ActivityBar(QWidget):
         # If clicking the already active view, toggle sidebar visibility
         _ = next((k for k, b in self._buttons.items() if b.active), None)
 
-        if view_name == "settings":
-            self.view_changed.emit("settings")
+        if view_name in ("settings", "terminal"):
+            # Neither is a sidebar view: don't touch the active
+            # highlight of whichever panel is showing.
+            self.view_changed.emit(view_name)
             return
 
         # Update active state
         for key, btn in self._buttons.items():
+            if key == "terminal":
+                continue  # its highlight mirrors terminal visibility, not the sidebar
             btn.active = key == view_name
 
         self.view_changed.emit(view_name)
 
+    def set_terminal_active(self, visible: bool) -> None:
+        """Highlight the terminal button while the terminal panel is shown."""
+        btn = self._buttons.get("terminal")
+        if btn is not None:
+            btn.active = bool(visible)
+
     def set_active(self, view_name: str) -> None:
         """Programmatically set the active view."""
         for key, btn in self._buttons.items():
+            if key == "terminal":
+                continue  # its highlight mirrors terminal visibility, not the sidebar
             btn.active = key == view_name

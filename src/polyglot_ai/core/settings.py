@@ -28,6 +28,7 @@ DEFAULTS = {
     "session.active_tab_index": 0,
     "session.splitter_sizes": {},
     "session.window_geometry": {},
+    "session.terminal_visible": False,
     # AI features
     "editor.ai_completions": True,
     "ai.auto_context": True,
