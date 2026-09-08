@@ -669,13 +669,29 @@ class TerminalWidget(QWidget):
 
         menu.exec(event.globalPos())
 
+    def _main_window(self):
+        """The application main window, even when this widget is popped out.
+
+        ``self.window()`` is the pop-out ``_TerminalWindow`` while the
+        terminal lives in its own window; that window is parented to the
+        main window, so climb parents until something exposes the
+        panels we need.
+        """
+        w = self.window()
+        for _ in range(5):
+            if w is None or hasattr(w, "chat_panel"):
+                return w
+            parent = w.parent()
+            w = parent.window() if parent is not None else None
+        return w
+
     def _restart_terminal_from_menu(self) -> None:
         """Walk up to the TerminalPanel and ask it to restart the shell.
 
         Falls back silently if the lookup fails so the menu action
         never errors visibly — the worst case is "menu does nothing".
         """
-        window = self.window()
+        window = self._main_window()
         panel = getattr(window, "terminal_panel", None)
         if panel is None or not hasattr(panel, "restart_terminal"):
             logger.debug("Restart Terminal: panel unavailable")
@@ -692,11 +708,16 @@ class TerminalWidget(QWidget):
         text = self._get_selected_text()
         if not text:
             return
-        window = self.window()
+        window = self._main_window()
         chat = getattr(window, "chat_panel", None)
         if chat is None or not hasattr(chat, "prefill_input"):
             logger.debug("Send to AI: chat panel unavailable")
             return
+        if window is not self.window():
+            # Sent from the popped-out terminal: bring the main window
+            # forward so the prefilled chat is actually visible.
+            window.raise_()
+            window.activateWindow()
         framed = (
             "Help me understand this terminal output. Explain what it "
             "means, whether there's an error, and what I should do next:\n\n"
