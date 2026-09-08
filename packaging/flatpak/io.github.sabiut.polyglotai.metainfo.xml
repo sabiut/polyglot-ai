@@ -23,6 +23,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.5" date="2026-09-08">
+      <description>
+        <p>The terminal now stays out of the way until you need it:
+        hidden by default, opened from a new button at the bottom of the
+        activity bar (or Ctrl+`), and remembered across sessions.</p>
+      </description>
+    </release>
     <release version="0.18.4" date="2026-09-08">
       <description>
         <p>Focus mode: expand the editor to the whole window from the tab
