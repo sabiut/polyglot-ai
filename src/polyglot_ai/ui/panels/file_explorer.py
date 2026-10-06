@@ -45,8 +45,12 @@ _HEADER_ICONS = {
     "New Folder": shared_icons.draw_new_folder_icon,
     "Refresh": shared_icons.draw_refresh_icon,
     "Collapse All": shared_icons.draw_collapse_all_icon,
+    "Hidden Files": shared_icons.draw_eye_icon,
 }
 
+#: Always filtered out of the tree, hidden-files toggle or not: VCS
+#: internals, virtualenvs, caches and build output. Dotfiles that are
+#: part of the project (.env, .gitignore, .github, …) are NOT here.
 HIDDEN_DIRS = {
     "__pycache__",
     ".git",
@@ -328,7 +332,20 @@ class FileIconDelegate(QStyledItemDelegate):
 
 
 class FilterProxyModel(QSortFilterProxyModel):
-    """Filters out common hidden/build directories."""
+    """Filters out common hidden/build directories, and optionally all dotfiles."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._show_hidden = True
+
+    @property
+    def show_hidden(self) -> bool:
+        return self._show_hidden
+
+    def set_show_hidden(self, show: bool) -> None:
+        if show != self._show_hidden:
+            self._show_hidden = bool(show)
+            self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         model = self.sourceModel()
@@ -336,7 +353,11 @@ class FilterProxyModel(QSortFilterProxyModel):
             return True
         index = model.index(source_row, 0, source_parent)
         name = model.fileName(index)
-        return name not in HIDDEN_DIRS and not name.endswith(".egg-info")
+        if name in HIDDEN_DIRS or name.endswith(".egg-info"):
+            return False
+        if not self._show_hidden and name.startswith("."):
+            return False
+        return True
 
 
 class _DragDropTreeView(QTreeView):
@@ -438,13 +459,18 @@ class FileExplorer(QWidget):
 
         # Action buttons in header
         self._action_btns: list[QPushButton] = []
-        for tooltip in ("New File", "New Folder", "Refresh", "Collapse All"):
+        for tooltip in ("New File", "New Folder", "Refresh", "Collapse All", "Hidden Files"):
             btn = QPushButton()
             btn.setObjectName("explorerActionBtn")
             btn.setFixedSize(24, 24)
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            if tooltip == "New File":
+            if tooltip == "Hidden Files":
+                btn.setCheckable(True)
+                btn.setChecked(True)
+                btn.toggled.connect(self.set_show_hidden)
+                self._hidden_btn = btn
+            elif tooltip == "New File":
                 btn.clicked.connect(self._new_file_at_root)
             elif tooltip == "New Folder":
                 btn.clicked.connect(self._new_folder_at_root)
@@ -514,8 +540,15 @@ class FileExplorer(QWidget):
 
         # File system model
         self._fs_model = QFileSystemModel()
+        # ``Hidden`` is what makes dotfiles (.env, .gitignore, .github…)
+        # reach the proxy at all; without it Qt drops them before our
+        # own filter runs. Noise like .git and .venv is still removed
+        # by FilterProxyModel via HIDDEN_DIRS.
         self._fs_model.setFilter(
-            QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
+            QDir.Filter.AllDirs
+            | QDir.Filter.Files
+            | QDir.Filter.NoDotAndDotDot
+            | QDir.Filter.Hidden
         )
 
         self._proxy_model = FilterProxyModel()
@@ -554,6 +587,10 @@ class FileExplorer(QWidget):
             """)
             # Re-painted on theme change so the strokes pick up the
             # current text/accent colours.
+            if btn is getattr(self, "_hidden_btn", None):
+                btn.setIcon(shared_icons.draw_eye_icon(crossed=not self.show_hidden))
+                btn.setIconSize(QSize(16, 16))
+                continue
             icon = _HEADER_ICONS.get(btn.toolTip())
             if icon is not None:
                 btn.setIcon(icon())
@@ -637,6 +674,25 @@ class FileExplorer(QWidget):
 
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
+
+    @property
+    def show_hidden(self) -> bool:
+        return self._proxy_model.show_hidden
+
+    def set_show_hidden(self, show: bool) -> None:
+        """Show or hide dotfiles (the header eye button; persisted by the window)."""
+        show = bool(show)
+        self._proxy_model.set_show_hidden(show)
+        btn = getattr(self, "_hidden_btn", None)
+        if btn is not None:
+            if btn.isChecked() != show:
+                btn.blockSignals(True)
+                btn.setChecked(show)
+                btn.blockSignals(False)
+            btn.setIcon(shared_icons.draw_eye_icon(crossed=not show))
+            btn.setToolTip("Hide dotfiles" if show else "Show dotfiles (.env, .gitignore, …)")
+        if self._event_bus is not None:
+            self._event_bus.emit("explorer:show_hidden", show=show)
 
     def set_root(self, path: Path) -> None:
         """Set the project root directory for the tree view."""

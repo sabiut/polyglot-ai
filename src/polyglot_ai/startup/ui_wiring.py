@@ -275,6 +275,16 @@ def wire_open_project(window, event_bus, settings=None):
 
     project_manager = ProjectManager(event_bus)
 
+    # Explorer dotfile visibility: apply the saved choice and persist
+    # changes made with the header eye button.
+    if settings is not None:
+        window._file_explorer.set_show_hidden(bool(settings.get("explorer.show_hidden")))
+
+        def _save_show_hidden(show: bool = True, **_kwargs) -> None:
+            safe_task(settings.set("explorer.show_hidden", bool(show)), name="save_show_hidden")
+
+        event_bus.subscribe("explorer:show_hidden", _save_show_hidden)
+
     def _activate_project(path: Path) -> None:
         project_manager.open_project(path)
         window._file_explorer.set_root(path)

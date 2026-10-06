@@ -85,6 +85,27 @@ def draw_remote_icon() -> QIcon:
     return QIcon(pm)
 
 
+def draw_eye_icon(crossed: bool = False) -> QIcon:
+    """Eye glyph — 'show hidden files'; ``crossed`` draws the slash (hidden)."""
+    pm = QPixmap(16, 16)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(tc.get("text_primary")))
+    pen.setWidthF(1.5)
+    p.setPen(pen)
+    path = QPainterPath()
+    path.moveTo(1.5, 8)
+    path.quadTo(8, 1.5, 14.5, 8)
+    path.quadTo(8, 14.5, 1.5, 8)
+    p.drawPath(path)
+    p.drawEllipse(QRectF(6, 6, 4, 4))
+    if crossed:
+        p.drawLine(3, 13, 13, 3)
+    p.end()
+    return QIcon(pm)
+
+
 def draw_popout_icon() -> QIcon:
     """Box-with-arrow ↗ glyph — 'open in a separate window' affordance."""
     pm = QPixmap(16, 16)

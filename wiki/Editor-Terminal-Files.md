@@ -170,6 +170,10 @@ Open with `Ctrl+Shift+E` or the first activity-bar icon (after Today/Tasks).
 - **Right-click** for a context menu: new file, new folder, rename, delete, copy path (absolute or relative), reveal in file manager.
 - **Drag and drop** a file into the chat panel to attach it.
 - **New file** shortcut: right-click → New file, or `Ctrl+N` when the explorer is focused.
+- **Dotfiles** (`.env`, `.gitignore`, `.github`, …) are shown by default.
+  The eye button in the explorer header hides or shows them; the choice
+  is remembered. `.git`, virtualenvs, `__pycache__` and other caches and
+  build output are always left out of the tree.
 
 The tree watches the filesystem and refreshes automatically when files
 change outside the app.

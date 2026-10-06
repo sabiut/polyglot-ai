@@ -57,6 +57,9 @@ DEFAULTS = {
     "ui.hidden_panels": ["arduino", "database"],
     # Terminal → New SSH Session…: last targets, most recent first.
     "ssh.recent_targets": [],
+    # File explorer: show dotfiles (.env, .gitignore, .github, …).
+    # .git, .venv and caches stay hidden regardless (HIDDEN_DIRS).
+    "explorer.show_hidden": True,
 }
 
 
