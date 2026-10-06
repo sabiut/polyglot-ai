@@ -102,6 +102,8 @@ shows token spend, backed by the usage table in the main app DB.
 | `Ctrl+Shift+I` | CI/CD inspector |
 | `Ctrl+Shift+A` | Toggle AI chat |
 | `` Ctrl+` `` | Toggle terminal |
+| `Ctrl+Shift+O` | Open project |
+| `Ctrl+Alt+Shift+O` | Add folder to explorer |
 | `Ctrl+Shift+P` | Command palette |
 | `Ctrl+,` | Settings |
 

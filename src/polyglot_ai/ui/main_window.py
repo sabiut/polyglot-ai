@@ -520,6 +520,11 @@ class MainWindow(QMainWindow):
         self._action_open_project.setShortcut(QKeySequence("Ctrl+Shift+O"))
         file_menu.addAction(self._action_open_project)
 
+        self._action_add_folder = QAction("Add Folder to &Explorer...", self)
+        self._action_add_folder.setShortcut(QKeySequence("Ctrl+Alt+Shift+O"))
+        self._action_add_folder.triggered.connect(self._add_folder_to_explorer)
+        file_menu.addAction(self._action_add_folder)
+
         file_menu.addSeparator()
 
         self._action_save = QAction("&Save", self)
@@ -912,6 +917,28 @@ class MainWindow(QMainWindow):
         if w:
             w.paste()
 
+    def _add_folder_to_explorer(self) -> None:
+        """File → Add Folder to Explorer…: a second (third…) folder beside the project."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Add Folder to Explorer", "", QFileDialog.Option.ShowDirsOnly
+        )
+        if not directory:
+            return
+        path = Path(directory)
+        if self._file_explorer.project_root is None:
+            # Nothing open yet: the first folder is simply the project.
+            self._open_project_path(path)
+            return
+        if not self._file_explorer.add_folder(path):
+            self.statusBar().showMessage(f"{path.name} is already in the explorer", 4000)
+
+    def _open_project_path(self, path: Path, *, keep_previous: bool = False) -> None:
+        activator = getattr(self, "_activate_project", None)
+        if activator is not None:
+            activator(path, keep_previous=keep_previous)
+        else:
+            self._file_explorer.set_root(path, keep_previous=keep_previous)
+
     def _open_project(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self, "Open Project", "", QFileDialog.Option.ShowDirsOnly
@@ -1100,6 +1127,13 @@ class MainWindow(QMainWindow):
         )
         reg.register(
             "file.open_project", "Open Project", self._open_project, "File", "Ctrl+Shift+O"
+        )
+        reg.register(
+            "file.add_folder",
+            "Add Folder to Explorer",
+            self._add_folder_to_explorer,
+            "File",
+            "Ctrl+Alt+Shift+O",
         )
         reg.register("file.save", "Save", self._editor_panel.save_current, "File", "Ctrl+S")
         reg.register(

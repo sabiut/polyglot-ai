@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QDir, QModelIndex, QSize, QSortFilterProxyModel, Qt
+from PyQt6.QtCore import QDir, QModelIndex, QSize, QSortFilterProxyModel, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFileSystemModel,
@@ -432,14 +432,147 @@ class _DragDropTreeView(QTreeView):
             event.ignore()
 
 
+class _SectionHeader(QWidget):
+    """Clickable folder header row (chevron + name + badge)."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt override
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class _FolderSection(QWidget):
+    """One folder in the explorer: a collapsible header plus its own tree.
+
+    All sections share the explorer's file-system model and filter
+    proxy; each tree is just rooted at a different directory. The
+    first section is the *project* (git, AI tools, indexing all key
+    off it); the rest are extra folders for browsing and editing.
+    """
+
+    def __init__(self, explorer: "FileExplorer", root: Path, primary: bool) -> None:
+        super().__init__(explorer)
+        self._explorer = explorer
+        self.root = Path(root)
+        self.primary = primary
+        self._collapsed = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.header = _SectionHeader()
+        self.header.setObjectName("projectHeader")
+        self.header.setFixedHeight(24)
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header.clicked.connect(self.toggle_collapsed)
+        self.header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.header.customContextMenuRequested.connect(
+            lambda pos: explorer._show_folder_menu(self, pos)
+        )
+        hl = QHBoxLayout(self.header)
+        hl.setContentsMargins(6, 0, 6, 0)
+        hl.setSpacing(4)
+        self.chevron = QLabel("▼")
+        self.chevron.setFixedWidth(12)
+        hl.addWidget(self.chevron)
+        self.name = QLabel(self.root.name.upper() or str(self.root))
+        self.name.setToolTip(str(self.root))
+        hl.addWidget(self.name)
+        hl.addStretch()
+        self.badge = QLabel("")
+        hl.addWidget(self.badge)
+        layout.addWidget(self.header)
+
+        self.tree = _DragDropTreeView(explorer)
+        tree = self.tree
+        tree.setHeaderHidden(True)
+        tree.setAnimated(False)
+        tree.setIndentation(16)
+        tree.setUniformRowHeights(True)
+        tree.setExpandsOnDoubleClick(True)
+        tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tree.setDragEnabled(True)
+        tree.setAcceptDrops(True)
+        tree.setDropIndicatorShown(True)
+        tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(lambda pos: explorer._show_context_menu(pos, self))
+        tree.doubleClicked.connect(explorer._on_double_click)
+        tree.clicked.connect(lambda idx: explorer._on_single_click(idx, tree))
+        tree.setModel(explorer._proxy_model)
+        self.delegate = FileIconDelegate(explorer._fs_model, explorer._proxy_model, tree)
+        tree.setItemDelegateForColumn(0, self.delegate)
+        layout.addWidget(tree)
+
+        self.set_primary(primary)
+        self.set_root_index()
+
+    def set_primary(self, primary: bool) -> None:
+        self.primary = primary
+        self.badge.setText("PROJECT" if primary else "")
+        self.header.setToolTip(
+            "The project: git, tests and the AI's tools work on this folder"
+            if primary
+            else f"Extra folder — {self.root}\nRight-click to make it the project or remove it"
+        )
+
+    def set_root_index(self) -> None:
+        fs = self._explorer._fs_model
+        proxy = self._explorer._proxy_model
+        src = fs.setRootPath(str(self.root)) if self.primary else fs.index(str(self.root))
+        self.tree.setRootIndex(proxy.mapFromSource(src))
+        for col in range(1, fs.columnCount()):
+            self.tree.hideColumn(col)
+
+    def toggle_collapsed(self) -> None:
+        self._collapsed = not self._collapsed
+        self.tree.setVisible(not self._collapsed)
+        self.chevron.setText("▶" if self._collapsed else "▼")
+
+    def apply_styles(self, tree_qss: str) -> None:
+        self.header.setStyleSheet(
+            f"#projectHeader {{ background-color: {tc.get('bg_surface')}; "
+            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
+        )
+        self.chevron.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_primary')}; background: transparent;"
+        )
+        self.name.setStyleSheet(
+            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_primary')}; "
+            "background: transparent; letter-spacing: 0.3px;"
+        )
+        self.badge.setStyleSheet(
+            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; background: transparent; "
+            "letter-spacing: 0.5px;"
+        )
+        self.tree.setStyleSheet(tree_qss)
+
+
 class FileExplorer(QWidget):
-    """VS Code-style tree view of the current project directory."""
+    """VS Code-style tree of the project directory, plus any extra folders.
+
+    The first folder is the project; ``add_folder`` stacks further
+    folders beneath it (File → Add Folder to Explorer…). Right-click a
+    folder's header to make it the project or remove it.
+    """
 
     on_file_double_clicked: callable = None
+
+    #: All folders as strings, project first — emitted whenever the set changes.
+    folders_changed = pyqtSignal(list)
+    #: User asked for an extra folder to become the project (Path).
+    set_as_project_requested = pyqtSignal(object)
+    #: User asked to add a folder (the window owns the directory dialog).
+    add_folder_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._event_bus = None
+        self._tree_qss = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -483,43 +616,16 @@ class FileExplorer(QWidget):
 
         layout.addWidget(self._header_bar)
 
-        # Project name section (collapsible, like VS Code)
-        self._project_header = QWidget()
-        self._project_header.setObjectName("projectHeader")
-        self._project_header.setFixedHeight(24)
-        self._project_header.hide()
-        ph_layout = QHBoxLayout(self._project_header)
-        ph_layout.setContentsMargins(6, 0, 6, 0)
-        ph_layout.setSpacing(4)
+        # One collapsible section per folder (project first), in a
+        # vertical splitter so the user can share the height between them.
+        from PyQt6.QtWidgets import QSplitter
 
-        self._chevron = QLabel("▼")
-        self._chevron.setFixedWidth(12)
-        ph_layout.addWidget(self._chevron)
-
-        self._project_name = QLabel("")
-        ph_layout.addWidget(self._project_name)
-        ph_layout.addStretch()
-
-        layout.addWidget(self._project_header)
-
-        # Tree view with drag & drop file moving
-        self._tree = _DragDropTreeView(self)
-        self._tree.setHeaderHidden(True)
-        self._tree.setAnimated(False)
-        self._tree.setIndentation(16)
-        self._tree.setUniformRowHeights(True)
-        self._tree.setExpandsOnDoubleClick(True)
-        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._tree.setDragEnabled(True)
-        self._tree.setAcceptDrops(True)
-        self._tree.setDropIndicatorShown(True)
-        self._tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self._tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tree.customContextMenuRequested.connect(self._show_context_menu)
-        self._tree.doubleClicked.connect(self._on_double_click)
-        self._tree.clicked.connect(self._on_single_click)
-        layout.addWidget(self._tree)
+        self._sections_box = QSplitter(Qt.Orientation.Vertical)
+        self._sections_box.setChildrenCollapsible(False)
+        self._sections_box.setHandleWidth(1)
+        self._sections_box.hide()
+        layout.addWidget(self._sections_box, stretch=1)
+        self._sections: list[_FolderSection] = []
 
         # Placeholder when no project is open
         self._placeholder = QWidget()
@@ -536,8 +642,6 @@ class FileExplorer(QWidget):
 
         layout.addWidget(self._placeholder)
 
-        self._tree.hide()
-
         # File system model
         self._fs_model = QFileSystemModel()
         # ``Hidden`` is what makes dotfiles (.env, .gitignore, .github…)
@@ -553,16 +657,144 @@ class FileExplorer(QWidget):
 
         self._proxy_model = FilterProxyModel()
         self._proxy_model.setSourceModel(self._fs_model)
-        self._tree.setModel(self._proxy_model)
-
-        # Custom icon delegate
-        self._delegate = FileIconDelegate(self._fs_model, self._proxy_model, self._tree)
-        self._tree.setItemDelegateForColumn(0, self._delegate)
 
         self._project_root: Path | None = None
 
         self._apply_theme_styles()
         theme.connect_theme_changed(self._apply_theme_styles)
+
+    # ── Sections (folders) ────────────────────────────────────────
+
+    @property
+    def _primary(self) -> _FolderSection | None:
+        return self._sections[0] if self._sections and self._sections[0].primary else None
+
+    @property
+    def _tree(self) -> QTreeView | None:
+        """The project's tree (kept for callers that predate multi-folder)."""
+        primary = self._primary
+        return primary.tree if primary is not None else None
+
+    @property
+    def folders(self) -> list[Path]:
+        """Every folder shown, project first."""
+        return [s.root for s in self._sections]
+
+    @property
+    def extra_folders(self) -> list[Path]:
+        return [s.root for s in self._sections if not s.primary]
+
+    def _make_section(self, root: Path, primary: bool) -> _FolderSection:
+        section = _FolderSection(self, root, primary)
+        section.apply_styles(self._tree_qss)
+        return section
+
+    def _remove_section(self, section: _FolderSection) -> None:
+        self._sections.remove(section)
+        section.setParent(None)
+        section.deleteLater()
+
+    def _refresh_visibility(self) -> None:
+        has_any = bool(self._sections)
+        self._sections_box.setVisible(has_any)
+        self._placeholder.setVisible(not has_any)
+
+    def _emit_folders(self) -> None:
+        self.folders_changed.emit([str(p) for p in self.folders])
+
+    def _section_for(self, path: Path) -> _FolderSection | None:
+        """Deepest section whose root contains ``path``."""
+        best = None
+        for section in self._sections:
+            try:
+                path.relative_to(section.root)
+            except ValueError:
+                continue
+            if best is None or len(section.root.parts) > len(best.root.parts):
+                best = section
+        return best
+
+    def _root_for(self, path: Path) -> Path | None:
+        section = self._section_for(path)
+        return section.root if section is not None else None
+
+    def add_folder(self, path: Path | str) -> bool:
+        """Show ``path`` as an extra folder beneath the project.
+
+        With no project open the folder is proposed *as* the project
+        instead (via ``set_as_project_requested``) so git, tests and the
+        AI tools have something to work on.
+        """
+        path = Path(path)
+        if not path.is_dir():
+            return False
+        if self._project_root is None:
+            self.set_as_project_requested.emit(path)
+            return False
+        if any(s.root == path for s in self._sections):
+            return False
+        section = self._make_section(path, primary=False)
+        self._sections.append(section)
+        self._sections_box.addWidget(section)
+        self._refresh_visibility()
+        self._emit_folders()
+        logger.info("File explorer: added folder %s", path)
+        return True
+
+    def remove_folder(self, path: Path | str) -> bool:
+        path = Path(path)
+        for section in list(self._sections):
+            if not section.primary and section.root == path:
+                self._remove_section(section)
+                self._refresh_visibility()
+                self._emit_folders()
+                return True
+        return False
+
+    def _show_folder_menu(self, section: _FolderSection, position) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(self._menu_qss())
+        menu.addAction("New File...").triggered.connect(lambda: self._new_file(section.root))
+        menu.addAction("New Folder...").triggered.connect(lambda: self._new_folder(section.root))
+        menu.addSeparator()
+        menu.addAction("Add Folder to Explorer...").triggered.connect(
+            self.add_folder_requested.emit
+        )
+        if not section.primary:
+            menu.addAction("Set as Project").triggered.connect(
+                lambda: self.set_as_project_requested.emit(section.root)
+            )
+            menu.addAction("Remove Folder from Explorer").triggered.connect(
+                lambda: self.remove_folder(section.root)
+            )
+        menu.addSeparator()
+        menu.addAction("Copy Path").triggered.connect(lambda: self._copy_path(section.root))
+        menu.addAction("Reveal in File Manager").triggered.connect(
+            lambda: self._reveal_in_file_manager(section.root)
+        )
+        menu.exec(section.header.mapToGlobal(position))
+
+    def _menu_qss(self) -> str:
+        return f"""
+            QMenu {{
+                background-color: {tc.get("bg_surface_overlay")};
+                border: 1px solid {tc.get("border_menu")};
+                padding: 4px 0;
+                color: {tc.get("text_primary")};
+                font-size: {tc.FONT_MD}px;
+            }}
+            QMenu::item {{
+                padding: 4px 28px 4px 12px;
+            }}
+            QMenu::item:selected {{
+                background-color: {tc.get("bg_active")};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {tc.get("border_menu")};
+                margin: 4px 8px;
+            }}
+        """
 
     def _apply_theme_styles(self) -> None:
         self.setStyleSheet(f"background-color: {tc.get('bg_base')};")
@@ -595,18 +827,7 @@ class FileExplorer(QWidget):
             if icon is not None:
                 btn.setIcon(icon())
                 btn.setIconSize(QSize(16, 16))
-        self._project_header.setStyleSheet(
-            f"#projectHeader {{ background-color: {tc.get('bg_surface')}; "
-            f"border-bottom: 1px solid {tc.get('border_secondary')}; }}"
-        )
-        self._chevron.setStyleSheet(
-            f"font-size: {tc.FONT_XS}px; color: {tc.get('text_primary')}; background: transparent;"
-        )
-        self._project_name.setStyleSheet(
-            f"font-size: {tc.FONT_SM}px; font-weight: bold; color: {tc.get('text_primary')}; "
-            "background: transparent; letter-spacing: 0.3px;"
-        )
-        self._tree.setStyleSheet(f"""
+        self._tree_qss = f"""
             QTreeView {{
                 background-color: {tc.get("bg_base")};
                 border: none;
@@ -662,7 +883,12 @@ class FileExplorer(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
             }}
-        """)
+        """
+        for section in self._sections:
+            section.apply_styles(self._tree_qss)
+        self._sections_box.setStyleSheet(
+            f"QSplitter::handle {{ background: {tc.get('border_secondary')}; }}"
+        )
         self._placeholder.setStyleSheet(f"background-color: {tc.get('bg_base')};")
         self._no_folder.setStyleSheet(
             f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_BASE}px; "
@@ -694,28 +920,43 @@ class FileExplorer(QWidget):
         if self._event_bus is not None:
             self._event_bus.emit("explorer:show_hidden", show=show)
 
-    def set_root(self, path: Path) -> None:
-        """Set the project root directory for the tree view."""
+    def set_root(self, path: Path, *, keep_previous: bool = False) -> None:
+        """Make ``path`` the project (first section).
+
+        Extra folders stay. The previous project is dropped unless
+        ``keep_previous`` is set, in which case it stays on as an extra
+        folder — that's what "Set as Project" on an extra folder does,
+        so promoting one never makes the other disappear.
+        """
+        path = Path(path)
+        old = self._primary
+        if old is not None and old.root == path:
+            old.set_root_index()
+            self._refresh_visibility()
+            return
+        # The new project may already be shown as an extra folder.
+        for section in [s for s in self._sections if not s.primary and s.root == path]:
+            self._remove_section(section)
+        if old is not None:
+            if keep_previous:
+                old.set_primary(False)
+                old.set_root_index()
+            else:
+                self._remove_section(old)
         self._project_root = path
-        root_index = self._fs_model.setRootPath(str(path))
-        proxy_index = self._proxy_model.mapFromSource(root_index)
-        self._tree.setRootIndex(proxy_index)
-
-        # Show only the name column
-        for col in range(1, self._fs_model.columnCount()):
-            self._tree.hideColumn(col)
-
-        self._tree.show()
-        self._placeholder.hide()
-        self._project_header.show()
-        self._project_name.setText(path.name.upper())
+        section = self._make_section(path, primary=True)
+        self._sections.insert(0, section)
+        self._sections_box.insertWidget(0, section)
+        self._refresh_visibility()
+        self._emit_folders()
         logger.info("File explorer root set to: %s", path)
 
     def clear(self) -> None:
         self._project_root = None
-        self._tree.hide()
-        self._placeholder.show()
-        self._project_header.hide()
+        for section in list(self._sections):
+            self._remove_section(section)
+        self._refresh_visibility()
+        self._emit_folders()
 
     @property
     def project_root(self) -> Path | None:
@@ -731,18 +972,20 @@ class FileExplorer(QWidget):
         if path and path.is_file() and self.on_file_double_clicked:
             self.on_file_double_clicked(path)
 
-    def _on_single_click(self, index: QModelIndex) -> None:
+    def _on_single_click(self, index: QModelIndex, tree: QTreeView | None = None) -> None:
         """Single click: toggle directories, open files (like VS Code)."""
         path = self._get_path_from_index(index)
         if not path:
             return
-
+        tree = tree or self._tree
         if path.is_dir():
+            if tree is None:
+                return
             # Toggle expand/collapse on single click
-            if self._tree.isExpanded(index):
-                self._tree.collapse(index)
+            if tree.isExpanded(index):
+                tree.collapse(index)
             else:
-                self._tree.expand(index)
+                tree.expand(index)
         elif path.is_file() and self.on_file_double_clicked:
             self.on_file_double_clicked(path)
 
@@ -755,53 +998,36 @@ class FileExplorer(QWidget):
             self._new_folder(self._project_root)
 
     def _refresh(self) -> None:
-        """Force refresh the file tree and notify the app."""
-        if self._project_root:
-            # Re-scan the filesystem
-            root_path = str(self._project_root)
-            self._fs_model.setRootPath("")  # Force re-read
-            root_index = self._fs_model.setRootPath(root_path)
-            proxy_index = self._proxy_model.mapFromSource(root_index)
-            self._tree.setRootIndex(proxy_index)
-
-            # Emit event so context builder refreshes too
-            if self._event_bus:
-                self._event_bus.emit("project_refreshed", path=root_path)
-
-            logger.info("File explorer refreshed: %s", root_path)
+        """Force refresh every folder's tree and notify the app."""
+        if not self._sections:
+            return
+        self._fs_model.setRootPath("")  # Force re-read
+        for section in self._sections:
+            section.set_root_index()
+        root_path = str(self._project_root) if self._project_root else ""
+        # Emit event so context builder refreshes too
+        if self._event_bus and root_path:
+            self._event_bus.emit("project_refreshed", path=root_path)
+        logger.info("File explorer refreshed: %s", root_path)
 
     def _collapse_all(self) -> None:
-        """Collapse all expanded directories."""
-        self._tree.collapseAll()
+        """Collapse all expanded directories in every folder."""
+        for section in self._sections:
+            section.tree.collapseAll()
 
-    def _show_context_menu(self, position) -> None:
-        index = self._tree.indexAt(position)
-        path = self._get_path_from_index(index) if index.isValid() else self._project_root
+    def _show_context_menu(self, position, section: _FolderSection | None = None) -> None:
+        section = section or self._primary
+        if section is None:
+            return
+        tree = section.tree
+        index = tree.indexAt(position)
+        path = self._get_path_from_index(index) if index.isValid() else section.root
 
         if path is None:
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {tc.get("bg_surface_overlay")};
-                border: 1px solid {tc.get("border_menu")};
-                padding: 4px 0;
-                color: {tc.get("text_primary")};
-                font-size: {tc.FONT_MD}px;
-            }}
-            QMenu::item {{
-                padding: 4px 28px 4px 12px;
-            }}
-            QMenu::item:selected {{
-                background-color: {tc.get("bg_active")};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: {tc.get("border_menu")};
-                margin: 4px 8px;
-            }}
-        """)
+        menu.setStyleSheet(self._menu_qss())
 
         if path.is_dir():
             new_file_action = menu.addAction("New File...")
@@ -833,7 +1059,7 @@ class FileExplorer(QWidget):
                 reveal_action = menu.addAction("Reveal in File Manager")
                 reveal_action.triggered.connect(lambda: self._reveal_in_file_manager(path))
 
-        menu.exec(self._tree.viewport().mapToGlobal(position))
+        menu.exec(tree.viewport().mapToGlobal(position))
 
     def _styled_input(
         self, title: str, label: str, placeholder: str = "", default: str = ""
@@ -1049,12 +1275,9 @@ class FileExplorer(QWidget):
         from PyQt6.QtWidgets import QApplication
 
         clipboard = QApplication.clipboard()
-        if clipboard and self._project_root:
-            try:
-                rel = path.relative_to(self._project_root)
-                clipboard.setText(str(rel))
-            except ValueError:
-                clipboard.setText(str(path))
+        if clipboard:
+            root = self._root_for(path)
+            clipboard.setText(str(path.relative_to(root)) if root else str(path))
 
     def _reveal_in_file_manager(self, path: Path) -> None:
         import subprocess
@@ -1066,5 +1289,6 @@ class FileExplorer(QWidget):
             logger.warning("Could not open file manager for: %s", target)
 
     @property
-    def tree(self) -> QTreeView:
+    def tree(self) -> QTreeView | None:
+        """The project's tree view (None when no project is open)."""
         return self._tree

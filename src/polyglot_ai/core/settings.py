@@ -40,6 +40,9 @@ DEFAULTS = {
     # Session restore
     "session.open_tabs": [],
     "session.active_tab_index": 0,
+    # Extra folders shown in the explorer beside the project
+    # (File → Add Folder to Explorer…); restored after the last project.
+    "session.extra_folders": [],
     "session.splitter_sizes": {},
     "session.window_geometry": {},
     # AI features

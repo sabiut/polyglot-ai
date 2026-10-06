@@ -145,8 +145,13 @@ vLLM, llama.cpp server, …).
 
 ### Can I use multiple projects at once?
 
-One project per window. You can open multiple windows — each has its own
-task manager scope. Chat conversations are shared across windows.
+One *project* per window, but the explorer can show several folders:
+**File → Add Folder to Explorer…** stacks extra folders beneath the
+project for browsing and editing. Git, tests, indexing and the AI's
+tools work on the project folder (marked PROJECT); right-click an extra
+folder's header → **Set as Project** to switch. You can also open
+multiple windows — each has its own task manager scope. Chat
+conversations are shared across windows.
 
 ### Does it work on Windows / macOS?
 

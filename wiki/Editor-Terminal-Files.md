@@ -170,6 +170,14 @@ Open with `Ctrl+Shift+E` or the first activity-bar icon (after Today/Tasks).
 - **Right-click** for a context menu: new file, new folder, rename, delete, copy path (absolute or relative), reveal in file manager.
 - **Drag and drop** a file into the chat panel to attach it.
 - **New file** shortcut: right-click → New file, or `Ctrl+N` when the explorer is focused.
+- **More than one folder** — **File → Add Folder to Explorer…**
+  (`Ctrl+Alt+Shift+O`) stacks another folder beneath the project, with
+  its own collapsible header and tree; add as many as you like and drag
+  the divider between them. The first folder is the **project** (marked
+  PROJECT): git, tests, indexing and the AI's tools work on that one.
+  Right-click an extra folder's header for **Set as Project** (the two
+  swap places) or **Remove Folder from Explorer**. Extra folders are
+  remembered across restarts.
 - **Dotfiles** (`.env`, `.gitignore`, `.github`, …) are shown by default.
   The eye button in the explorer header hides or shows them; the choice
   is remembered. `.git`, virtualenvs, `__pycache__` and other caches and

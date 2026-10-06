@@ -285,9 +285,9 @@ def wire_open_project(window, event_bus, settings=None):
 
         event_bus.subscribe("explorer:show_hidden", _save_show_hidden)
 
-    def _activate_project(path: Path) -> None:
+    def _activate_project(path: Path, *, keep_previous: bool = False) -> None:
         project_manager.open_project(path)
-        window._file_explorer.set_root(path)
+        window._file_explorer.set_root(path, keep_previous=keep_previous)
         window.setWindowTitle(f"{path.name} — {APP_NAME} v{APP_VERSION}")
         window.statusBar().showMessage(f"Project: {path}")
         if settings is not None:
@@ -295,6 +295,24 @@ def wire_open_project(window, event_bus, settings=None):
                 settings.set("session.last_project", str(path)),
                 name="save_last_project",
             )
+
+    # Extra folders in the explorer: "Set as Project" on one swaps it
+    # with the current project (the old one stays as an extra folder);
+    # the set of extra folders is remembered across sessions.
+    explorer = window._file_explorer
+    explorer.set_as_project_requested.connect(
+        lambda p: _activate_project(Path(p), keep_previous=True)
+    )
+    explorer.add_folder_requested.connect(window._add_folder_to_explorer)
+    if settings is not None:
+
+        def _save_extra_folders(_folders: list) -> None:
+            safe_task(
+                settings.set("session.extra_folders", [str(p) for p in explorer.extra_folders]),
+                name="save_extra_folders",
+            )
+
+        explorer.folders_changed.connect(_save_extra_folders)
 
     def _open_project_with_manager():
         from PyQt6.QtWidgets import QFileDialog
@@ -329,6 +347,12 @@ def restore_last_project(window, settings) -> None:
         return
     logger.info("Restoring last project: %s", path)
     activator(path)
+    for extra in settings.get("session.extra_folders") or []:
+        extra_path = Path(extra)
+        if extra_path.is_dir():
+            window._file_explorer.add_folder(extra_path)
+        else:
+            logger.info("Extra folder %s no longer exists, skipping", extra_path)
 
 
 def run_onboarding(window, settings, keyring_store, provider_manager, event_bus):

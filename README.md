@@ -9,6 +9,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 ### Core
 - **Multi-provider AI chat** — OpenAI, Anthropic (Claude), Google (Gemini), DeepSeek with streaming responses
 - **Integrated code editor** — Syntax highlighting via QScintilla, multi-tab editing
+- **Multi-folder explorer** — add extra folders beside the project (File → Add Folder to Explorer…), each with its own collapsible tree; dotfiles shown by default with a one-click toggle
 - **Inline diagnostics** — ruff lints Python as you type (JSON/YAML parse errors too): squiggles, hover messages, a problems count in the status bar, F8 to jump, right-click "Fix with AI" or apply ruff's auto-fixes
 - **Built-in terminal** — Full PTY terminal with mouse text selection, copy/paste, right-click context menu, and one-click SSH sessions (recent targets + `~/.ssh/config` aliases)
 - **Per-project chat history** — the conversation sidebar shows the current project's chats by default, with an "All projects" toggle
