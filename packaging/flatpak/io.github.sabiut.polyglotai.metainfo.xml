@@ -23,6 +23,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.13" date="2026-10-06">
+      <description>
+        <p>The file explorer can show more than one folder: File → Add
+        Folder to Explorer… stacks extra folders beneath the project,
+        each with its own collapsible tree. Right-click a folder header
+        to make it the project or remove it; extra folders are remembered
+        across restarts.</p>
+      </description>
+    </release>
     <release version="0.18.12" date="2026-10-06">
       <description>
         <p>The file explorer now shows dotfiles such as .env, .gitignore
