@@ -152,3 +152,27 @@ def test_relative_path_uses_containing_folder(qapp, roots):
     assert explorer._root_for(b / "b.py") == b
     assert explorer._root_for(a / "a.py") == a
     assert explorer._root_for(Path("/definitely/elsewhere")) is None
+
+
+def test_collapsed_section_shrinks_to_its_header(qapp, roots):
+    a, b = roots
+    explorer = FileExplorer()
+    explorer.resize(300, 800)
+    explorer.show()
+    explorer.set_root(a)
+    explorer.add_folder(b)
+    QApplication.instance().processEvents()
+    first, second = explorer._sections
+    before = second.height()
+    first.toggle_collapsed()
+    QApplication.instance().processEvents()
+    assert first.collapsed is True
+    assert first.maximumHeight() == first.header.height()
+    assert first.height() <= first.header.height() + 2
+    assert second.height() > before
+    first.toggle_collapsed()
+    QApplication.instance().processEvents()
+    assert first.collapsed is False
+    assert first.maximumHeight() > 10_000
+    assert first.tree.isVisibleTo(first)
+    explorer.hide()

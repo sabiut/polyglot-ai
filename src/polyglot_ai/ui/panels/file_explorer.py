@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QSplitter,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -528,10 +529,24 @@ class _FolderSection(QWidget):
         for col in range(1, fs.columnCount()):
             self.tree.hideColumn(col)
 
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
     def toggle_collapsed(self) -> None:
-        self._collapsed = not self._collapsed
-        self.tree.setVisible(not self._collapsed)
-        self.chevron.setText("▶" if self._collapsed else "▼")
+        self.set_collapsed(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self.tree.setVisible(not collapsed)
+        self.chevron.setText("▶" if collapsed else "▼")
+        # The section lives in a QSplitter, which keeps handing a hidden
+        # tree its share of the height. Pin a collapsed section to its
+        # header row so the other folders get the space.
+        self.setMaximumHeight(self.header.height() if collapsed else 16_777_215)
+        splitter = self.parentWidget()
+        if isinstance(splitter, QSplitter):
+            splitter.refresh()
 
     def apply_styles(self, tree_qss: str) -> None:
         self.header.setStyleSheet(
@@ -618,8 +633,6 @@ class FileExplorer(QWidget):
 
         # One collapsible section per folder (project first), in a
         # vertical splitter so the user can share the height between them.
-        from PyQt6.QtWidgets import QSplitter
-
         self._sections_box = QSplitter(Qt.Orientation.Vertical)
         self._sections_box.setChildrenCollapsible(False)
         self._sections_box.setHandleWidth(1)
