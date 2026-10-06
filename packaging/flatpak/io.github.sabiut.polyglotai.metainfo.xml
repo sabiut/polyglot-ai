@@ -23,6 +23,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.14" date="2026-10-06">
+      <description>
+        <p>Collapsing a folder section in the explorer now shrinks it to
+        its header so the other folders get the space.</p>
+      </description>
+    </release>
     <release version="0.18.13" date="2026-10-06">
       <description>
         <p>The file explorer can show more than one folder: File → Add
