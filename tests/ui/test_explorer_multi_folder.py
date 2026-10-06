@@ -176,3 +176,19 @@ def test_collapsed_section_shrinks_to_its_header(qapp, roots):
     assert first.maximumHeight() > 10_000
     assert first.tree.isVisibleTo(first)
     explorer.hide()
+
+
+def test_all_collapsed_stays_pinned_to_the_top(qapp, roots):
+    a, b = roots
+    explorer = FileExplorer()
+    explorer.resize(300, 800)
+    explorer.show()
+    explorer.set_root(a)
+    explorer.add_folder(b)
+    for section in explorer._sections:
+        section.set_collapsed(True)
+    QApplication.instance().processEvents()
+    assert explorer._header_bar.y() == 0
+    assert explorer._sections_box.y() == explorer._header_bar.height()
+    assert explorer._sections_box.height() <= sum(s.header.height() for s in explorer._sections) + 4
+    explorer.hide()

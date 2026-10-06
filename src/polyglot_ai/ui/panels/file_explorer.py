@@ -653,7 +653,12 @@ class FileExplorer(QWidget):
         self._open_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ph_main.addWidget(self._open_hint)
 
-        layout.addWidget(self._placeholder)
+        layout.addWidget(self._placeholder, stretch=1)
+        # When every folder is collapsed the splitter is pinned to its
+        # headers and can't grow; without a spacer QVBoxLayout would
+        # spread the leftover height around the items and the whole
+        # explorer would drift to the middle of the sidebar.
+        layout.addStretch(0)
 
         # File system model
         self._fs_model = QFileSystemModel()
