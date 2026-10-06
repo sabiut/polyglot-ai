@@ -25,18 +25,28 @@ def qapp():
     yield QApplication.instance() or QApplication([])
 
 
-def _visible_names(explorer: FileExplorer) -> set[str]:
-    """Top-level entry names the tree currently shows (after the model loads)."""
+def _visible_names(explorer: FileExplorer, project) -> set[str]:
+    """Top-level entry names the proxy exposes under the project root.
+
+    QFileSystemModel loads directories lazily and asynchronously, so wait
+    for the project directory itself (resolved, since macOS puts tmp under
+    /private) to finish loading before reading rows.
+    """
     app = QApplication.instance()
+    fs = explorer._fs_model
     proxy = explorer._proxy_model
-    root = explorer._tree.rootIndex()
-    deadline = time.monotonic() + 5
+    src_root = fs.index(str(project.resolve()))
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         app.processEvents()
-        if proxy.rowCount(root) and not explorer._fs_model.canFetchMore(proxy.mapToSource(root)):
+        if src_root.isValid() and fs.rowCount(src_root) and not fs.canFetchMore(src_root):
             break
-        explorer._fs_model.fetchMore(proxy.mapToSource(root))
+        if src_root.isValid() and fs.canFetchMore(src_root):
+            fs.fetchMore(src_root)
+        src_root = fs.index(str(project.resolve()))
         time.sleep(0.02)
+    assert src_root.isValid(), "project root never appeared in the file-system model"
+    root = proxy.mapFromSource(src_root)
     return {proxy.data(proxy.index(r, 0, root)) for r in range(proxy.rowCount(root))}
 
 
@@ -59,7 +69,7 @@ def test_default_setting_shows_hidden():
 def test_dotfiles_visible_but_noise_dirs_hidden(qapp, project):
     explorer = FileExplorer()
     explorer.set_root(project)
-    names = _visible_names(explorer)
+    names = _visible_names(explorer, project)
     assert {".env", ".gitignore", ".github", "app.py"} <= names
     assert not {".git", ".venv", "__pycache__"} & names
 
@@ -67,18 +77,18 @@ def test_dotfiles_visible_but_noise_dirs_hidden(qapp, project):
 def test_toggle_hides_and_restores_dotfiles(qapp, project):
     explorer = FileExplorer()
     explorer.set_root(project)
-    assert ".env" in _visible_names(explorer)
+    assert ".env" in _visible_names(explorer, project)
 
     explorer.set_show_hidden(False)
     assert explorer.show_hidden is False
     assert not explorer._hidden_btn.isChecked()
-    names = _visible_names(explorer)
+    names = _visible_names(explorer, project)
     assert ".env" not in names and ".gitignore" not in names
     assert "app.py" in names
 
     explorer._hidden_btn.setChecked(True)  # the header button path
     assert explorer.show_hidden is True
-    assert ".env" in _visible_names(explorer)
+    assert ".env" in _visible_names(explorer, project)
 
 
 def test_toggle_announces_on_event_bus(qapp, project):

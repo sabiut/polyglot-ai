@@ -282,7 +282,20 @@ def preview(qtbot):
     w = VideoPreviewWidget()
     qtbot.addWidget(w)
     w.show()
-    return w
+    yield w
+    # Deterministic teardown. A test that loads a garbage clip leaves
+    # the FFmpeg backend decoding asynchronously; its errorOccurred can
+    # fire after pytest-qt has started destroying the widget, which
+    # surfaces as "TypeError: 'NoneType' object is not callable" from
+    # the Qt event loop (seen flaky on CI). Stop the player and drain
+    # pending events while the Python side is still intact.
+    # Some tests delete the widget themselves, hence the guard.
+    try:
+        w.clear()
+        qtbot.wait(50)
+        w.close()
+    except RuntimeError:  # wrapped C/C++ object already deleted
+        pass
 
 
 def test_preview_initial_state(preview):
