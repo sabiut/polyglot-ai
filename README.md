@@ -53,7 +53,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 
 ### MCP (Model Context Protocol)
 - **Built-in MCP marketplace** — One-click install of Filesystem, Git, Memory, GitHub, Fetch, Sequential Thinking, Playwright, GitLab, MySQL, and more
-- **Smart defaults** — On first run, Polyglot AI auto-seeds `sequential-thinking`, `memory`, and `fetch` (no-auth) so deep reasoning works out of the box
+- **Smart defaults** — On first run, Polyglot AI auto-seeds `sequential-thinking` (no-auth) so deep reasoning works out of the box; `memory`, `fetch` and the rest are one click away. MCP tools ask before running unless you mark a server as trusted
 - **MCP sidebar** — Live connection status, tool counts, inline connect/disconnect, search filter
 - **Sequential-thinking integration** — When the tool is available, the AI is prompted to reason step-by-step on complex tasks
 
@@ -163,7 +163,7 @@ Most MCP servers are distributed as Node.js or Python packages. Install whicheve
 | **Node.js 20+** (`npx`) | [nodejs.org](https://nodejs.org/) or `sudo apt install nodejs npm` | sequential-thinking, memory, filesystem, github, gitlab, playwright, mysql |
 | **uv** (`uvx`) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | fetch, git |
 
-If either runtime is missing, the corresponding MCP servers simply fail to connect — the rest still work. The three defaults seeded on first run (`sequential-thinking`, `memory`, `fetch`) require both `npx` and `uvx`.
+If either runtime is missing, the corresponding MCP servers simply fail to connect — the rest still work. The default seeded on first run (`sequential-thinking`) needs `npx`.
 
 ### Optional CLIs for DevOps panels
 These are only needed if you want to use the corresponding panel:

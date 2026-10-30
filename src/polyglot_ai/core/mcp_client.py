@@ -181,6 +181,17 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)  # e.g. ["-m", "my_server"]
     env: dict[str, str] | None = None
     enabled: bool = True
+    #: Run this server's tools without asking. Off by default: MCP tools
+    #: can read the network, write files, or persist instructions, and
+    #: untrusted text (a README, a web page, tool output) can steer the
+    #: model into calling them. The user opts in per server.
+    auto_approve: bool = False
+
+
+#: Servers whose tools have no side effects outside the conversation, so
+#: asking before every call would only be noise. Used as the
+#: ``auto_approve`` default when a config entry doesn't say.
+SIDE_EFFECT_FREE_SERVERS = frozenset({"sequential-thinking"})
 
 
 @dataclass
@@ -648,6 +659,19 @@ class MCPClient:
         """Check if a tool name belongs to an MCP server."""
         return tool_name in self._tools
 
+    def tool_needs_approval(self, tool_name: str) -> bool:
+        """True unless the tool's server is set to run without asking."""
+        tool = self._tools.get(tool_name)
+        config = self._servers.get(tool.server_name) if tool else None
+        return not (config and config.auto_approve)
+
+    def set_auto_approve(self, server_name: str, value: bool) -> None:
+        config = self._servers.get(server_name)
+        if config is None:
+            return
+        config.auto_approve = bool(value)
+        self._save_config()
+
     @property
     def connected_servers(self) -> list[str]:
         return list(self._connected)
@@ -694,6 +718,7 @@ class MCPClient:
             args=args,
             env=env if env else None,
             enabled=True,
+            auto_approve=catalog_id in SIDE_EFFECT_FREE_SERVERS,
         )
         self.add_server(config)
         self._save_config()
@@ -790,6 +815,7 @@ class MCPClient:
                 "args": cfg.args,
                 "env": safe_env,
                 "enabled": cfg.enabled,
+                "auto_approve": cfg.auto_approve,
             }
         secure_write(config_path, json.dumps(data, indent=2))
         logger.info("Saved MCP config to %s", config_path)
@@ -799,7 +825,12 @@ class MCPClient:
 #: (no API keys, no OAuth). sequential-thinking and memory need `npx` (Node);
 #: fetch needs `uvx` (uv). If either runtime is missing the corresponding
 #: server simply fails to connect and the rest still work.
-_DEFAULT_SEED_SERVER_IDS = ("sequential-thinking", "memory", "fetch")
+#: Only side-effect-free servers are seeded. ``fetch`` and ``memory``
+#: used to be seeded too and ran without approval: injected text could
+#: get the model to send project data to any URL (fetch has no
+#: private-address filter) or plant instructions that persist across
+#: sessions (memory). Both remain one click away in Settings → MCP.
+_DEFAULT_SEED_SERVER_IDS = ("sequential-thinking",)
 
 
 def _seed_default_config(config_path: Path) -> list[MCPServerConfig]:
@@ -824,6 +855,7 @@ def _seed_default_config(config_path: Path) -> list[MCPServerConfig]:
                 args=list(entry["args"]),
                 env={},
                 enabled=True,
+                auto_approve=server_id in SIDE_EFFECT_FREE_SERVERS,
             )
         )
         seed_dict[server_id] = {
@@ -831,6 +863,7 @@ def _seed_default_config(config_path: Path) -> list[MCPServerConfig]:
             "args": list(entry["args"]),
             "env": {},
             "enabled": True,
+            "auto_approve": server_id in SIDE_EFFECT_FREE_SERVERS,
         }
 
     if not seed_dict:
@@ -940,6 +973,9 @@ def load_mcp_config(config_path: Path | None = None) -> list[MCPServerConfig]:
                     args=list(cfg.get("args", [])),
                     env=env,
                     enabled=cfg.get("enabled", True),
+                    # Entries written before this field existed (including
+                    # the old fetch/memory seeds) now ask before each call.
+                    auto_approve=cfg.get("auto_approve", name in SIDE_EFFECT_FREE_SERVERS),
                 )
             )
         return servers
@@ -996,5 +1032,7 @@ def _validate_server_entry(name: object, cfg: object) -> tuple[bool, str]:
 
     if "enabled" in cfg and not isinstance(cfg["enabled"], bool):
         return False, f"'enabled' must be a bool, got {type(cfg['enabled']).__name__}"
+    if "auto_approve" in cfg and not isinstance(cfg["auto_approve"], bool):
+        return False, f"'auto_approve' must be a bool, got {type(cfg['auto_approve']).__name__}"
 
     return True, ""

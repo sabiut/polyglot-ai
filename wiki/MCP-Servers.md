@@ -72,8 +72,13 @@ transport cleanly and re-runs the handshake.
 
 ## Tool approval
 
-MCP tools are untrusted by default — every call requires user approval
-unless you've marked a specific tool as auto-approve for the session. See
+MCP tools are untrusted by default: Polyglot asks before each call. If you
+trust a server with your project, tick **Run tools without asking** on its
+card in **Settings → MCP Servers**. Only do that for servers you'd let run
+unattended — text inside files, web pages or tool output can steer the AI
+into calling them. `sequential-thinking` (pure reasoning, no outside
+effects) runs without asking out of the box. Every MCP call is recorded in
+the audit log, noting whether it ran without a prompt. See
 **[Chat → Tools → Approval policy](Chat#approval-policy)**.
 
 ## Browsing tools

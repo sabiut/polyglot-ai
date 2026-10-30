@@ -2154,11 +2154,20 @@ class ChatPanel(QWidget):
             # Check if this is an MCP tool
             is_mcp = self._mcp_client and self._mcp_client.is_mcp_tool(tool_call.function_name)
 
-            if (
-                not is_mcp
-                and self._tool_registry
-                and self._tool_registry.needs_approval(tool_call.function_name)
-            ):
+            # MCP tools ask too, unless the user set that server to run
+            # without asking (Settings → MCP Servers). They used to skip
+            # approval entirely, including the fetch server seeded on
+            # first run, which injected text could use to send project
+            # data to any URL.
+            if is_mcp:
+                needs_approval = self._mcp_client.tool_needs_approval(tool_call.function_name)
+            else:
+                needs_approval = bool(
+                    self._tool_registry
+                    and self._tool_registry.needs_approval(tool_call.function_name)
+                )
+
+            if needs_approval:
                 approved = await self._request_tool_approval(
                     tool_call.function_name, tool_call.arguments
                 )
@@ -2184,17 +2193,14 @@ class ChatPanel(QWidget):
                 except (ValueError, TypeError):
                     args = {}
                 result = await self._mcp_client.call_tool(tool_call.function_name, args)
-                # MCP-server tools run without the approval gate that
-                # built-in mutating tools pass through — the trust decision
-                # is made once, when the server is installed. Record each
-                # execution so that otherwise-invisible boundary is at least
-                # auditable after the fact. The tool name only: arguments
-                # can carry user data or secrets, so they stay out of the log.
+                # Record each MCP execution, and whether it ran without a
+                # prompt. The tool name only: arguments can carry user data
+                # or secrets, so they stay out of the log.
                 window = self.window()
                 if hasattr(window, "audit"):
                     window.audit.log(
                         "mcp_tool_executed",
-                        {"tool": tool_call.function_name, "auto_approved": True},
+                        {"tool": tool_call.function_name, "auto_approved": not needs_approval},
                     )
             elif self._tool_registry:
                 result = await self._tool_registry.execute(

@@ -860,7 +860,7 @@ class SettingsDialog(QDialog):
     def _create_server_card(self, entry: dict) -> QWidget:
         """Create a marketplace card for one MCP server."""
         card = QWidget()
-        card.setFixedHeight(100)
+        card.setFixedHeight(124)
         card.setStyleSheet(
             f"QWidget {{"
             f"  background-color: {tc.get('bg_card')}; border: 1px solid {tc.get('border_card')};"
@@ -911,24 +911,54 @@ class SettingsDialog(QDialog):
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
-        # Status
+        # Status + per-server approval switch
+        bottom = QHBoxLayout()
         status = QLabel("")
         status.setStyleSheet(
             f"font-size: {tc.FONT_XS}px; color: {tc.get('accent_success_muted')}; background: transparent; border: none;"
         )
-        layout.addWidget(status)
+        bottom.addWidget(status)
+        bottom.addStretch()
+        auto = QCheckBox("Run tools without asking")
+        auto.setStyleSheet(
+            _CHECKBOX_STYLE + " QCheckBox { border: none; background: transparent; }"
+        )
+        auto.setToolTip(
+            "When off, Polyglot asks before each of this server's tools runs. "
+            "Only turn on for servers you trust with your project: text in files "
+            "or web pages can steer the AI into calling them."
+        )
+        auto.hide()
+        auto.toggled.connect(
+            lambda checked, eid=entry["id"]: self._set_mcp_auto_approve(eid, checked)
+        )
+        bottom.addWidget(auto)
+        layout.addLayout(bottom)
 
-        self._mcp_cards[entry["id"]] = {"card": card, "btn": btn, "status": status}
+        self._mcp_cards[entry["id"]] = {"card": card, "btn": btn, "status": status, "auto": auto}
         return card
+
+    def _set_mcp_auto_approve(self, server_id: str, value: bool) -> None:
+        if self._mcp_client:
+            self._mcp_client.set_auto_approve(server_id, value)
 
     def _refresh_mcp_cards(self) -> None:
         """Update card states based on connected servers."""
         if not self._mcp_client:
             return
         connected = set(self._mcp_client.connected_servers)
-        registered = {c.name for c in self._mcp_client.get_server_configs()}
+        configs = {c.name: c for c in self._mcp_client.get_server_configs()}
+        registered = set(configs)
 
         for sid, widgets in self._mcp_cards.items():
+            auto = widgets.get("auto")
+            if auto is not None:
+                config = configs.get(sid)
+                auto.setVisible(config is not None)
+                if config is not None:
+                    auto.blockSignals(True)
+                    auto.setChecked(bool(config.auto_approve))
+                    auto.blockSignals(False)
             if sid in connected:
                 widgets["btn"].setText("Disconnect")
                 widgets["btn"].setStyleSheet(
