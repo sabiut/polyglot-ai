@@ -32,16 +32,33 @@ class KeyringStore:
         return self._backend_ok
 
     def store_key(self, provider: str, key: str) -> None:
+        # Raises on a backend-less system on purpose: the settings dialog
+        # turns that into a visible "couldn't save" error.
         keyring.set_password(KEYRING_SERVICE, provider, key)
 
     def get_key(self, provider: str) -> str | None:
-        return keyring.get_password(KEYRING_SERVICE, provider)
+        """The stored key, or None if there isn't one *or no keyring works*.
+
+        With no Secret Service / KWallet, ``keyring`` raises on every
+        read. That used to abort provider registration during startup —
+        on such a desktop the app never finished starting up: saved
+        subscription logins weren't registered and onboarding never ran.
+        """
+        try:
+            return keyring.get_password(KEYRING_SERVICE, provider)
+        except keyring.errors.KeyringError as exc:
+            logger.warning("keyring: can't read %s key (%s)", provider, exc.__class__.__name__)
+            return None
 
     def delete_key(self, provider: str) -> None:
         try:
             keyring.delete_password(KEYRING_SERVICE, provider)
         except keyring.errors.PasswordDeleteError:
             pass
+        except keyring.errors.KeyringError as exc:
+            # Nothing can be stored without a backend, so nothing to delete;
+            # don't let Settings → Save fail over it.
+            logger.warning("keyring: can't delete %s key (%s)", provider, exc.__class__.__name__)
 
     @staticmethod
     def _probe_backend() -> bool:

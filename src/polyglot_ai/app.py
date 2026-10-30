@@ -543,7 +543,13 @@ def main() -> None:
             )
         except Exception:
             logger.exception("Provider SDK preload failed — importing inline")
-        register_ai_providers(provider_manager, keyring_store, event_bus)
+        try:
+            register_ai_providers(provider_manager, keyring_store, event_bus)
+        except Exception:
+            # One broken provider (or keyring) must not abort the rest of
+            # startup — onboarding, the model list and the no-provider
+            # hint below still need to run.
+            logger.exception("Registering AI providers failed")
         startup_timer.mark("post-show: AI providers (SDK import + keyring)")
 
         if not measuring:
