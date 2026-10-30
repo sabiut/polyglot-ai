@@ -54,11 +54,12 @@ _READ_VERB_PREFIXES = (
     "preview",
     "simulate",
     "validate",
-    "generate-presigned-url",
 )
 
 # ``aws s3`` (the high-level commands) uses verbs, not API names.
-_S3_READ_VERBS = {"ls", "presign"}
+# ``presign`` (and generate-presigned-url above) is deliberately not
+# read-only: the URL it returns grants access to the object.
+_S3_READ_VERBS = {"ls"}
 _S3_DESTRUCTIVE_VERBS = {"rm", "rb"}
 
 # Verbs that destroy or expose things — worth an amber warning on top
@@ -144,27 +145,122 @@ def split_command(command: str) -> list[str]:
     return argv
 
 
+#: Global options that take a value. Their value must not be mistaken for
+#: the service or operation: ``ec2 --query describe terminate-instances``
+#: is a TerminateInstances call (``describe`` is the --query value), which
+#: the old word filter classed as a harmless "describe".
+_VALUE_OPTIONS = frozenset(
+    {
+        "--query",
+        "--output",
+        "--region",
+        "--profile",
+        "--color",
+        "--ca-bundle",
+        "--cli-read-timeout",
+        "--cli-connect-timeout",
+        "--page-size",
+        "--max-items",
+        "--starting-token",
+        "--cli-binary-format",
+    }
+)
+_FLAG_OPTIONS = frozenset(
+    {"--debug", "--no-paginate", "--no-cli-pager", "--no-cli-auto-prompt", "--cli-auto-prompt"}
+)
+#: Never "read", wherever they appear: they send the request somewhere
+#: else, drop TLS checks or signing, or hide the real arguments in a file.
+_NEVER_READ_OPTIONS = frozenset(
+    {
+        "--endpoint-url",
+        "--no-sign-request",
+        "--no-verify-ssl",
+        "--cli-input-json",
+        "--cli-input-yaml",
+    }
+)
+#: Read-shaped calls that return credentials or secrets, or write a local
+#: file. They need approval like any mutation.
+_SECRET_OR_FILE_READS = frozenset(
+    {
+        ("secretsmanager", "get-secret-value"),
+        ("secretsmanager", "batch-get-secret-value"),
+        ("ssm", "get-parameter"),
+        ("ssm", "get-parameters"),
+        ("ssm", "get-parameters-by-path"),
+        ("ssm", "get-parameter-history"),
+        ("sts", "get-session-token"),
+        ("sts", "get-federation-token"),
+        ("ecr", "get-login-password"),
+        ("ecr", "get-authorization-token"),
+        ("codeartifact", "get-authorization-token"),
+        ("eks", "get-token"),
+        ("rds", "generate-db-auth-token"),
+        ("cognito-identity", "get-credentials-for-identity"),
+        ("s3api", "get-object"),
+        ("s3api", "get-object-torrent"),
+        ("lambda", "get-function"),
+    }
+)
+
+
+def _service_and_operation(argv: list[str]) -> tuple[str, str] | None:
+    """The first two positional words, skipping global options and their values.
+
+    None when an option we don't know appears before the operation — we
+    can't tell whether it takes a value, so the caller must assume the
+    worst.
+    """
+    positionals: list[str] = []
+    i = 0
+    while i < len(argv) and len(positionals) < 2:
+        tok = argv[i]
+        if tok.startswith("-"):
+            name = tok.split("=", 1)[0]
+            if name in _VALUE_OPTIONS:
+                i += 1 if "=" in tok else 2
+                continue
+            if name in _FLAG_OPTIONS:
+                i += 1
+                continue
+            return None
+        positionals.append(tok.lower())
+        i += 1
+    return (positionals[0], positionals[1]) if len(positionals) == 2 else None
+
+
 def classify(command: str | list[str]) -> str:
     """Return ``"read"``, ``"mutate"`` or ``"destructive"`` for an AWS command.
 
     Conservative: anything not recognisably read-only is a mutation, so
-    a typo or an unknown service can never slip past approval.
+    a typo, an unknown service or an unfamiliar option can never pass as
+    read-only. "read" is used to colour the approval card and to decide
+    what may run without asking, so it must also exclude reads that
+    return secrets or write files.
     """
     argv = split_command(command) if isinstance(command, str) else list(command)
-    words = [w for w in argv if not w.startswith("-")]
-    if len(words) < 2:
+    parsed = _service_and_operation(argv)
+    if parsed is None:
         return "mutate"
-    service, verb = words[0].lower(), words[1].lower()
-    if service in ("s3",):
-        if verb in _S3_READ_VERBS:
-            return "read"
-        return "destructive" if verb in _S3_DESTRUCTIVE_VERBS else "mutate"
-    if service == "sts" or service == "configure" and verb in ("list", "get", "list-profiles"):
-        return "read"
+    service, verb = parsed
+    # Destructive wins over everything below, so the warning colour shows.
+    if service == "s3" and verb in _S3_DESTRUCTIVE_VERBS:
+        return "destructive"
+    if service != "s3" and verb.startswith(_DESTRUCTIVE_VERB_PREFIXES):
+        return "destructive"
+    if any(tok.split("=", 1)[0] in _NEVER_READ_OPTIONS for tok in argv):
+        return "mutate"
+    if (service, verb) in _SECRET_OR_FILE_READS:
+        return "mutate"
+    if service == "s3":
+        return "read" if verb in _S3_READ_VERBS else "mutate"
+    if service == "sts":
+        return "read" if verb == "get-caller-identity" else "mutate"
+    if service == "configure":
+        # ``configure get aws_secret_access_key`` prints the secret.
+        return "read" if verb in ("list", "list-profiles") else "mutate"
     if service == "logs" and verb in ("tail", "filter-log-events", "get-log-events"):
         return "read"
-    if verb.startswith(_DESTRUCTIVE_VERB_PREFIXES):
-        return "destructive"
     if verb.startswith(_READ_VERB_PREFIXES):
         return "read"
     return "mutate"

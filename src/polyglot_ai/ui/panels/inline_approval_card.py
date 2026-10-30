@@ -32,8 +32,19 @@ from polyglot_ai.ui import theme_colors as tc
 logger = logging.getLogger(__name__)
 
 
-# Per-tool wording: (kind badge, title, detail). ``detail`` is the
-# command / path shown in monospace under the title.
+def _where(args: dict, name_key: str) -> str:
+    """``namespace/name`` plus `` (context …)`` for Kubernetes targets."""
+    ns = args.get("namespace") or "default"
+    text = f"{ns}/{args.get(name_key, '')}"
+    if args.get("context"):
+        text += f"  (context {args['context']})"
+    return text
+
+
+# Per-tool wording: (kind badge, title, detail). ``detail`` is the exact
+# command / SQL / manifest / path shown in monospace under the title.
+# Every approval-gated tool needs an entry: a card that says only
+# "Run db_execute" asks the user to approve SQL they can't see.
 def _describe(tool_name: str, args: dict) -> tuple[str, str, str]:
     path = args.get("path", "")
     if tool_name == "file_write":
@@ -53,12 +64,164 @@ def _describe(tool_name: str, args: dict) -> tuple[str, str, str]:
         return "GIT", "Commit", args.get("message", "")
     if tool_name == "aws_cli":
         return "AWS", "Run AWS command", "aws " + str(args.get("command", ""))
-    return "TOOL", f"Run {tool_name}", ""
+    if tool_name == "db_query":
+        return "SQL", f"Query {args.get('connection', 'database')}", args.get("sql", "")
+    if tool_name == "db_execute":
+        return "SQL", f"Run SQL on {args.get('connection', 'database')}", args.get("sql", "")
+    if tool_name == "k8s_apply":
+        title = "Apply manifest"
+        if args.get("context"):
+            title += f" (context {args['context']})"
+        if args.get("file"):
+            return "K8S", f"{title} from file", args["file"]
+        return "K8S", title, args.get("yaml", "")
+    if tool_name == "k8s_delete_pod":
+        return "K8S", "Delete pod", _where(args, "pod")
+    if tool_name == "k8s_restart_deployment":
+        return "K8S", "Restart deployment", _where(args, "deployment")
+    if tool_name == "k8s_scale_deployment":
+        return (
+            "K8S",
+            f"Scale deployment to {args.get('replicas', '?')} replicas",
+            _where(args, "deployment"),
+        )
+    if tool_name == "docker_remove":
+        what = "image" if args.get("is_image") else "container"
+        force = " (force)" if args.get("force") else ""
+        return "DOCKER", f"Remove {what}{force}", args.get("name", "")
+    if tool_name in ("docker_restart", "docker_stop", "docker_start"):
+        verb = tool_name.split("_", 1)[1].capitalize()
+        return "DOCKER", f"{verb} container", args.get("container", "")
+    if tool_name == "arduino_upload":
+        target = args.get("port") or args.get("drive") or "board"
+        return "ARDUINO", "Upload to board", f"{args.get('fqbn', '')} on {target}".strip()
+    if tool_name == "arduino_compile":
+        return "ARDUINO", "Compile sketch", args.get("fqbn", "")
+    if tool_name == "arduino_load_starter":
+        return (
+            "ARDUINO",
+            "Load starter project",
+            f"{args.get('slug', '')} into {args.get('target_dir', '')}",
+        )
+    if tool_name == "arduino_create_blank":
+        return (
+            "ARDUINO",
+            "Create project",
+            f"{args.get('name', '')} ({args.get('language', '')}) in {args.get('target_dir', '')}",
+        )
+    # Anything else (MCP tools included): show the arguments themselves,
+    # so e.g. a fetch call's URL is visible before approving.
+    detail = json.dumps(args, ensure_ascii=False) if args else ""
+    return "TOOL", f"Run {tool_name}", detail
 
 
-def _elide(text: str, limit: int = 160) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+#: Zero-width and bidirectional-override characters: invisible, but they
+#: can make text read differently from what actually runs.
+_INVISIBLE = frozenset("​‌‍⁠﻿‪‫‬‭‮⁦⁧⁨⁩")
+
+
+def _visible(text: str) -> str:
+    """Show the detail exactly, with hidden characters made visible.
+
+    The old card collapsed whitespace and cut the text at 160 characters,
+    so the tail of a long command (``pip install a b c … evil-pkg``) or a
+    second line was simply not shown. Control characters (ANSI escapes,
+    carriage returns) and invisible Unicode are rendered as escapes so
+    they can't disguise what will run.
+    """
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if ch in "\n\t":
+            out.append(ch)
+        elif code < 32 or code == 127 or 0x80 <= code < 0xA0:
+            out.append(f"\\x{code:02x}")
+        elif ch in _INVISIBLE:
+            out.append(f"\\u{code:04x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+#: Shell commands that only read, so the card can stay calm. Anything
+#: else gets the warning colour: the sandbox already blocks pipes and
+#: redirection, but ``bash``, ``curl``, ``ssh`` or an installer can do
+#: plenty on their own, and a denylist could never name them all.
+_ROUTINE_COMMANDS = frozenset(
+    {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "grep",
+        "egrep",
+        "rg",
+        "wc",
+        "pwd",
+        "echo",
+        "which",
+        "file",
+        "stat",
+        "du",
+        "df",
+        "tree",
+        "sort",
+        "uniq",
+        "cut",
+        "diff",
+        "date",
+        "whoami",
+        "uname",
+        "basename",
+        "dirname",
+        "realpath",
+        "find",
+    }
+)
+_ROUTINE_GIT = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "blame"})
+_FIND_ACTIONS = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fls"})
+
+#: Non-shell tools whose approval card gets the warning colour.
+_RISKY_TOOLS = frozenset(
+    {
+        "file_delete",
+        "dir_delete",
+        "db_execute",
+        "k8s_apply",
+        "k8s_delete_pod",
+        "k8s_scale_deployment",
+        "docker_remove",
+        "arduino_upload",
+    }
+)
+
+
+def _shell_is_routine(command: str) -> bool:
+    import shlex
+    from pathlib import Path
+
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts or any(ch in command for ch in "\n\r"):
+        return False
+    base = Path(parts[0]).name
+    if base == "git":
+        return len(parts) > 1 and parts[1] in _ROUTINE_GIT
+    if base == "find":
+        return not any(p in _FIND_ACTIONS for p in parts)
+    return base in _ROUTINE_COMMANDS
+
+
+def _is_risky(tool_name: str, args: dict) -> bool:
+    if tool_name == "shell_exec":
+        return not _shell_is_routine(str(args.get("command") or ""))
+    if tool_name == "aws_cli":
+        from polyglot_ai.core import aws_cli
+
+        return aws_cli.classify(str(args.get("command") or "")) == "destructive"
+    return tool_name in _RISKY_TOOLS
 
 
 class InlineApprovalCard(QFrame):
@@ -89,18 +252,9 @@ class InlineApprovalCard(QFrame):
 
         kind, title, detail = _describe(tool_name, args)
 
-        # Shell commands that the sandbox classifies as dangerous get
-        # a warning edge, title and hint so the risk is visible at a
-        # glance before the user clicks.
-        self._dangerous = False
-        if tool_name == "shell_exec":
-            from polyglot_ai.core.sandbox import Sandbox
-
-            self._dangerous = Sandbox.is_dangerous_command(args.get("command") or "")
-        elif tool_name == "aws_cli":
-            from polyglot_ai.core import aws_cli
-
-            self._dangerous = aws_cli.classify(str(args.get("command") or "")) == "destructive"
+        # Anything that isn't a routine read gets a warning edge, title
+        # and hint so the risk is visible at a glance before the user clicks.
+        self._dangerous = _is_risky(tool_name, args)
 
         self.setObjectName("approvalCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -132,8 +286,10 @@ class InlineApprovalCard(QFrame):
         head.addWidget(self._label, 1)
         outer.addLayout(head)
 
-        # ── Detail: the command / path in monospace ──
-        self._detail = QLabel(_elide(detail))
+        # ── Detail: the exact command / SQL / path, never shortened ──
+        shown = _visible(detail)
+        self._detail = QLabel(shown)
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)
         self._detail.setStyleSheet(
             f"color: {tc.get('text_primary')}; background: {tc.get('bg_inline_code')}; "
             f"border-radius: 3px; padding: 3px 6px; font-size: {tc.FONT_SM}px; "
@@ -141,8 +297,21 @@ class InlineApprovalCard(QFrame):
         )
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._detail.setVisible(bool(detail))
-        outer.addWidget(self._detail)
+        self._detail_scroll = None
+        if shown.count("\n") >= 6 or len(shown) > 600:
+            # Long SQL / manifests scroll inside the card instead of
+            # pushing the buttons off-screen.
+            from PyQt6.QtWidgets import QScrollArea
+
+            self._detail_scroll = QScrollArea()
+            self._detail_scroll.setWidgetResizable(True)
+            self._detail_scroll.setFrameShape(QFrame.Shape.NoFrame)
+            self._detail_scroll.setFixedHeight(180)
+            self._detail_scroll.setWidget(self._detail)
+            outer.addWidget(self._detail_scroll)
+        else:
+            self._detail.setVisible(bool(detail))
+            outer.addWidget(self._detail)
 
         # ── Footer: hint + buttons ──
         foot = QHBoxLayout()
