@@ -116,6 +116,9 @@ class AwsPanel(QWidget):
         self._identity: dict | None = None
         self._overview: dict = {"lambda": [], "ec2": [], "ecs": [], "s3": [], "errors": {}}
         self._details_request = 0
+        #: Bumped per refresh: switching profile/region quickly could let an
+        #: older fetch finish last and overwrite the newer result.
+        self._overview_request = 0
         self._loaded_once = False
         self._current_details_text = ""
         #: The row whose details are showing (for Open in Console / Copy).
@@ -379,12 +382,22 @@ class AwsPanel(QWidget):
             self._status_label.setText("  AWS CLI not installed")
             return
         profile, region = self._profile, self._region
+        self._overview_request += 1
+        request = self._overview_request
         self._status_label.setText(f"  {profile or 'default'} @ {region} — loading...")
+
+        def done(data: dict) -> None:
+            if request == self._overview_request:
+                self._on_overview(data)
+
+        def failed(exc: Exception) -> None:
+            if request == self._overview_request:
+                self._status_label.setText(f"  Error: {exc}")
 
         run_in_thread(
             lambda: fetch_overview(profile, region),
-            self._on_overview,
-            lambda exc: self._status_label.setText(f"  Error: {exc}"),
+            done,
+            failed,
             owner=self,
             name="aws-overview",
         )
@@ -558,13 +571,11 @@ class AwsPanel(QWidget):
             self._current_details_text = text
             self._details.setPlainText(text or "(no output)")
 
-        run_in_thread(
-            work,
-            done,
-            lambda exc: self._details.setPlainText(f"Error: {exc}"),
-            owner=self,
-            name="aws-details",
-        )
+        def failed(exc: Exception) -> None:
+            if request == self._details_request:
+                self._details.setPlainText(f"Error: {exc}")
+
+        run_in_thread(work, done, failed, owner=self, name="aws-details")
 
     def _on_item_selected(self, current, previous) -> None:
         if not current:

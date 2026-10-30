@@ -451,3 +451,32 @@ def test_send_to_ai_redacts_secrets(qapp):
     panel._details.setPlainText('{"Environment": {"Variables": {"DB_PASSWORD": "hunter2hunter2"}}}')
     panel._send_details_to_ai()
     assert sent and "hunter2hunter2" not in sent[0]
+
+
+def test_stale_overview_does_not_overwrite_newer(qapp, monkeypatch):
+    """Switching region quickly: the older fetch finishing last must be dropped."""
+    import threading
+
+    gate = threading.Event()
+    calls = []
+
+    def slow_fetch(profile, region):
+        calls.append(region)
+        if region == "us-east-1":
+            gate.wait(2)  # the first fetch finishes last
+        return dict(SAMPLE, identity={"Account": region, "Arn": "arn:aws:iam::1:user/x"})
+
+    import polyglot_ai.ui.panels.aws_panel as mod
+
+    monkeypatch.setattr(mod, "fetch_overview", slow_fetch)
+    monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+    panel = AwsPanel()
+    panel._profile, panel._region = "default", "us-east-1"
+    panel._refresh()
+    panel._region = "eu-west-1"
+    panel._refresh()
+    assert _pump_until(lambda: "eu-west-1" in panel._identity_label.text())
+    gate.set()
+    _pump_until(lambda: False, timeout_s=0.5)  # let the stale one land
+    assert "eu-west-1" in panel._identity_label.text()
+    assert calls == ["us-east-1", "eu-west-1"]
