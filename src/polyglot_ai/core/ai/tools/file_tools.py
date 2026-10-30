@@ -40,6 +40,27 @@ async def file_read(file_ops, args: dict) -> str:
     return redact_secrets_in_content(content)
 
 
+_PLACEHOLDER = "[SECRET_REDACTED]"
+_PLACEHOLDER_REFUSAL = (
+    "Error: the new text contains [SECRET_REDACTED] placeholders that aren't in the "
+    "file now. They came from a redacted read, and writing them would replace the real "
+    "secrets in {path} with placeholder text. Use file_patch to change only the lines "
+    "you need, keeping secret lines out of old_text and new_text."
+)
+
+
+def _adds_placeholders(new_text: str, current_text: str) -> bool:
+    """True if a write would put *more* redaction placeholders on disk.
+
+    file_read redacts secrets before the model sees a file. If the model
+    then writes the whole file back, the real keys on disk become the
+    literal placeholder — silent data loss (the original only survives in
+    .polyglot-backups). Files that legitimately contain the placeholder
+    text keep working: only an increase is refused.
+    """
+    return new_text.count(_PLACEHOLDER) > current_text.count(_PLACEHOLDER)
+
+
 async def file_write(sandbox, file_ops, args: dict) -> str:
     path = args.get("path", "")
     content = args.get("content", "")
@@ -58,6 +79,14 @@ async def file_write(sandbox, file_ops, args: dict) -> str:
         return f"Error: {syntax_error}"
 
     resolved = sandbox.validate_path(path)
+    if _PLACEHOLDER in content:
+        current = ""
+        if resolved.is_file():
+            current = await asyncio.to_thread(
+                resolved.read_text, encoding="utf-8", errors="replace"
+            )
+        if _adds_placeholders(content, current):
+            return _PLACEHOLDER_REFUSAL.format(path=path)
     if resolved.is_file():
         from polyglot_ai.core.ai.code_applier import _create_backup
 
@@ -84,6 +113,8 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         )
     if not old_text:
         return "Error: No old_text provided"
+    if _adds_placeholders(new_text, old_text):
+        return _PLACEHOLDER_REFUSAL.format(path=path)
 
     # Same rule as file_write: patch exactly the file named, never a
     # symlink's target (this reads the file directly, below).
@@ -102,6 +133,12 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         content = await asyncio.to_thread(resolved.read_text, encoding="utf-8", errors="replace")
         count = content.count(old_text)
         if count == 0:
+            if _PLACEHOLDER in old_text:
+                return (
+                    f"Error: old_text not found in {path}. It contains [SECRET_REDACTED], "
+                    "which stands in for a real secret on disk; pick old_text that avoids "
+                    "the secret lines."
+                )
             return f"Error: old_text not found in {path}"
         if count > 1:
             return f"Error: old_text matches {count} locations in {path}. Make it more specific."
