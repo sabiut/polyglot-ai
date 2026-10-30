@@ -41,40 +41,39 @@ class FileOperations:
 
         return resolved
 
-    def reject_symlinks(self, path: str) -> None:
-        """Refuse ``path`` if any component, as written, is a symlink.
+    def project_path(self, path: str) -> tuple[Path, str]:
+        """``(absolute, project-relative)`` for an AI-supplied path.
 
-        This has to inspect the *unresolved* path: ``validate_path``
-        resolves first, and a resolved path never contains a symlink —
-        so the old check (run on the resolved path) never fired. A repo
-        could ship ``docs/setup.txt -> ../.env`` and have ``file_read``
-        return the secret, or ``docs/notes.md -> ../.git/config`` and
-        have an approved "write docs/notes.md" land in ``.git/config``.
-
-        ``..`` is refused too: ``link/..`` resolves through ``link``.
-        Paths are relative to the project root; an absolute path must
-        point inside it.
+        Refuses paths outside the project, ``..``, and symlinked
+        components (see :func:`file_safety.resolve_project_path`). Safety
+        rules must be checked against the relative form it returns, never
+        the raw string: an absolute or ``./``-prefixed path used to slip
+        past the CI/hooks protection (``/proj/.git/hooks/pre-commit``).
         """
         if self._project_root is None:
             raise ValueError("No project is open")
-        raw = Path(path)
-        if raw.is_absolute():
-            try:
-                raw = raw.relative_to(self._project_root)
-            except ValueError as exc:
-                raise PermissionError(f"Path escapes project root: {path}") from exc
-        current = self._project_root
-        for part in raw.parts:
-            if part == "..":
-                raise PermissionError(f"'..' is not allowed in paths: {path}")
-            current = current / part
-            if current.is_symlink():
-                rel = current.relative_to(self._project_root)
-                raise PermissionError(f"Refusing to follow a symlink: {rel}")
+        from polyglot_ai.core.file_safety import resolve_project_path
+
+        return resolve_project_path(self._project_root, path)
+
+    def reject_symlinks(self, path: str) -> None:
+        """Refuse ``path`` if it leaves the project, uses ``..`` or goes through a symlink."""
+        self.project_path(path)
+
+    def _check_writable(self, rel: str, action: str) -> None:
+        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
+
+        blocked = check_blocked_file(rel)
+        if blocked:
+            raise PermissionError(blocked)
+        if is_sensitive_path(rel):
+            raise PermissionError(
+                f"Cannot {action} '{rel}': CI/workflow/hooks config paths "
+                "require manual editing for security."
+            )
 
     def read(self, path: str) -> str:
-        self.reject_symlinks(path)
-        resolved = self.validate_path(path)
+        resolved, _rel = self.project_path(path)
         if not resolved.is_file():
             raise FileNotFoundError(f"File not found: {path}")
 
@@ -84,24 +83,11 @@ class FileOperations:
             return resolved.read_text(encoding="latin-1")
 
     def write(self, path: str, content: str) -> None:
-        # Before anything else: the approval card showed ``path``, so the
-        # write must land on exactly that file, not a symlink's target.
-        self.reject_symlinks(path)
-        resolved = self.validate_path(path)
-
-        # Block dangerous files (shared policy)
-        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
-
-        blocked = check_blocked_file(path)
-        if blocked:
-            raise PermissionError(blocked)
-
-        # Block writes to CI/workflow/hooks paths via AI tools
-        if is_sensitive_path(path):
-            raise PermissionError(
-                f"Cannot write to '{path}': CI/workflow/hooks config paths "
-                f"require manual editing for security."
-            )
+        # The approval card showed ``path``: the write must land on exactly
+        # that file (no symlink target), and the rules must judge the
+        # canonical relative path, whatever spelling the model used.
+        resolved, rel = self.project_path(path)
+        self._check_writable(rel, "write to")
 
         is_new = not resolved.exists()
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -113,61 +99,17 @@ class FileOperations:
     def delete(self, path: str, force_directory: bool = False) -> None:
         """Delete a file or directory inside the project root.
 
-        Same safety policy as :meth:`write`:
-        - Path must resolve inside the project root (handled by
-          ``validate_path``).
-        - Sensitive CI / hooks paths are refused.
-        - The project root itself can never be deleted.
-        - Symlinks are refused so the AI can't escape via a planted
-          link.
-        - Recursive directory removal requires ``force_directory=True``
-          to prevent accidents.
-
-        Args:
-            path: Relative path from project root.
-            force_directory: Must be True to recursively delete a directory.
+        Same safety policy as :meth:`write` — no symlinks anywhere on the
+        path, no ``..``, blocked/sensitive rules on the canonical relative
+        path — plus: the project root itself can never be deleted, and
+        recursive directory removal requires ``force_directory=True``.
         """
-        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
-
-        # Symlink protection MUST happen on the unresolved path —
-        # ``validate_path`` calls ``.resolve()`` which silently
-        # follows symlinks, so once we resolve we're already looking
-        # at the target. Check the raw join first.
-        if self._project_root is None:
-            raise ValueError("No project is open")
-        unresolved = self._project_root / path
-        if unresolved.is_symlink():
-            raise PermissionError(f"Refusing to delete a symlink: {path}")
-        # …and no symlinked *directory* on the way there either.
-        self.reject_symlinks(path)
-
-        resolved = self.validate_path(path)
-
-        if resolved == self._project_root:
+        resolved, rel = self.project_path(path)
+        if not rel:
             raise PermissionError("Refusing to delete the project root itself.")
-
         if not resolved.exists():
             raise FileNotFoundError(f"Path does not exist: {path}")
-
-        # Apply the same blocklists used for writes so deletions
-        # cannot bypass them.
-        blocked = check_blocked_file(path)
-        if blocked:
-            raise PermissionError(blocked)
-        if is_sensitive_path(path):
-            raise PermissionError(
-                f"Cannot delete '{path}': CI / workflow / hooks config paths "
-                "must be removed manually for safety."
-            )
-
-        # Also reject if any parent component along the unresolved
-        # path is a symlink (covers ``link/inside.txt`` where ``link``
-        # is a symlink that resolves into the project root).
-        for parent in unresolved.parents:
-            if parent == self._project_root:
-                break
-            if parent.is_symlink():
-                raise PermissionError(f"Refusing to delete through a symlink: {path}")
+        self._check_writable(rel, "delete")
 
         if resolved.is_file():
             resolved.unlink()
@@ -193,18 +135,8 @@ class FileOperations:
         Refuses sensitive paths and existing non-directory targets.
         Idempotent: creating an already-existing directory is a no-op.
         """
-        from polyglot_ai.core.file_safety import check_blocked_file, is_sensitive_path
-
-        resolved = self.validate_path(path)
-
-        blocked = check_blocked_file(path)
-        if blocked:
-            raise PermissionError(blocked)
-        if is_sensitive_path(path):
-            raise PermissionError(
-                f"Cannot create '{path}': CI / workflow / hooks config paths "
-                "must be created manually for safety."
-            )
+        resolved, rel = self.project_path(path)
+        self._check_writable(rel, "create")
 
         if resolved.exists():
             if resolved.is_dir():

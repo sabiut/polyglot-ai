@@ -69,6 +69,41 @@ SENSITIVE_HIDDEN_PATHS = {
 }
 
 
+def resolve_project_path(project_root: Path, path: str) -> tuple[Path, str]:
+    """Resolve an AI-supplied path inside the project, safely.
+
+    Returns ``(absolute_path, project_relative_posix_path)``. The rules in
+    this module (blocked files, sensitive CI/hook paths) must be checked
+    against the *relative* form: they used to receive the raw string, so
+    an absolute path (``/home/me/proj/.git/hooks/pre-commit``) or a
+    ``./``-prefixed one walked straight past them.
+
+    Refuses, with PermissionError:
+    - paths outside the project (absolute or otherwise),
+    - any ``..`` component (``link/..`` resolves through ``link``),
+    - any symlinked component, checked on the path *as written* — a
+      resolved path never contains a symlink, which is why the old
+      post-resolve checks never fired.
+    """
+    root = Path(project_root).resolve()
+    raw = Path(path)
+    if raw.is_absolute():
+        try:
+            raw = raw.relative_to(root)
+        except ValueError as exc:
+            raise PermissionError(f"Path escapes project root: {path}") from exc
+    current = root
+    parts: list[str] = []
+    for part in raw.parts:
+        if part == "..":
+            raise PermissionError(f"'..' is not allowed in paths: {path}")
+        current = current / part
+        parts.append(part)
+        if current.is_symlink():
+            raise PermissionError(f"Refusing to follow a symlink: {'/'.join(parts)}")
+    return current, "/".join(parts)
+
+
 def check_blocked_file(rel_path: str) -> str | None:
     """Check if a file is blocked from writing.
 
@@ -96,9 +131,13 @@ def is_sensitive_path(rel_path: str) -> bool:
     These paths are technically writable but control automation pipelines,
     git hooks, or deployment workflows — modifications can have security impact.
     """
-    normalized = rel_path.replace("\\", "/")
+    # Compare path components, not raw strings: "./.github/workflows/x"
+    # used to miss the ".github/workflows" prefix. Callers should still
+    # pass the project-relative form from resolve_project_path.
+    parts = [p for p in rel_path.replace("\\", "/").split("/") if p not in ("", ".")]
     for sensitive in SENSITIVE_HIDDEN_PATHS:
-        if normalized.startswith(sensitive):
+        s_parts = sensitive.split("/")
+        if parts[: len(s_parts)] == s_parts:
             return True
     return False
 

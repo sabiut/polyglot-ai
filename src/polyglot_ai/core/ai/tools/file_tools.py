@@ -22,8 +22,14 @@ async def file_read(file_ops, args: dict) -> str:
 
     from pathlib import Path
 
-    p = Path(path)
-    blocked = check_blocked_file(path)
+    # Judge the canonical project-relative path, not the raw string: an
+    # absolute path used to skip the hidden-directory rule (.git/config).
+    try:
+        _resolved, rel = file_ops.project_path(path)
+    except (PermissionError, ValueError) as exc:
+        return f"Error: {exc}"
+    p = Path(rel)
+    blocked = check_blocked_file(rel)
     if blocked:
         return f"Error: Cannot read {p.name} — {blocked}"
     if is_secret_file(p):
@@ -67,7 +73,11 @@ async def file_write(sandbox, file_ops, args: dict) -> str:
 
     from polyglot_ai.core.file_safety import validate_python_syntax, is_sensitive_path
 
-    if is_sensitive_path(path):
+    try:
+        _resolved, rel = file_ops.project_path(path)
+    except (PermissionError, ValueError) as exc:
+        return f"Error: {exc}"
+    if is_sensitive_path(rel):
         return (
             f"Error: '{path}' is a CI/workflow/hooks config path. "
             f"Modifications to this path require explicit user approval "
@@ -106,7 +116,13 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
 
     from polyglot_ai.core.file_safety import is_sensitive_path
 
-    if is_sensitive_path(path):
+    # Also refuses symlinks and '..': patch exactly the file named,
+    # never a symlink's target (it's read directly below).
+    try:
+        _resolved, rel = file_ops.project_path(path)
+    except (PermissionError, ValueError) as exc:
+        return f"Error: {exc}"
+    if is_sensitive_path(rel):
         return (
             f"Error: '{path}' is a CI/workflow/hooks config path. "
             f"Modifications require explicit user approval."
@@ -115,13 +131,6 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
         return "Error: No old_text provided"
     if _adds_placeholders(new_text, old_text):
         return _PLACEHOLDER_REFUSAL.format(path=path)
-
-    # Same rule as file_write: patch exactly the file named, never a
-    # symlink's target (this reads the file directly, below).
-    try:
-        file_ops.reject_symlinks(path)
-    except PermissionError as exc:
-        return f"Error: {exc}"
 
     resolved = sandbox.validate_path(path)
     if not resolved:

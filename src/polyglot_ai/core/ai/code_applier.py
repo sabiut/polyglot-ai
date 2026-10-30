@@ -102,8 +102,21 @@ def apply_code_block(project_root: Path, block: dict) -> tuple[bool, str]:
 
     Returns (success, message).
     """
-    rel_path = block["path"]
     content = block["content"]
+
+    # Resolve once, safely: refuses paths outside the project, '..', and
+    # symlinked components (checked as written — the old post-resolve
+    # check never fired, so a block for notes.txt -> .env overwrote
+    # .env). Every rule below judges the canonical relative path, so an
+    # absolute or ./-prefixed spelling can't dodge the CI/hooks rules.
+    from polyglot_ai.core.file_safety import resolve_project_path
+
+    try:
+        full_path, rel_path = resolve_project_path(project_root, block["path"])
+    except PermissionError as exc:
+        return False, f"Rejected {block['path']}: {exc}"
+    if not rel_path:
+        return False, f"Rejected {block['path']}: not a file path"
 
     # Check blocked files
     blocked = check_blocked_file(rel_path)
@@ -132,20 +145,6 @@ def apply_code_block(project_root: Path, block: dict) -> tuple[bool, str]:
         allowed_short = {"__init__.py", "__main__.py", "conftest.py", "setup.py"}
         if basename not in allowed_short:
             return False, f"Rejected {rel_path}: content too short (likely truncated)"
-
-    # Security: ensure path stays within project root
-    full_path = (project_root / rel_path).resolve()
-    try:
-        full_path.relative_to(project_root.resolve())
-    except ValueError:
-        return False, f"Rejected {rel_path}: path escapes project root"
-
-    # Symlink protection — reject writes through symlinked path components
-    from polyglot_ai.core.security import check_no_symlinks_in_path
-
-    safe, reason = check_no_symlinks_in_path(full_path, project_root.resolve())
-    if not safe:
-        return False, f"Rejected {rel_path}: {reason}"
 
     try:
         # Backup existing file before overwriting
