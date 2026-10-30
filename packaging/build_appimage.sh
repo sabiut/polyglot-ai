@@ -22,14 +22,34 @@ python3 -m build --wheel
 # Create AppDir structure
 APPDIR="$SCRIPT_DIR/Polyglot_AI.AppDir"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin"
-mkdir -p "$APPDIR/usr/lib"
+mkdir -p "$APPDIR/usr"
 
-# Create a venv inside AppDir using the system Python
-# NOTE: --clear wipes $APPDIR/usr, so mkdir for share/ must come AFTER this
-python3 -m venv "$APPDIR/usr" --copies --clear
+# Bundle a relocatable CPython (python-build-standalone), pinned and
+# checksum-verified. The AppImage used to bundle `python3 -m venv
+# --copies`, which copies only the interpreter binary, not the standard
+# library, so the AppImage died at startup with "Failed to import
+# encodings module" on every machine. A standalone build carries its
+# own stdlib and works from wherever the AppImage is mounted.
+PBS_RELEASE="20261026"
+PBS_PYTHON="3.12.16"
+PBS_SHA256="6a79e922e50006b601f29e688407659da1c2b86ebcd4e9c7254cf234be8b89de"
+PBS_FILE="cpython-${PBS_PYTHON}+${PBS_RELEASE}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PBS_FILE/+/%2B}"
+PBS_CACHE="$SCRIPT_DIR/appimage/$PBS_FILE"
+if [ ! -f "$PBS_CACHE" ]; then
+    echo "Downloading standalone Python ${PBS_PYTHON}..."
+    wget -q -O "$PBS_CACHE.part" "$PBS_URL"
+    mv "$PBS_CACHE.part" "$PBS_CACHE"
+fi
+echo "${PBS_SHA256}  ${PBS_CACHE}" | sha256sum -c - >/dev/null || {
+    echo "Checksum mismatch for $PBS_FILE — refusing to bundle it." >&2
+    rm -f "$PBS_CACHE"
+    exit 1
+}
+# The tarball unpacks to python/{bin,lib,include,share}; put that at usr/.
+tar -xzf "$PBS_CACHE" -C "$APPDIR/usr" --strip-components=1
+PY="$APPDIR/usr/bin/python3"
 
-# Create directories that venv --clear would have removed.
 # Full hicolor size set — appimaged / AppImageLauncher pick the
 # closest size when integrating, and a 24 px tray would otherwise
 # downscale 256 → blurry.
@@ -41,35 +61,44 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 
 # Pre-download every wheel into a sibling directory first, then
 # install with ``--no-index --find-links`` so the build itself is
-# the only step that needs network. The previous setup ran a bare
-# ``pip install`` against PyPI at build time; if the CI runner
-# lost network mid-build, the AppImage would silently embed a
-# partially-installed venv and ship to users. Mirrors the
-# offline-bundle pattern already used by .deb / .rpm.
+# the only step that needs network. Versions come from
+# constraints.txt — the exact set CI tested — like the .deb / .rpm.
 mkdir -p "$SCRIPT_DIR/appimage/wheels"
 echo "Pre-downloading wheels for offline AppImage install..."
-"$APPDIR/usr/bin/pip" install --upgrade pip
-"$APPDIR/usr/bin/pip" download \
+"$PY" -m pip download \
+    --constraint "$PROJECT_DIR/constraints.txt" \
     --dest "$SCRIPT_DIR/appimage/wheels" \
     --only-binary=:all: \
-    --platform manylinux2014_x86_64 \
-    --platform manylinux_2_17_x86_64 \
-    --platform manylinux_2_28_x86_64 \
-    --platform any \
-    "$PROJECT_DIR/dist/"*.whl \
-    || {
-        echo "Strict platform download failed; retrying with host resolver…"
-        "$APPDIR/usr/bin/pip" download \
-            --dest "$SCRIPT_DIR/appimage/wheels" \
-            "$PROJECT_DIR/dist/"*.whl
-    }
+    "$PROJECT_DIR/dist/"*.whl
 
 # Install entirely from the bundled wheels — no live PyPI access.
-# ``--no-index`` forbids contacting PyPI and ``--find-links`` makes
-# the resolver use the bundled wheels exclusively.
-"$APPDIR/usr/bin/pip" install --no-index \
+# Into the bundled interpreter's own site-packages (no venv).
+"$PY" -m pip install --no-index --no-warn-script-location \
+    --constraint "$PROJECT_DIR/constraints.txt" \
     --find-links "$SCRIPT_DIR/appimage/wheels" \
     "$PROJECT_DIR/dist/"*.whl
+
+# Smoke-test before packaging: start the real app through the same
+# interpreter, flags and entry point AppRun uses, headless, in a clean
+# environment and a throwaway home, and require it to finish starting
+# up. A broken interpreter (the old venv layout) or a launcher that
+# never reaches main() (the old ``-m polyglot_ai.app``) now fails the
+# build instead of shipping.
+SMOKE_HOME="$(mktemp -d)"
+SMOKE_OUT="$SMOKE_HOME/startup.txt"
+if ! env -i HOME="$SMOKE_HOME" PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen \
+        POLYGLOT_AI_DISABLE_UPDATE_CHECK=1 POLYGLOT_AI_STARTUP_TIMING=1 \
+        POLYGLOT_AI_EXIT_AFTER_STARTUP=1 \
+        timeout 180 "$PY" -s -E -m polyglot_ai > "$SMOKE_OUT" 2>&1 \
+   || ! grep -q "total since app import" "$SMOKE_OUT"; then
+    echo "AppImage smoke test failed — the bundled app did not start:" >&2
+    tail -40 "$SMOKE_OUT" >&2
+    rm -rf "$SMOKE_HOME"
+    exit 1
+fi
+grep "total since" "$SMOKE_OUT"
+rm -rf "$SMOKE_HOME"
+echo "AppImage runtime OK"
 
 # Copy desktop file and icons
 cp "$SCRIPT_DIR/appimage/polyglot-ai.desktop" "$APPDIR/"

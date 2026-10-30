@@ -3,27 +3,15 @@
 APPDIR="$(dirname "$(readlink -f "$0")")"
 export APPDIR
 
-# Use bundled Python
-export PATH="$APPDIR/usr/bin:$PATH"
-export PYTHONHOME="$APPDIR/usr"
-
-# Detect the actual Python lib dir bundled inside the AppImage.
-# Previous versions hard-coded ``python3.11`` here, which broke
-# any AppImage built on a host with a different Python (3.10 on
-# old LTS, 3.12+ on rolling releases). The AppImage launched but
-# ``PYTHONHOME`` shadowed system site discovery and PyQt6 failed
-# to import. Glob for ``lib/python3.*`` and take the first match
-# — the venv builder only puts one Python in there.
-PY_LIB="$(ls -d "$APPDIR"/usr/lib/python3.* 2>/dev/null | head -n 1)"
-if [ -z "$PY_LIB" ]; then
-    echo "AppRun: bundled Python lib dir not found under $APPDIR/usr/lib" >&2
-    exit 1
-fi
-export PYTHONPATH="$PY_LIB/site-packages:$PYTHONPATH"
-export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
-
-# Qt platform plugin path — same version-agnostic resolution.
-export QT_PLUGIN_PATH="$PY_LIB/site-packages/PyQt6/Qt6/plugins"
+# The bundled interpreter is a relocatable standalone CPython (see
+# build_appimage.sh): it finds its own stdlib and site-packages from its
+# location, so nothing needs exporting. The old launcher exported
+# PYTHONHOME / PYTHONPATH / LD_LIBRARY_PATH / PATH for a venv layout that
+# couldn't start anyway — and every child process inherited them, so
+# `python3` in the built-in terminal, git hooks and test runs all picked
+# up the AppImage's Python. Clear any Python variables from the user's
+# environment too: -s skips the user site-packages, -E ignores PYTHON*.
+unset PYTHONHOME PYTHONPATH
 
 # Self-register a launcher entry on first run so the AppImage
 # shows up in the user's app menu without requiring appimaged or
@@ -77,4 +65,7 @@ if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
     fi
 fi
 
-exec "$APPDIR/usr/bin/python3" -m polyglot_ai.app "$@"
+# ``-m polyglot_ai`` (the package's __main__), not ``-m polyglot_ai.app``:
+# app.py has no __main__ guard, so the old line imported it and exited
+# silently — another reason the AppImage never opened a window.
+exec "$APPDIR/usr/bin/python3" -s -E -m polyglot_ai "$@"
