@@ -72,21 +72,41 @@ class ProjectIndexer:
 
         logger.info("Indexed %d files from %s", self._doc_count, project_root)
 
-    def _walk_files(self, root: Path) -> list[Path]:
+    @staticmethod
+    def should_index(path: Path, root: Path) -> bool:
+        """The one filter for what may enter the index (and so the prompt).
+
+        Both the full build and per-save updates go through this. The
+        save path used to skip it entirely, so saving ``.env`` (or a
+        12 MB file under node_modules) indexed it, and a chat message
+        sharing a few words with it pasted the contents into the system
+        prompt sent to the provider.
+        """
         from polyglot_ai.core.security import is_secret_file
 
+        try:
+            rel_parts = path.relative_to(root).parts
+        except ValueError:
+            return False
+        if any(part in SKIP_DIRS for part in rel_parts):
+            return False
+        try:
+            if not path.is_file() or path.is_symlink():
+                return False
+            if is_secret_file(path):
+                return False  # Never index secrets
+            if path.suffix not in CODE_EXTENSIONS and path.name not in CODE_EXTENSIONS:
+                return False
+            return path.stat().st_size <= MAX_FILE_SIZE
+        except OSError:
+            return False
+
+    def _walk_files(self, root: Path) -> list[Path]:
         files = []
         try:
             for item in root.rglob("*"):
-                if any(part in SKIP_DIRS for part in item.parts):
-                    continue
-                if not item.is_file():
-                    continue
-                if is_secret_file(item):
-                    continue  # Never index secrets
-                if item.suffix in CODE_EXTENSIONS or item.name in CODE_EXTENSIONS:
-                    if item.stat().st_size <= MAX_FILE_SIZE:
-                        files.append(item)
+                if self.should_index(item, root):
+                    files.append(item)
         except OSError:
             pass
         return files
@@ -127,6 +147,10 @@ class ProjectIndexer:
         except ValueError:
             return
         if path.is_dir():
+            return
+        if not self.should_index(path, self._project_root):
+            # Drop it if an earlier version was indexed (e.g. renamed to .env).
+            self.remove_file(path)
             return
         try:
             content = path.read_text(encoding="utf-8", errors="replace")

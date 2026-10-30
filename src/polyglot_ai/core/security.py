@@ -135,20 +135,49 @@ def is_secret_file(path: Path) -> bool:
 # Regexes that detect common secret patterns embedded in file contents.
 # Used to prevent accidental upload of secrets to AI providers.
 
+#: A pattern may name a ``keep`` group: that text survives redaction
+#: (``API_KEY=`` stays, the value goes), so the model still sees *what*
+#: was there without seeing the secret.
+_SECRET_KEYWORDS = r"(?:SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)"
 _CONTENT_SECRET_PATTERNS = [
-    re.compile(r"(?:sk|pk|rk)-[a-zA-Z0-9]{20,}"),  # OpenAI / Stripe style
+    re.compile(r"(?:sk|pk|rk)-[a-zA-Z0-9]{20,}"),  # OpenAI style
+    re.compile(r"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),  # Stripe
     re.compile(r"ghp_[a-zA-Z0-9]{36,}"),  # GitHub PAT
     re.compile(r"gho_[a-zA-Z0-9]{36,}"),  # GitHub OAuth
+    re.compile(r"github_pat_[A-Za-z0-9_]{40,}"),  # GitHub fine-grained PAT
     re.compile(r"glpat-[a-zA-Z0-9\-]{20,}"),  # GitLab PAT
-    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
-    re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),  # Private keys
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),  # Slack
+    re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}"),  # AWS access key (long-lived / session)
+    re.compile(r"-----BEGIN\s+(?:RSA\s+|EC\s+|OPENSSH\s+|DSA\s+)?PRIVATE\s+KEY-----"),
     re.compile(r"-----BEGIN\s+CERTIFICATE-----"),  # Certificates
+    # Credentials inside URLs: postgres://user:pass@host → postgres://[…]@host
+    re.compile(r"(?<=://)[^\s:/@'\"]+:[^\s@/'\"]+(?=@)"),
+    # ~/.aws/credentials and friends (lowercase, unquoted).
     re.compile(
-        r"""(?:password|passwd|pwd|secret|token|api_key|apikey|"""
-        r"""access_key|private_key)\s*[=:]\s*['"][^'"]{8,}['"]""",
+        r"(?P<keep>\b(?:aws_secret_access_key|aws_session_token)\s*[=:]\s*)\S+",
         re.IGNORECASE,
     ),
+    # Quoted assignments: password = "…", "api_key": "…"
+    re.compile(
+        r"""(?P<keep>(?:password|passwd|pwd|secret|token|api_key|apikey|"""
+        r"""access_key|private_key|secret_key)['"]?\s*[=:]\s*)['"][^'"]{8,}['"]""",
+        re.IGNORECASE,
+    ),
+    # Unquoted env/config style: DATABASE_PASSWORD=hunter2, export API_TOKEN=…,
+    # and the same mid-line, e.g. docker inspect's "Env": ["DB_PASSWORD=…"].
+    # Upper-case names only, so source code like ``token = get_token()``
+    # isn't mangled.
+    re.compile(
+        r"(?m)(?P<keep>(?:^|(?<=[\s\"'\[,{(]))(?:export\s+)?[A-Z0-9_]*"
+        + _SECRET_KEYWORDS
+        + r"[A-Z0-9_]*\s*[=:]\s*)(?![\"'])[^\s#\"',]{8,}"
+    ),
 ]
+
+
+def _redact_match(match: re.Match) -> str:
+    keep = match.groupdict().get("keep") or ""
+    return keep + "[SECRET_REDACTED]"
 
 
 def scan_content_for_secrets(content: str, max_scan: int = 50_000) -> list[str]:
@@ -227,7 +256,7 @@ def redact_sensitive_output(text: str, max_length: int = 10_000) -> str:
     return result
 
 
-def redact_secrets_in_content(text: str, max_scan: int = 50_000) -> str:
+def redact_secrets_in_content(text: str) -> str:
     """Scan text for embedded secrets and redact them in-place.
 
     Applies the same patterns used by :func:`scan_content_for_secrets`
@@ -235,12 +264,16 @@ def redact_secrets_in_content(text: str, max_scan: int = 50_000) -> str:
     second pass after :func:`redact_sensitive_output` to catch secrets
     that don't match the credential-header patterns (e.g. bare API keys,
     AWS access keys, private key blocks).
+
+    Scans the *whole* text. It used to stop after 50,000 characters and
+    pass the rest through untouched, so a key deep in a large file or
+    log went to the provider as-is.
     """
-    result = text[:max_scan]
-    remainder = text[max_scan:]
+    if not text:
+        return text
     for pattern in _CONTENT_SECRET_PATTERNS:
-        result = pattern.sub("[SECRET_REDACTED]", result)
-    return result + remainder
+        text = pattern.sub(_redact_match, text)
+    return text
 
 
 def check_secure_file(path: Path) -> tuple[bool, str]:

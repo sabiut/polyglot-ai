@@ -109,6 +109,17 @@ async def git_show_file(sandbox, args: dict) -> str:
     if not re.match(r"^[a-zA-Z0-9_./ \-]+$", path):
         return f"Error: Invalid file path: {path}"
 
+    # Same policy as file_read: this tool is auto-approved, and a secret
+    # file committed in the past (even one deleted since) would otherwise
+    # be returned verbatim via ``git show HEAD~N:.env``.
+    from pathlib import PurePosixPath
+
+    from polyglot_ai.core.file_safety import check_blocked_file
+    from polyglot_ai.core.security import is_secret_file
+
+    if check_blocked_file(path) or is_secret_file(PurePosixPath(path)):
+        return f"Error: Cannot show {PurePosixPath(path).name} — file appears to contain secrets"
+
     git_ref_path = shlex.quote(f"{ref}:{path}")
     command = f"git show {git_ref_path}"
 

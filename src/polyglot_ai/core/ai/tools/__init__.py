@@ -299,7 +299,19 @@ class ToolRegistry:
     _MAX_ARGS_SIZE = 100_000
 
     async def execute(self, tool_name: str, arguments: str) -> str:
-        """Execute a tool and return the result as a string."""
+        """Execute a tool and return the result as a string.
+
+        Every result passes through secret redaction before it can reach
+        the model. Individual tools used to opt in (file_read, shell did;
+        git_show_file, git_diff, aws_cli and others didn't), so one
+        forgotten call site leaked credentials to the provider.
+        """
+        from polyglot_ai.core.security import redact_secrets_in_content
+
+        result = await self._execute_unredacted(tool_name, arguments)
+        return redact_secrets_in_content(result) if isinstance(result, str) else result
+
+    async def _execute_unredacted(self, tool_name: str, arguments: str) -> str:
         # Reject oversized payloads
         if arguments and len(arguments) > self._MAX_ARGS_SIZE:
             return f"Error: Arguments too large ({len(arguments)} bytes, max {self._MAX_ARGS_SIZE})"
