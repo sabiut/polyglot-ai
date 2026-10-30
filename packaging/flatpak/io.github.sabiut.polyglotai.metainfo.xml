@@ -23,6 +23,17 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.17" date="2026-10-31">
+      <description>
+        <p>The AWS panel now covers EC2, Lambda, ECS, EKS, S3, RDS, DynamoDB,
+        SQS, SNS, CloudFormation stacks and CloudWatch alarms. Clicking a
+        resource shows a readable summary above the full output, every
+        resource opens in the AWS Console with one click, sections show
+        visible expand/collapse arrows, and a filter narrows the list. ECS
+        lists every service in a cluster, and EKS clusters can be added to
+        your kubeconfig for the Kubernetes panel.</p>
+      </description>
+    </release>
     <release version="0.18.16" date="2026-10-31">
       <description>
         <p>The AI can work through up to 50 tool rounds per message, then
