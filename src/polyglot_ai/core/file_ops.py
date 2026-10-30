@@ -41,18 +41,42 @@ class FileOperations:
 
         return resolved
 
+    def reject_symlinks(self, path: str) -> None:
+        """Refuse ``path`` if any component, as written, is a symlink.
+
+        This has to inspect the *unresolved* path: ``validate_path``
+        resolves first, and a resolved path never contains a symlink —
+        so the old check (run on the resolved path) never fired. A repo
+        could ship ``docs/setup.txt -> ../.env`` and have ``file_read``
+        return the secret, or ``docs/notes.md -> ../.git/config`` and
+        have an approved "write docs/notes.md" land in ``.git/config``.
+
+        ``..`` is refused too: ``link/..`` resolves through ``link``.
+        Paths are relative to the project root; an absolute path must
+        point inside it.
+        """
+        if self._project_root is None:
+            raise ValueError("No project is open")
+        raw = Path(path)
+        if raw.is_absolute():
+            try:
+                raw = raw.relative_to(self._project_root)
+            except ValueError as exc:
+                raise PermissionError(f"Path escapes project root: {path}") from exc
+        current = self._project_root
+        for part in raw.parts:
+            if part == "..":
+                raise PermissionError(f"'..' is not allowed in paths: {path}")
+            current = current / part
+            if current.is_symlink():
+                rel = current.relative_to(self._project_root)
+                raise PermissionError(f"Refusing to follow a symlink: {rel}")
+
     def read(self, path: str) -> str:
+        self.reject_symlinks(path)
         resolved = self.validate_path(path)
         if not resolved.is_file():
             raise FileNotFoundError(f"File not found: {path}")
-
-        # Symlink protection — same policy as writes
-        if self._project_root:
-            from polyglot_ai.core.security import check_no_symlinks_in_path
-
-            safe, reason = check_no_symlinks_in_path(resolved, self._project_root)
-            if not safe:
-                raise PermissionError(f"Blocked read: {reason}")
 
         try:
             return resolved.read_text(encoding="utf-8")
@@ -60,6 +84,9 @@ class FileOperations:
             return resolved.read_text(encoding="latin-1")
 
     def write(self, path: str, content: str) -> None:
+        # Before anything else: the approval card showed ``path``, so the
+        # write must land on exactly that file, not a symlink's target.
+        self.reject_symlinks(path)
         resolved = self.validate_path(path)
 
         # Block dangerous files (shared policy)
@@ -75,14 +102,6 @@ class FileOperations:
                 f"Cannot write to '{path}': CI/workflow/hooks config paths "
                 f"require manual editing for security."
             )
-
-        # Symlink protection — reject writes through symlinks
-        if self._project_root:
-            from polyglot_ai.core.security import check_no_symlinks_in_path
-
-            safe, reason = check_no_symlinks_in_path(resolved, self._project_root)
-            if not safe:
-                raise PermissionError(f"Blocked: {reason}")
 
         is_new = not resolved.exists()
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +138,8 @@ class FileOperations:
         unresolved = self._project_root / path
         if unresolved.is_symlink():
             raise PermissionError(f"Refusing to delete a symlink: {path}")
+        # …and no symlinked *directory* on the way there either.
+        self.reject_symlinks(path)
 
         resolved = self.validate_path(path)
 

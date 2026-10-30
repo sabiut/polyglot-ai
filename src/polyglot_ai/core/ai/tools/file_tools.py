@@ -85,6 +85,13 @@ async def file_patch(sandbox, file_ops, args: dict) -> str:
     if not old_text:
         return "Error: No old_text provided"
 
+    # Same rule as file_write: patch exactly the file named, never a
+    # symlink's target (this reads the file directly, below).
+    try:
+        file_ops.reject_symlinks(path)
+    except PermissionError as exc:
+        return f"Error: {exc}"
+
     resolved = sandbox.validate_path(path)
     if not resolved:
         return f"Error: Path not allowed: {path}"
