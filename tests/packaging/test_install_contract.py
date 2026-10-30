@@ -189,3 +189,36 @@ def _extract_field(control_text: str, field_name: str) -> str:
             else:
                 break
     return "\n".join(out)
+
+
+def _rpm_scriptlet(name: str, spec_text: str | None = None) -> str:
+    """Body of one %scriptlet section in the spec ('' if absent)."""
+    import re
+
+    spec = spec_text or (_REPO_ROOT / "packaging" / "rpm" / "polyglot-ai.spec").read_text()
+    body: list[str] = []
+    inside = False
+    for line in spec.splitlines():
+        if re.fullmatch(r"%[a-z]+", line.strip()):
+            if inside:
+                break
+            inside = line.strip() == name
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
+def test_rpm_upgrade_does_not_delete_the_new_venv():
+    """rpm -U runs the new %post, then the OLD %preun. A %preun that deletes
+    the venv unconditionally wiped the app on every dnf upgrade."""
+    preun = _rpm_scriptlet("%preun")
+    assert 'if [ "$1" -eq 0 ]' in preun, "%preun must only clean up on a real uninstall"
+    assert "rm -rf /opt/polyglot-ai/venv" in preun
+
+
+def test_rpm_builds_the_venv_after_old_scriptlets_run():
+    """Releases <= 0.18.15 carry the unguarded %preun; only %posttrans runs
+    after it, so that's where the venv must be built."""
+    assert "python3 -m venv" in _rpm_scriptlet("%posttrans")
+    assert "python3 -m venv" not in _rpm_scriptlet("%post")

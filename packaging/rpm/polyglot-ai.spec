@@ -93,25 +93,47 @@ if [ -f %{_sourcedir}/polyglot-ai.svg ]; then
        %{buildroot}/usr/share/icons/hicolor/scalable/apps/polyglot-ai.svg
 fi
 
-%post
+# The venv is built in %posttrans, not %post. During an upgrade rpm runs
+# the NEW package's %post first and the OLD package's %preun after it;
+# releases up to 0.18.15 ship a %preun that deletes the venv
+# unconditionally, so a venv built in %post was wiped on every
+# `dnf upgrade` ("polyglot-ai: command not found"). %posttrans runs at
+# the very end of the transaction, after the old scriptlets.
+%posttrans
 INSTALL_DIR="/opt/polyglot-ai"
 VENV_DIR="$INSTALL_DIR/venv"
 WHEELS_DIR="$INSTALL_DIR/wheels"
-python3 -m venv "$VENV_DIR"
-# Install offline from bundled wheels first; fall back to PyPI if
-# the bundle is empty or pip refuses (incompatible platform tags
-# on a non-x86_64 box, etc.).
-if [ -d "$WHEELS_DIR" ] && [ -n "$(ls -A "$WHEELS_DIR" 2>/dev/null)" ]; then
-    "$VENV_DIR/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
-        "$INSTALL_DIR"/*.whl || {
-        "$VENV_DIR/bin/pip" install --upgrade pip
-        "$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
-    }
-else
-    "$VENV_DIR/bin/pip" install --upgrade pip
-    "$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
+NEW_VENV="$VENV_DIR.new"
+# Build next to the live venv and swap only on success, so a failed
+# rebuild (no network, broken wheel) leaves the previous install working.
+rm -rf "$NEW_VENV"
+BUILD_OK=0
+if python3 -m venv "$NEW_VENV"; then
+    # Install offline from bundled wheels first; fall back to PyPI if
+    # the bundle is empty or pip refuses (incompatible platform tags
+    # on a non-x86_64 box, etc.).
+    if [ -d "$WHEELS_DIR" ] && [ -n "$(ls -A "$WHEELS_DIR" 2>/dev/null)" ] && \
+       "$NEW_VENV/bin/pip" install --no-index --find-links "$WHEELS_DIR" "$INSTALL_DIR"/*.whl; then
+        BUILD_OK=1
+    elif "$NEW_VENV/bin/pip" install --upgrade pip && \
+         "$NEW_VENV/bin/pip" install "$INSTALL_DIR"/*.whl; then
+        BUILD_OK=1
+    fi
 fi
-ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
+if [ "$BUILD_OK" -eq 1 ]; then
+    rm -rf "$VENV_DIR"
+    mv "$NEW_VENV" "$VENV_DIR"
+    ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
+    echo "Polyglot AI installed successfully."
+    echo "Run 'polyglot-ai' to start, or find it in your application menu."
+else
+    rm -rf "$NEW_VENV"
+    echo "Polyglot AI: could not build its Python environment." >&2
+    if [ -x "$VENV_DIR/bin/polyglot-ai" ]; then
+        echo "The previously installed version is still in place." >&2
+    fi
+    echo "Check your network connection, then run: sudo dnf reinstall polyglot-ai" >&2
+fi
 # Refresh desktop / icon caches so the launcher entry shows up
 # in the user's menu *now*, not after the next reboot. Both tools
 # are commonly present on Fedora/RHEL but not guaranteed in
@@ -122,12 +144,16 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || :
 fi
-echo "Polyglot AI installed successfully."
-echo "Run 'polyglot-ai' to start, or find it in your application menu."
+:
 
 %preun
-rm -f /usr/local/bin/polyglot-ai
-rm -rf /opt/polyglot-ai/venv
+# $1 is the number of versions left after this one goes: 0 means a real
+# uninstall, 1 means an upgrade (the new version is already installed and
+# its venv must survive).
+if [ "$1" -eq 0 ]; then
+    rm -f /usr/local/bin/polyglot-ai
+    rm -rf /opt/polyglot-ai/venv /opt/polyglot-ai/venv.new
+fi
 
 %postun
 # After uninstall, refresh caches so the leftover icon doesn't
