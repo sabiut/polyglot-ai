@@ -130,24 +130,45 @@ and at least one profile configured (`aws configure` or `aws sso login`).
 ### What it shows
 
 Pick a **profile** and **region** at the top (the region defaults to the
-profile's configured one). The panel then lists, in one refresh:
+profile's configured one). One refresh lists, in parallel:
 
-- **Lambda** functions — runtime and last-modified time
-- **EC2** instances — Name tag, state (colour-coded), type, IP
-- **ECS services** — cluster/service, running/desired tasks
-- **S3 buckets** — creation date (buckets are global; the list doesn't
-  change with region)
+| Group | Resources | Shown in the list |
+|---|---|---|
+| Compute | **EC2** instances | Name, state (coloured), type, IP |
+| | **Lambda** functions | runtime, last modified |
+| | **ECS services** | cluster / service, running/desired tasks |
+| | **EKS clusters** | name |
+| Data | **S3 buckets** | creation date (global, not per region) |
+| | **RDS databases** | status (coloured), engine and class |
+| | **DynamoDB tables** | name |
+| Messaging | **SQS queues** | name |
+| | **SNS topics** | name |
+| Operations | **CloudFormation stacks** | status (failures and rollbacks in red), last update |
+| | **CloudWatch alarms** | state — firing alarms listed first |
+
+Sections with nothing in them fold into one *None here: …* line, so the
+list only shows what you have. Click a section's ▾ / ▸ header to collapse
+or expand it; collapsed sections stay collapsed across refreshes. Type in
+**Filter resources…** to narrow every section at once.
 
 The account ID and caller identity appear under the selectors. Each
 section fails independently: if a profile lacks permission for one
 service you see a hint under that section and the rest still loads.
 
-Click a resource to load its details below: a Lambda's configuration,
-an instance description, a service description, or a bucket's top-level
-listing. There is no auto-refresh — every call is a real API request —
-so use the refresh button when you want fresh data.
+**Click a resource to see its details** in the pane below: a readable
+summary first (for example an instance's state, IPs, VPC and security
+groups; a database's engine, endpoint, storage and backups; an alarm's
+state and why), then the full CLI output under *Full output*. Lambda
+summaries list environment variable *names* only. The header buttons
+open the resource in the **AWS Console** in your browser, send the
+details to the AI, or open them in a larger window. There is no
+auto-refresh — every call is a real API request — so use the refresh
+button when you want fresh data.
 
 ### Actions (right-click)
+
+Every resource has **Open in AWS Console**, **Copy ID / ARN / URL** and
+**Send details to AI**. On top of that:
 
 - **Lambda** — *Tail logs (last hour)* from CloudWatch, *Configuration*,
   *Invoke…* with a JSON payload (asks for confirmation)
@@ -156,13 +177,17 @@ so use the refresh button when you want fresh data.
   Manager (SSM)* (runs `aws ssm start-session` in the terminal — no
   open port 22 needed) for a running instance; *Stop* / *Reboot* a
   running instance or *Start* a stopped one (each asks for confirmation)
-- **ECS** — *Describe*, *Recent events*, *Force new deployment…*
+- **ECS** — *Describe*, *Recent events*, *Running tasks*, *Force new
+  deployment…*
+- **EKS** — *Describe*, *Node groups*, *Add to kubeconfig…* (runs
+  `aws eks update-kubeconfig`, after asking, so the Kubernetes panel can
+  browse the cluster)
 - **S3** — *List top-level objects*, *Copy s3:// URI*
 
-Every resource also has **Send details to AI**, which puts the details
-pane into the chat with a prompt to explain it and suggest next steps —
-the fastest route from "this Lambda is failing" to a fix. The chat
-button in the details header does the same.
+**Send details to AI** puts the details pane into the chat with a prompt
+to explain it and suggest next steps — the fastest route from "this
+Lambda is failing" to a fix. Secrets in the details are redacted before
+they're sent.
 
 ### The AI can use AWS too
 

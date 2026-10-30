@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core import aws_cli
+from polyglot_ai.core.aws_resources import BY_KEY, RESOURCE_TYPES, format_summary
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels import shared_icons
@@ -39,15 +40,6 @@ from polyglot_ai.ui.thread_bridge import run_in_thread
 from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 logger = logging.getLogger(__name__)
-
-_EC2_STATE = {
-    "running": "accent_success_muted",
-    "pending": "accent_warning",
-    "stopping": "accent_warning",
-    "stopped": "text_muted",
-    "shutting-down": "accent_error",
-    "terminated": "accent_error",
-}
 
 
 def _pretty(output: str) -> str:
@@ -59,87 +51,58 @@ def _pretty(output: str) -> str:
 
 
 def fetch_overview(profile: str, region: str) -> dict:
-    """Collect identity + Lambda/EC2/ECS/S3 summaries. Runs off-thread.
+    """Identity, then every resource type in ``RESOURCE_TYPES``. Runs off-thread.
 
-    Each section fails independently: one missing permission must not
-    blank the whole panel. Errors are returned per section as hints.
+    Each section fails independently (one missing permission must not
+    blank the panel); errors come back per section. The lists run in
+    parallel — there are eleven of them now, and each is a separate CLI
+    process that takes about a second.
     """
-    result: dict = {"identity": None, "lambda": [], "ec2": [], "ecs": [], "s3": [], "errors": {}}
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
 
-    def call(section: str, argv: list[str], *, global_call: bool = False):
-        out, code = aws_cli.run(argv, profile=profile, region="" if global_call else region)
-        if code != 0:
-            result["errors"][section] = out.removeprefix("Error: ")
-            return None
-        try:
-            return json.loads(out) if out else {}
-        except json.JSONDecodeError:
-            result["errors"][section] = "Unexpected (non-JSON) output"
-            return None
+    result: dict = {"identity": None, "errors": {}}
+    for rt in RESOURCE_TYPES:
+        result[rt.key] = []
+    lock = threading.Lock()
 
-    ident = call("identity", ["sts", "get-caller-identity"], global_call=True)
-    if ident:
-        result["identity"] = ident
-    else:
-        # Without an identity nothing else will work — don't make four
+    def make_call(section: str):
+        def call(argv: list[str], *, global_call: bool = False):
+            out, code = aws_cli.run(argv, profile=profile, region="" if global_call else region)
+            if code != 0:
+                with lock:
+                    result["errors"].setdefault(section, out.removeprefix("Error: "))
+                return None
+            try:
+                return json.loads(out) if out else {}
+            except json.JSONDecodeError:
+                with lock:
+                    result["errors"].setdefault(section, "Unexpected (non-JSON) output")
+                return None
+
+        return call
+
+    ident = make_call("identity")(["sts", "get-caller-identity"], global_call=True)
+    if not ident:
+        # Without an identity nothing else will work — don't make eleven
         # more calls that produce the same credentials error.
         return result
+    result["identity"] = ident
 
-    functions = call("lambda", ["lambda", "list-functions", "--max-items", "200"])
-    if functions:
-        for fn in functions.get("Functions", []):
-            result["lambda"].append(
-                {
-                    "name": fn.get("FunctionName", ""),
-                    "runtime": fn.get("Runtime", fn.get("PackageType", "")),
-                    "modified": (fn.get("LastModified") or "")[:16].replace("T", " "),
-                    "memory": fn.get("MemorySize"),
-                }
-            )
+    def run_type(rt):
+        try:
+            return rt.key, rt.fetch(make_call(rt.key))
+        except Exception as exc:  # a parser surprise must not sink the rest
+            logger.exception("AWS %s listing failed", rt.key)
+            with lock:
+                result["errors"].setdefault(rt.key, f"Couldn't read the listing: {exc}")
+            return rt.key, []
 
-    ec2 = call("ec2", ["ec2", "describe-instances", "--max-items", "200"])
-    if ec2:
-        for reservation in ec2.get("Reservations", []):
-            for inst in reservation.get("Instances", []):
-                tags = {t.get("Key"): t.get("Value") for t in inst.get("Tags", [])}
-                result["ec2"].append(
-                    {
-                        "id": inst.get("InstanceId", ""),
-                        "name": tags.get("Name", ""),
-                        "state": (inst.get("State") or {}).get("Name", "unknown"),
-                        "type": inst.get("InstanceType", ""),
-                        "ip": inst.get("PublicIpAddress") or inst.get("PrivateIpAddress") or "",
-                    }
-                )
-
-    clusters = call("ecs", ["ecs", "list-clusters"])
-    if clusters:
-        for cluster_arn in clusters.get("clusterArns", [])[:10]:
-            cluster = cluster_arn.rsplit("/", 1)[-1]
-            services = call("ecs", ["ecs", "list-services", "--cluster", cluster])
-            arns = (services or {}).get("serviceArns", [])[:10]
-            if not arns:
-                continue
-            described = call(
-                "ecs", ["ecs", "describe-services", "--cluster", cluster, "--services", *arns]
-            )
-            for svc in (described or {}).get("services", []):
-                result["ecs"].append(
-                    {
-                        "cluster": cluster,
-                        "name": svc.get("serviceName", ""),
-                        "running": svc.get("runningCount", 0),
-                        "desired": svc.get("desiredCount", 0),
-                        "status": svc.get("status", ""),
-                    }
-                )
-
-    buckets = call("s3", ["s3api", "list-buckets"], global_call=True)
-    if buckets:
-        for b in buckets.get("Buckets", []):
-            result["s3"].append(
-                {"name": b.get("Name", ""), "created": (b.get("CreationDate") or "")[:10]}
-            )
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for key, rows in pool.map(run_type, RESOURCE_TYPES):
+            for row in rows:
+                row["type"] = key
+            result[key] = rows
     return result
 
 
@@ -155,6 +118,10 @@ class AwsPanel(QWidget):
         self._details_request = 0
         self._loaded_once = False
         self._current_details_text = ""
+        #: The row whose details are showing (for Open in Console / Copy).
+        self._details_row: dict | None = None
+        #: Sections the user collapsed — kept across refreshes.
+        self._collapsed: set[str] = set()
 
         self._setup_ui()
         self._apply_theme_styles()
@@ -215,6 +182,14 @@ class AwsPanel(QWidget):
         self._identity_label = QLabel("")
         self._identity_label.setWordWrap(True)
         sel.addWidget(self._identity_label)
+
+        from PyQt6.QtWidgets import QLineEdit
+
+        self._filter = QLineEdit()
+        self._filter.setPlaceholderText("Filter resources…")
+        self._filter.setClearButtonEnabled(True)
+        self._filter.textChanged.connect(self._apply_filter)
+        sel.addWidget(self._filter)
         layout.addWidget(self._selector_bar)
 
         self._splitter = QSplitter(Qt.Orientation.Vertical)
@@ -223,9 +198,18 @@ class AwsPanel(QWidget):
         self._tree.setHeaderLabels(["Resource", "Status", "Info"])
         self._tree.setColumnWidth(0, 200)
         self._tree.setColumnWidth(1, 80)
+        # Section rows carry their own ▾/▸ in the text: the theme's branch
+        # arrows are invisible on the dark background, so a collapsed
+        # section looked empty with no way back. One click toggles it.
+        self._tree.setRootIsDecorated(False)
+        self._tree.setExpandsOnDoubleClick(False)
+        self._tree.setIndentation(14)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
         self._tree.currentItemChanged.connect(self._on_item_selected)
+        self._tree.itemClicked.connect(self._on_item_clicked)
+        self._tree.itemExpanded.connect(lambda it: self._on_section_toggled(it, True))
+        self._tree.itemCollapsed.connect(lambda it: self._on_section_toggled(it, False))
         self._splitter.addWidget(self._tree)
 
         details = QWidget()
@@ -242,6 +226,12 @@ class AwsPanel(QWidget):
         dh.addStretch()
         from polyglot_ai.ui.panels import nav_icons
 
+        self._console_btn = make_icon_button(
+            shared_icons.draw_popout_icon(), "Open in the AWS Console"
+        )
+        self._console_btn.clicked.connect(lambda: self._open_console(self._details_row))
+        self._console_btn.setEnabled(False)
+        dh.addWidget(self._console_btn)
         self._ai_btn = make_icon_button(nav_icons.make_chat_icon(), "Send these details to the AI")
         self._ai_btn.clicked.connect(self._send_details_to_ai)
         dh.addWidget(self._ai_btn)
@@ -252,8 +242,12 @@ class AwsPanel(QWidget):
 
         self._details = QPlainTextEdit()
         self._details.setReadOnly(True)
-        mono = QFont("Monospace", 10)
-        mono.setStyleHint(QFont.StyleHint.Monospace)
+        # The system fixed-width font: a bare "Monospace" family doesn't
+        # resolve everywhere, and the summary's aligned columns need it.
+        from PyQt6.QtGui import QFontDatabase
+
+        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        mono.setPointSize(10)
         self._details.setFont(mono)
         self._details.setPlaceholderText("Click a resource to view details")
         d.addWidget(self._details)
@@ -292,6 +286,11 @@ class AwsPanel(QWidget):
         self._identity_label.setStyleSheet(
             f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; padding: 2px 0;"
         )
+        self._filter.setStyleSheet(
+            f"QLineEdit {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
+            f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
+        )
         self._splitter.setStyleSheet(
             f"QSplitter::handle {{ background: {tc.get('border_secondary')}; height: 2px; }}"
         )
@@ -312,9 +311,14 @@ class AwsPanel(QWidget):
             f"color: {tc.get('text_tertiary')}; font-size: {tc.FONT_XS}px; "
             "font-weight: 600; background: transparent;"
         )
+        # The font has to be in the stylesheet: the app theme's stylesheet
+        # sets a proportional font on every widget, overriding setFont(),
+        # and the summary's columns only line up in a fixed-width font.
         self._details.setStyleSheet(
             f"QPlainTextEdit {{ background: {tc.get('bg_base')}; "
-            f"color: {tc.get('text_primary')}; border: none; padding: 4px; }}"
+            f"color: {tc.get('text_primary')}; border: none; padding: 4px; "
+            f"font-family: '{self._details.font().family()}', 'JetBrains Mono', "
+            f"'DejaVu Sans Mono', 'Fira Code', monospace; font-size: {tc.FONT_SM}px; }}"
         )
         self._status_label.setStyleSheet(
             f"font-size: {tc.FONT_XS}px; color: {tc.get('text_muted')}; "
@@ -402,10 +406,10 @@ class AwsPanel(QWidget):
             self._status_label.setText(f"  {errors['identity']}")
             self._show_hint(errors["identity"])
             return
-        counts = (
-            f"{len(data['lambda'])} functions | {len(data['ec2'])} instances | "
-            f"{len(data['ecs'])} services | {len(data['s3'])} buckets"
-        )
+        found = [(rt.title, len(data.get(rt.key, []))) for rt in RESOURCE_TYPES]
+        total = sum(n for _, n in found)
+        services = sum(1 for _, n in found if n)
+        counts = f"{total} resources in {services} services" if total else "no resources"
         problems = [f"{k}: {v}" for k, v in errors.items()]
         suffix = f"  ({'; '.join(problems)})" if problems else ""
         self._status_label.setText(
@@ -420,70 +424,114 @@ class AwsPanel(QWidget):
         hint.setFlags(Qt.ItemFlag.NoItemFlags)
         hint.setFirstColumnSpanned(True)
 
+    @staticmethod
+    def _section_text(title: str, count: int, expanded: bool) -> str:
+        return f"{'▾' if expanded else '▸'}  {title} ({count})"
+
     def _populate_tree(self) -> None:
         self._tree.clear()
         data = self._overview
         errors: dict = data.get("errors", {})
+        bold = QFont()
+        bold.setBold(True)
+        empty: list[str] = []
 
-        def section(title: str, key: str) -> QTreeWidgetItem:
+        for rt in RESOURCE_TYPES:
+            rows = data.get(rt.key, [])
+            if not rows and rt.key not in errors:
+                empty.append(rt.title)
+                continue
+            expanded = rt.key not in self._collapsed
             root = QTreeWidgetItem(self._tree)
-            root.setText(0, f"{title} ({len(data.get(key, []))})")
-            root.setExpanded(True)
-            if key in errors:
+            root.setText(0, self._section_text(rt.title, len(rows), expanded))
+            root.setFont(0, bold)
+            root.setFirstColumnSpanned(True)
+            root.setData(0, Qt.ItemDataRole.UserRole, {"section": rt.key, "title": rt.title})
+            if rt.key in errors:
                 err = QTreeWidgetItem(root)
-                err.setText(0, errors[key])
+                err.setText(0, errors[rt.key])
                 err.setForeground(0, QColor(tc.get("accent_warning")))
                 err.setFlags(Qt.ItemFlag.NoItemFlags)
                 err.setFirstColumnSpanned(True)
-            return root
+            for row in rows:
+                item = QTreeWidgetItem(root)
+                item.setText(0, row.get("label", row.get("name", "")))
+                item.setText(1, str(row.get("status") or ""))
+                item.setText(2, str(row.get("info") or ""))
+                item.setToolTip(0, row.get("label", ""))
+                colour = rt.status_colour(row)
+                if colour:
+                    item.setForeground(1, QColor(tc.get(colour)))
+                item.setData(0, Qt.ItemDataRole.UserRole, {"type": rt.key, **row})
+            # Expand only after the children exist.
+            root.setExpanded(expanded)
 
-        lam = section("Lambda", "lambda")
-        for fn in data.get("lambda", []):
-            item = QTreeWidgetItem(lam)
-            item.setText(0, fn["name"])
-            item.setText(1, str(fn.get("runtime") or ""))
-            item.setText(2, fn.get("modified", ""))
-            item.setData(0, Qt.ItemDataRole.UserRole, {"type": "lambda", **fn})
-
-        ec2 = section("EC2", "ec2")
-        for inst in data.get("ec2", []):
-            item = QTreeWidgetItem(ec2)
-            label = inst["name"] or inst["id"]
-            item.setText(0, label if not inst["name"] else f"{inst['name']}  ({inst['id']})")
-            item.setText(1, inst["state"])
-            item.setForeground(1, QColor(tc.get(_EC2_STATE.get(inst["state"], "text_muted"))))
-            item.setText(2, f"{inst['type']}  {inst['ip']}".strip())
-            item.setData(0, Qt.ItemDataRole.UserRole, {"type": "ec2", **inst})
-
-        ecs = section("ECS services", "ecs")
-        for svc in data.get("ecs", []):
-            item = QTreeWidgetItem(ecs)
-            item.setText(0, f"{svc['cluster']} / {svc['name']}")
-            item.setText(1, f"{svc['running']}/{svc['desired']}")
-            healthy = svc["running"] >= svc["desired"] and svc["desired"] > 0
-            item.setForeground(
-                1, QColor(tc.get("accent_success_muted" if healthy else "accent_warning"))
-            )
-            item.setText(2, svc["status"])
-            item.setData(0, Qt.ItemDataRole.UserRole, {"type": "ecs", **svc})
-
-        s3 = section("S3 buckets", "s3")
-        for b in data.get("s3", []):
-            item = QTreeWidgetItem(s3)
-            item.setText(0, b["name"])
-            item.setText(2, b["created"])
-            item.setData(0, Qt.ItemDataRole.UserRole, {"type": "s3", **b})
-
-        if not any(data.get(k) for k in ("lambda", "ec2", "ecs", "s3")) and not errors:
+        if empty and self._tree.topLevelItemCount():
+            note = QTreeWidgetItem(self._tree)
+            note.setText(0, "None here: " + ", ".join(empty))
+            note.setToolTip(0, "No resources found for: " + ", ".join(empty))
+            note.setForeground(0, QColor(tc.get("text_muted")))
+            note.setFlags(Qt.ItemFlag.NoItemFlags)
+            note.setFirstColumnSpanned(True)
+        elif not self._tree.topLevelItemCount():
             hint = QTreeWidgetItem(self._tree)
             hint.setText(0, "Nothing found in this region for this profile.")
             hint.setForeground(0, QColor(tc.get("text_muted")))
             hint.setFlags(Qt.ItemFlag.NoItemFlags)
             hint.setFirstColumnSpanned(True)
+        self._apply_filter(self._filter.text())
+
+    def _on_item_clicked(self, item, _column: int) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, dict) and "section" in data:
+            item.setExpanded(not item.isExpanded())
+
+    def _on_section_toggled(self, item, expanded: bool) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not (isinstance(data, dict) and "section" in data):
+            return
+        key = data["section"]
+        if expanded:
+            self._collapsed.discard(key)
+        else:
+            self._collapsed.add(key)
+        count = sum(
+            1
+            for i in range(item.childCount())
+            if isinstance(item.child(i).data(0, Qt.ItemDataRole.UserRole), dict)
+        )
+        item.setText(0, self._section_text(data["title"], count, expanded))
+
+    def _apply_filter(self, text: str) -> None:
+        """Hide resources whose name/info don't contain ``text``."""
+        needle = text.strip().lower()
+        for i in range(self._tree.topLevelItemCount()):
+            section = self._tree.topLevelItem(i)
+            meta = section.data(0, Qt.ItemDataRole.UserRole)
+            if not (isinstance(meta, dict) and "section" in meta):
+                section.setHidden(bool(needle))
+                continue
+            visible = 0
+            for j in range(section.childCount()):
+                child = section.child(j)
+                hay = f"{child.text(0)} {child.text(1)} {child.text(2)}".lower()
+                show = not needle or needle in hay
+                child.setHidden(not show)
+                visible += show
+            section.setHidden(bool(needle) and visible == 0)
+            if needle and visible:
+                section.setExpanded(True)
 
     # ── Details ─────────────────────────────────────────────────────
 
-    def _show_in_details(self, title: str, argv: list[str], *, json_output: bool = True) -> None:
+    def _show_in_details(
+        self,
+        title: str,
+        argv: list[str],
+        *,
+        json_output: bool = True,
+        summarize=None,
+    ) -> None:
         self._details_title.setText(title)
         self._details.setPlainText("Loading...")
         self._details_request += 1
@@ -500,6 +548,13 @@ class AwsPanel(QWidget):
                 return
             output, code = result
             text = _pretty(output) if code == 0 else output
+            if code == 0 and summarize is not None:
+                try:
+                    summary = format_summary(summarize(json.loads(output)))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    summary = ""
+                if summary:
+                    text = f"{summary}\n\n── Full output ──\n{text}"
             self._current_details_text = text
             self._details.setPlainText(text or "(no output)")
 
@@ -515,36 +570,39 @@ class AwsPanel(QWidget):
         if not current:
             return
         data = current.data(0, Qt.ItemDataRole.UserRole)
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or "type" not in data:
             return
-        kind = data["type"]
-        if kind == "lambda":
-            self._show_in_details(
-                f"LAMBDA — {data['name']}",
-                ["lambda", "get-function-configuration", "--function-name", data["name"]],
-            )
-        elif kind == "ec2":
-            self._show_in_details(
-                f"EC2 — {data['id']}", ["ec2", "describe-instances", "--instance-ids", data["id"]]
-            )
-        elif kind == "ecs":
-            self._show_in_details(
-                f"ECS — {data['name']}",
-                [
-                    "ecs",
-                    "describe-services",
-                    "--cluster",
-                    data["cluster"],
-                    "--services",
-                    data["name"],
-                ],
-            )
-        elif kind == "s3":
-            self._show_in_details(
-                f"S3 — {data['name']}",
-                ["s3", "ls", f"s3://{data['name']}", "--human-readable", "--summarize"],
-                json_output=False,
-            )
+        rt = BY_KEY.get(data["type"])
+        if rt is None or rt.describe is None:
+            return
+        self._details_row = data
+        self._console_btn.setEnabled(rt.console_url is not None)
+        self._show_in_details(
+            f"{rt.title.split()[0].upper()} — {data.get('name') or data.get('id', '')}",
+            rt.describe(data),
+            json_output=not rt.describe_is_text,
+            summarize=rt.summarize,
+        )
+
+    def _console_url(self, row: dict | None) -> str:
+        if not row:
+            return ""
+        rt = BY_KEY.get(row.get("type", ""))
+        if rt is None or rt.console_url is None:
+            return ""
+        return rt.console_url(row, self._region or "us-east-1")
+
+    def _open_console(self, row: dict | None) -> None:
+        url = self._console_url(row)
+        if not url:
+            return
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl(url))
+        self._status_label.setText(
+            f"  Opened {row.get('name') or row.get('id')} in the AWS Console"
+        )
 
     # ── Connect to instances (terminal) ─────────────────────────────
 
@@ -579,8 +637,8 @@ class AwsPanel(QWidget):
         if not item:
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not isinstance(data, dict):
-            return
+        if not isinstance(data, dict) or "type" not in data:
+            return  # section headers and notes have no menu
         kind = data["type"]
 
         menu = QMenu(self)
@@ -646,9 +704,37 @@ class AwsPanel(QWidget):
                     ],
                 )
             )
+            menu.addAction("Running tasks").triggered.connect(
+                lambda: self._show_in_details(
+                    f"TASKS — {name}",
+                    [
+                        "ecs",
+                        "list-tasks",
+                        "--cluster",
+                        cluster,
+                        "--service-name",
+                        name,
+                        "--desired-status",
+                        "RUNNING",
+                    ],
+                )
+            )
             menu.addSeparator()
             menu.addAction("Force new deployment…").triggered.connect(
                 lambda: self._ecs_redeploy(cluster, name)
+            )
+        elif kind == "eks":
+            cluster = data["name"]
+            menu.addAction("Describe").triggered.connect(lambda: self._on_item_selected(item, None))
+            menu.addAction("Node groups").triggered.connect(
+                lambda: self._show_in_details(
+                    f"NODE GROUPS — {cluster}",
+                    ["eks", "list-nodegroups", "--cluster-name", cluster],
+                )
+            )
+            menu.addSeparator()
+            menu.addAction("Add to kubeconfig…").triggered.connect(
+                lambda: self._eks_update_kubeconfig(cluster)
             )
         elif kind == "s3":
             bucket = data["name"]
@@ -660,6 +746,14 @@ class AwsPanel(QWidget):
             )
 
         menu.addSeparator()
+        if self._console_url(data):
+            menu.addAction("Open in AWS Console").triggered.connect(
+                lambda: self._open_console(data)
+            )
+        ident = data.get("arn") or data.get("url") or data.get("id") or data.get("name", "")
+        if ident:
+            what = "ARN" if data.get("arn") else "URL" if data.get("url") else "ID"
+            menu.addAction(f"Copy {what}").triggered.connect(lambda: self._copy_text(ident))
         menu.addAction("Send details to AI").triggered.connect(self._send_details_to_ai)
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
@@ -706,6 +800,27 @@ class AwsPanel(QWidget):
                 "--query",
                 "service.deployments",
             ],
+        )
+
+    def _eks_update_kubeconfig(self, cluster: str) -> None:
+        """Write the cluster into ~/.kube/config so the Kubernetes panel can use it.
+
+        Local change only (no AWS resources are modified), but it edits the
+        user's kubeconfig and switches the current context, so ask first.
+        """
+        if not self._confirm(
+            "Add to kubeconfig",
+            f"Add EKS cluster {cluster} ({self._region}) to ~/.kube/config and make it "
+            f"the current context?\n\nThis runs: aws eks update-kubeconfig --name {cluster}",
+        ):
+            return
+        self._show_in_details(
+            f"KUBECONFIG — {cluster}",
+            ["eks", "update-kubeconfig", "--name", cluster],
+            json_output=False,
+        )
+        self._status_label.setText(
+            f"  {cluster} added to kubeconfig — open the Kubernetes panel (Ctrl+Shift+8) to browse it"
         )
 
     def _invoke_lambda(self, name: str) -> None:
@@ -791,6 +906,12 @@ class AwsPanel(QWidget):
         if chat is None or not hasattr(chat, "prefill_input"):
             return
         title = self._details_title.text()
+        # The details can include secrets (Lambda environment values,
+        # queue policies, stack outputs); they're shown locally as the
+        # Console would, but never go to the AI provider unredacted.
+        from polyglot_ai.core.security import redact_secrets_in_content
+
+        text = redact_secrets_in_content(text)
         if len(text) > 12_000:
             text = text[:12_000] + "\n... (truncated)"
         chat.prefill_input(

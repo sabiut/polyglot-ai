@@ -48,7 +48,7 @@ AI-powered coding assistant for Linux — multi-provider desktop IDE with OpenAI
 - **CI/CD panel** — GitHub Actions workflow runs, job status, live log streaming
 - **Docker panel** — Containers, images, logs, start/stop/restart/remove with approval
 - **Kubernetes panel** — Pods, deployments, services, logs, scale/delete/apply with approval
-- **AWS panel** — Lambda, EC2, ECS and S3 at a glance via your own `aws` CLI; CloudWatch log tail, invoke/start/stop with confirmation, connect to EC2 over SSH or Session Manager in the terminal, and AI tools that run read-only calls freely and gate anything mutating behind approval
+- **AWS panel** — EC2, Lambda, ECS, EKS, S3, RDS, DynamoDB, SQS, SNS, CloudFormation and CloudWatch alarms at a glance via your own `aws` CLI, with readable details and one-click AWS Console links; CloudWatch log tail, invoke/start/stop with confirmation, connect to EC2 over SSH or Session Manager in the terminal, and AI tools that run read-only calls freely and gate anything mutating behind approval
 - **Database panel** — Direct PostgreSQL / MySQL / SQLite connections with schema explorer and SQL runner
 
 ### MCP (Model Context Protocol)
