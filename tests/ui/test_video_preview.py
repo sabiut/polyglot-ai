@@ -13,6 +13,7 @@ behaviour that depends on real codec output.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -344,7 +345,7 @@ def test_preview_load_clears_old_state(preview, tmp_path, monkeypatch):
     # ``load`` resets the button (we haven't gotten the new
     # duration yet for the freshly loaded file).
     assert preview._use_trim_btn.isEnabled() is False
-    assert sources and sources[-1].toLocalFile() == str(f)
+    assert sources and Path(sources[-1].toLocalFile()) == f  # Path: slashes differ on Windows
 
 
 def test_preview_clear_tears_down_state(preview):
