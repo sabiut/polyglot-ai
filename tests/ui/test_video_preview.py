@@ -277,8 +277,26 @@ def test_right_click_does_not_trigger_drag(slider):
 # ── VideoPreviewWidget ─────────────────────────────────────────────
 
 
+@pytest.fixture(scope="module")
+def _audio_engine_keepalive(qapp):
+    """Hold one QAudioOutput for the whole module.
+
+    Each VideoPreviewWidget builds a QMediaPlayer + QAudioOutput. Qt's
+    audio-device backend is a shared engine created with the first
+    output and torn down with the last; constructing and destroying it
+    dozens of times in a row occasionally segfaulted inside the
+    QAudioOutput constructor (~1 in 30 runs, on CI and locally). Keeping
+    one output alive keeps the engine up for the module.
+    """
+    from PyQt6.QtMultimedia import QAudioOutput
+
+    keep = QAudioOutput()
+    yield keep
+    keep.deleteLater()
+
+
 @pytest.fixture
-def preview(qtbot):
+def preview(qtbot, _audio_engine_keepalive):
     w = VideoPreviewWidget()
     qtbot.addWidget(w)
     w.show()
@@ -305,12 +323,18 @@ def test_preview_initial_state(preview):
     assert preview.range_slider.duration_ms == 0
 
 
-def test_preview_load_clears_old_state(preview, tmp_path):
+def test_preview_load_clears_old_state(preview, tmp_path, monkeypatch):
     """Calling ``load`` resets the trim button and stops any
     playback — switching clips must not carry over the previous
     clip's UI state."""
     f = tmp_path / "clip.mp4"
     f.write_bytes(b"\x00" * 100)
+    # Don't hand FFmpeg a garbage file: it fails decoding at some later,
+    # unpredictable moment, and when that lands during teardown pytest-qt
+    # reports it as an error (flaky on CI). This test is about the UI
+    # reset, which happens synchronously in load().
+    sources = []
+    monkeypatch.setattr(preview._player, "setSource", sources.append)
     # Drive the widget into a "loaded" state by simulating the
     # duration-changed signal (bypasses gstreamer decoding).
     preview._on_duration_changed(30_000)
@@ -320,6 +344,7 @@ def test_preview_load_clears_old_state(preview, tmp_path):
     # ``load`` resets the button (we haven't gotten the new
     # duration yet for the freshly loaded file).
     assert preview._use_trim_btn.isEnabled() is False
+    assert sources and sources[-1].toLocalFile() == str(f)
 
 
 def test_preview_clear_tears_down_state(preview):

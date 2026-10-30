@@ -58,10 +58,17 @@ class TestResolver:
         assert resolve_project_path(root, "./src/a.py")[1] == "src/a.py"
         assert resolve_project_path(root, "src//a.py")[1] == "src/a.py"
 
-    @pytest.mark.parametrize("bad", ["notes.txt", "../x", "src/../.env", "/etc/passwd"])
-    def test_refuses_symlinks_dotdot_and_outside(self, root, bad):
+    @pytest.mark.parametrize("bad", ["notes.txt", "../x", "src/../.env"])
+    def test_refuses_symlinks_dotdot(self, root, bad):
         with pytest.raises(PermissionError):
             resolve_project_path(root, bad)
+
+    def test_refuses_absolute_paths_outside_the_project(self, root, tmp_path_factory):
+        # Built from a real temp dir so it's absolute on every OS
+        # ("/etc/passwd" has no drive, so Windows treats it as relative).
+        outside = tmp_path_factory.mktemp("elsewhere") / "x.txt"
+        with pytest.raises(PermissionError):
+            resolve_project_path(root, str(outside))
 
     def test_sensitive_check_ignores_dot_prefix(self):
         assert is_sensitive_path("./.github/workflows/x.yml")
