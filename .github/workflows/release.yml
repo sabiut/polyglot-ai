@@ -9,7 +9,58 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    # Nothing used to run tests on the tagged commit, so a tag pushed past
+    # a red CI (or onto a commit CI never saw) still shipped. Every build
+    # below needs this job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Tag matches the version in every file
+        # A mismatched tag would publish under the wrong version, and
+        # Cloudsmith's --republish would silently overwrite an existing
+        # release's packages.
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PYPROJECT=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          FALLBACK=$(grep -oP '__version__ = "\K[^"]+' src/polyglot_ai/__init__.py)
+          METAINFO=$(grep -oP '<release version="\K[^"]+' packaging/flatpak/io.github.sabiut.polyglotai.metainfo.xml | head -1)
+          echo "tag=$TAG pyproject=$PYPROJECT fallback=$FALLBACK metainfo=$METAINFO"
+          for v in "$PYPROJECT" "$FALLBACK" "$METAINFO"; do
+            if [ "$v" != "$TAG" ]; then
+              echo "::error::Tag v$TAG doesn't match version $v — bump pyproject.toml, src/polyglot_ai/__init__.py and the metainfo release entry together."
+              exit 1
+            fi
+          done
+
+      - name: Install Qt system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 \
+            libpulse0 libxslt1.1 \
+            >/dev/null 2>&1
+
+      - name: Install dependencies (tested set)
+        run: pip install -c constraints.txt -e ".[dev]"
+
+      - name: Lint
+        run: |
+          ruff check src/ tests/
+          ruff format --check src/ tests/
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest tests/ -q -p no:cacheprovider
+
   build-wheel:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,9 +117,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
+        # The Qt libraries are for build_appimage.sh's smoke test, which
+        # imports PyQt6 with the bundled interpreter before packaging.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 wget
+          sudo apt-get install -y libfuse2 wget \
+            libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
       - name: Build AppImage
         run: bash packaging/build_appimage.sh
       - uses: actions/upload-artifact@v4
@@ -190,7 +244,10 @@ jobs:
     # to "true" after registering the trusted publisher on pypi.org
     # (see packaging/PYPI.md). Until then the job is skipped entirely.
     if: vars.PYPI_PUBLISH_ENABLED == 'true'
-    needs: build-wheel
+    # After the GitHub Release exists, i.e. after every package built.
+    # It used to need only build-wheel, so PyPI could publish a version
+    # whose deb/rpm/AppImage builds had failed.
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # OIDC token for PyPI trusted publishing
