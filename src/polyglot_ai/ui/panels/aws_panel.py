@@ -1,4 +1,4 @@
-"""AWS sidebar panel — Lambda, EC2, ECS and S3 at a glance, via the ``aws`` CLI.
+"""AWS sidebar panel — the resource types in ``core.aws_resources``, via the ``aws`` CLI.
 
 Same shape as the Kubernetes panel: profile/region selectors on top, a
 resource tree, a details pane underneath, and everything that shells
@@ -114,7 +114,7 @@ class AwsPanel(QWidget):
         self._profile = ""
         self._region = ""
         self._identity: dict | None = None
-        self._overview: dict = {"lambda": [], "ec2": [], "ecs": [], "s3": [], "errors": {}}
+        self._overview: dict = {"errors": {}, **{rt.key: [] for rt in RESOURCE_TYPES}}
         self._details_request = 0
         #: Bumped per refresh: switching profile/region quickly could let an
         #: older fetch finish last and overwrite the newer result.
