@@ -1746,7 +1746,7 @@ class ChatPanel(QWidget):
                 if plan_tc:
                     await self._handle_plan_creation(plan_tc, full_content)
                 else:
-                    await self._execute_tool_calls(
+                    await self._run_agent_loop(
                         tool_calls_list, provider, model_id, display_model, system_prompt
                     )
 
@@ -1953,6 +1953,167 @@ class ChatPanel(QWidget):
                 self._current_conversation.messages.pop()
             self._start_stream_task()
 
+    # ─── Agent loop ─────────────────────────────────────────────────
+    #
+    # One "round" = the model asks for tools, they run, and the model
+    # gets a follow-up turn to read the results. The loop is iterative
+    # (it used to recurse, with a depth guard that was never
+    # incremented — so it was unbounded until Python's recursion limit
+    # silently ended it around round 480). It now stops at a
+    # configurable budget (Settings → AI → Max Tool Rounds) and offers
+    # a Continue button, so long tasks keep going on the user's say-so.
+
+    #: Pause if the model makes the identical tool call(s) this many
+    #: rounds in a row — it's stuck, and each round costs tokens.
+    _REPEAT_LIMIT = 3
+
+    def _max_tool_rounds(self) -> int:
+        try:
+            return max(1, min(1000, int(self._setting("ai.max_tool_rounds"))))
+        except (TypeError, ValueError):
+            return 50
+
+    async def _run_agent_loop(
+        self, tool_calls, provider, model_id, display_model, system_prompt
+    ) -> None:
+        budget = self._max_tool_rounds()
+        rounds = 0
+        last_signature = None
+        repeats = 0
+        while tool_calls:
+            signature = tuple((tc.function_name, tc.arguments) for tc in tool_calls)
+            repeats = repeats + 1 if signature == last_signature else 1
+            last_signature = signature
+
+            await self._execute_tool_calls(
+                tool_calls, provider, model_id, display_model, system_prompt
+            )
+            rounds += 1
+
+            if repeats >= self._REPEAT_LIMIT:
+                self._pause_agent(
+                    f"Paused: the AI made the same tool call {repeats} times in a row.",
+                    provider,
+                    model_id,
+                    display_model,
+                    system_prompt,
+                )
+                return
+            if rounds >= budget:
+                self._pause_agent(
+                    f"Paused after {rounds} tool rounds (Settings → AI → Max Tool Rounds).",
+                    provider,
+                    model_id,
+                    display_model,
+                    system_prompt,
+                )
+                return
+            tool_calls = await self._stream_followup(
+                provider, model_id, display_model, system_prompt, round_no=rounds, budget=budget
+            )
+
+    def _pause_agent(self, reason: str, provider, model_id, display_model, system_prompt) -> None:
+        """Stop the loop with a notice and a Continue button.
+
+        The conversation ends with this round's tool results, which is a
+        valid place to resume: Continue gives the model its follow-up
+        turn and a fresh round budget. Sending a new message instead is
+        fine too.
+        """
+        logger.info("Agent loop paused: %s", reason)
+        conversation = self._current_conversation
+        self._add_separator()
+        notice = QWidget()
+        notice.setObjectName("agentPauseNotice")
+        notice.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(notice)
+        layout.setContentsMargins(42, 4, 8, 4)
+        layout.setSpacing(6)
+
+        label = QLabel(reason)
+        label.setWordWrap(True)
+        label.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_BASE}px; "
+            "background: transparent;"
+        )
+        layout.addWidget(label)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        budget = self._max_tool_rounds()
+        btn = QPushButton(f"Continue ({budget} more rounds)")
+        btn.setObjectName("agentContinueBtn")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: {tc.FONT_MD}px; padding: 5px 14px;
+                background-color: {tc.get("accent_primary")}; color: white;
+                border: none; border-radius: {tc.RADIUS_MD}px;
+            }}
+            QPushButton:hover {{ background-color: {tc.get("accent_primary_hover")}; }}
+            QPushButton:disabled {{
+                background-color: {tc.get("bg_hover")}; color: {tc.get("text_muted")};
+            }}
+        """)
+        btn.clicked.connect(
+            lambda: self._continue_agent(
+                btn, label, conversation, provider, model_id, display_model, system_prompt
+            )
+        )
+        row.addWidget(btn)
+        row.addStretch()
+        layout.addLayout(row)
+
+        self._message_layout.addWidget(notice)
+        self._scroll_to_bottom()
+
+    def _continue_agent(
+        self, btn, label, conversation, provider, model_id, display_model, system_prompt
+    ) -> None:
+        if self._streaming:
+            return
+        if (
+            conversation is not self._current_conversation
+            or not conversation.messages
+            or conversation.messages[-1].role != "tool"
+        ):
+            # The user switched conversations or sent a new message:
+            # there's no paused run to resume any more.
+            btn.setEnabled(False)
+            btn.setText("Nothing to continue")
+            return
+        btn.setEnabled(False)
+        btn.setText("Continuing…")
+        from polyglot_ai.core.async_utils import safe_task
+
+        self._set_streaming_ui(True)
+        self._stream_task = safe_task(
+            self._run_continue(provider, model_id, display_model, system_prompt),
+            name="agent_continue",
+            on_error=self._on_stream_task_failed,
+        )
+
+    async def _run_continue(self, provider, model_id, display_model, system_prompt) -> None:
+        try:
+            tool_calls = await self._stream_followup(
+                provider, model_id, display_model, system_prompt
+            )
+            if tool_calls:
+                await self._run_agent_loop(
+                    tool_calls, provider, model_id, display_model, system_prompt
+                )
+        except asyncio.CancelledError:
+            self._add_system_message("Generation stopped.")
+        finally:
+            if self._current_conversation is not None:
+                try:
+                    await self._persist_conversation()
+                except Exception:
+                    logger.exception("chat_panel: persist after continue failed")
+            self._set_streaming_ui(False)
+            self._current_assistant_msg = None
+            self._stream_task = None
+
     # ─── Tool execution ─────────────────────────────────────────────
 
     async def _execute_tool_calls(
@@ -2081,8 +2242,9 @@ class ChatPanel(QWidget):
                 Message(role="tool", content=result, tool_call_id=tool_call.id)
             )
 
+        # The agent loop (``_run_agent_loop``) decides whether the model
+        # gets another turn; this method only runs one round of tools.
         self._current_assistant_msg = None
-        await self._stream_followup(provider, model_id, display_model, system_prompt)
 
     async def _request_tool_approval(self, tool_name: str, arguments: str) -> bool:
         # Inline approval — append a one-line approve/reject row to
@@ -2124,13 +2286,29 @@ class ChatPanel(QWidget):
         return await future
 
     async def _stream_followup(
-        self, provider, model_id, display_model, system_prompt, _depth: int = 0
-    ) -> None:
-        if not self._current_conversation or _depth > 5:
-            return
+        self,
+        provider,
+        model_id,
+        display_model,
+        system_prompt,
+        *,
+        round_no: int = 0,
+        budget: int | None = None,
+    ) -> list | None:
+        """Give the model its turn after a round of tool results.
 
-        logger.info("Starting follow-up stream (depth=%d)", _depth)
-        self._set_agent_status("Analyzing results...")
+        Returns the tool calls it asked for next (None when it's done,
+        was stopped, or failed); ``_run_agent_loop`` decides whether
+        they run.
+        """
+        if not self._current_conversation:
+            return None
+
+        logger.info("Starting follow-up stream (round %d)", round_no)
+        if round_no and budget:
+            self._set_agent_status(f"Analyzing results... (round {round_no} of {budget})")
+        else:
+            self._set_agent_status("Analyzing results...")
         # Keep image parts through tool-call follow-ups for vision
         # models — the first stream sent them, so dropping them here
         # made the model lose sight of the image mid-conversation.
@@ -2200,14 +2378,13 @@ class ChatPanel(QWidget):
             if tool_calls_list and not full_content and self._current_assistant_msg:
                 self._current_assistant_msg.hide()
 
-            # Execute any tool calls and recurse
+            # Hand any tool calls back to the agent loop.
             if tool_calls_list:
                 self._current_assistant_msg = None
-                await self._execute_tool_calls(
-                    tool_calls_list, provider, model_id, display_model, system_prompt
-                )
-            elif full_content:
+                return tool_calls_list
+            if full_content:
                 await self._auto_apply(full_content)
+            return None
         except asyncio.CancelledError:
             # Stop pressed mid-followup. If we streamed some text but hadn't
             # yet committed the assistant message, capture it so it isn't lost.
@@ -2222,18 +2399,26 @@ class ChatPanel(QWidget):
                         reasoning_content=full_reasoning if full_reasoning else None,
                     )
                 )
-        except Exception:
+            return None
+        except Exception as exc:
+            # Used to be log-only, so a provider error mid-task looked
+            # like the AI had simply stopped working.
             logger.exception("Error during follow-up streaming")
+            from polyglot_ai.core.security import sanitize_error
+
+            self._add_system_message(f"The AI's follow-up failed: {sanitize_error(str(exc))}")
+            return None
         finally:
             # Persist unconditionally (idempotent) so a cancel between the
             # message-append above and the outer persist can't drop this
-            # turn's messages.
+            # turn's messages. The streaming UI is reset by whoever owns
+            # the task (``_stream_response`` / ``_run_continue``), not
+            # here — the agent loop may still have rounds to run.
             if self._current_conversation is not None:
                 try:
                     await self._persist_conversation()
                 except Exception:
                     logger.exception("chat_panel: persist on follow-up end failed")
-            self._set_streaming_ui(False)
             self._current_assistant_msg = None
 
     # ─── Conversation persistence ───────────────────────────────────

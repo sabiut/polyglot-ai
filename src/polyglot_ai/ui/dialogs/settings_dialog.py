@@ -682,6 +682,20 @@ class SettingsDialog(QDialog):
         self._max_tokens.setValue(self._settings.get("ai.max_tokens"))
         form.addRow("Max Tokens:", self._max_tokens)
 
+        self._max_tool_rounds = QSpinBox()
+        self._max_tool_rounds.setRange(5, 500)
+        self._max_tool_rounds.setSingleStep(5)
+        try:
+            self._max_tool_rounds.setValue(int(self._settings.get("ai.max_tool_rounds")))
+        except (TypeError, ValueError):
+            self._max_tool_rounds.setValue(50)
+        self._max_tool_rounds.setToolTip(
+            "How many rounds of tool calls the AI may make for one message before it "
+            "pauses with a Continue button. Higher lets it finish longer tasks on its "
+            "own; each round uses tokens."
+        )
+        form.addRow("Max Tool Rounds:", self._max_tool_rounds)
+
         self._system_prompt = QTextEdit()
         self._system_prompt.setPlaceholderText("Additional system prompt instructions...")
         self._system_prompt.setMaximumHeight(100)
@@ -1254,6 +1268,7 @@ class SettingsDialog(QDialog):
         await self._settings.set("ai.default_model", self._default_model.currentText())
         await self._settings.set("ai.temperature", self._temperature.value() / 10.0)
         await self._settings.set("ai.max_tokens", self._max_tokens.value())
+        await self._settings.set("ai.max_tool_rounds", self._max_tool_rounds.value())
         await self._settings.set("ai.system_prompt", self._system_prompt.toPlainText())
         await self._settings.set("ai.auto_context", self._auto_context.isChecked())
         await self._settings.set("terminal.shell", self._shell_path.text())

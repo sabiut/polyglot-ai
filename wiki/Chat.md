@@ -296,6 +296,19 @@ tool name, arguments, and a preview. You can:
 - **Reject** — tell the AI the tool call was denied (it will continue
   reasoning).
 
+### How long the AI works on its own
+
+Each **round** is the AI calling one or more tools and then reading the
+results. It keeps going round after round until it answers, up to
+**Settings → AI → Max Tool Rounds** (default 50). The status line under
+the input shows the round count ("Analyzing results… (round 12 of 50)").
+
+When the limit is reached the AI pauses with a note and a **Continue**
+button, which gives it another full set of rounds from where it stopped.
+You can also just type a new message instead. It also pauses early if it
+makes the exact same tool call three rounds in a row, since that usually
+means it's stuck. **Stop** works at any point during a run.
+
 ### Bootstrap mode
 
 Greenfield projects need a lot of shell commands up front — `npm

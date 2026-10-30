@@ -42,6 +42,9 @@ and Source Control are always shown.
 #### AI
 - **Default model**.
 - **Temperature** / **max tokens**.
+- **Max tool rounds** — how many rounds of tool calls the AI may make for
+  one message before it pauses with a **Continue** button (default 50,
+  5–500). See [Chat → How long the AI works on its own](Chat#how-long-the-ai-works-on-its-own).
 - **System prompt** — extra instructions appended to every conversation.
 - **Notifications** — enable/disable desktop notifications, and set the
   threshold (in seconds) below which a finished AI response doesn't

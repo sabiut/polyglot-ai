@@ -34,6 +34,9 @@ DEFAULTS = {
     "ai.default_model": "openai:gpt-5.5",
     "ai.temperature": 0.7,
     "ai.max_tokens": 4096,
+    # Tool rounds per message before the agent pauses with a Continue
+    # button. A round = the model calls tools, then reads the results.
+    "ai.max_tool_rounds": 50,
     "ai.system_prompt": "",
     "terminal.shell": default_shell(),
     "terminal.font_size": 11,
