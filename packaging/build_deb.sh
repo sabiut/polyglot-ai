@@ -66,6 +66,7 @@ echo "Pre-downloading dependency wheels for offline install..."
 WHEELS_OK=1
 for PYVER in 3.11 3.12 3.13; do
     python3 -m pip download \
+        --constraint "$PROJECT_DIR/constraints.txt" \
         --dest "$STAGING/opt/polyglot-ai/wheels" \
         --only-binary=:all: \
         --python-version "$PYVER" \
@@ -82,6 +83,7 @@ if [ "$WHEELS_OK" -ne 1 ]; then
     # than no .deb at all.
     echo "Strict platform download failed; retrying with host resolver…"
     python3 -m pip download \
+        --constraint "$PROJECT_DIR/constraints.txt" \
         --dest "$STAGING/opt/polyglot-ai/wheels" \
         "$PROJECT_DIR/dist/"*.whl
 fi

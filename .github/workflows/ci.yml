@@ -33,7 +33,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]"
+          pip install -c constraints.txt -e ".[dev]"
 
       - name: Lint with ruff
         run: |
@@ -64,7 +64,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
 
       - name: Import smoke
         run: python -c "import polyglot_ai.app, polyglot_ai.ui.main_window; print('import ok')"
@@ -90,5 +90,5 @@ jobs:
 
       - name: Verify wheel
         run: |
-          pip install dist/*.whl
+          pip install -c constraints.txt dist/*.whl
           python -c "from polyglot_ai import __version__; print(f'Version: {__version__}')"

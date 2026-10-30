@@ -53,6 +53,7 @@ echo "Pre-downloading dependency wheels for offline install..."
 WHEELS_OK=1
 for PYVER in 3.11 3.12 3.13; do
     python3 -m pip download \
+        --constraint "$PROJECT_DIR/constraints.txt" \
         --dest "$RPMBUILD/SOURCES/wheels" \
         --only-binary=:all: \
         --python-version "$PYVER" \
@@ -65,6 +66,7 @@ for PYVER in 3.11 3.12 3.13; do
 done
 if [ "$WHEELS_OK" -ne 1 ]; then
     python3 -m pip download \
+        --constraint "$PROJECT_DIR/constraints.txt" \
         --dest "$RPMBUILD/SOURCES/wheels" \
         "$PROJECT_DIR/dist/"*.whl
 fi
