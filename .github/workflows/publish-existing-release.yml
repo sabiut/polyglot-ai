@@ -61,6 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           RPM=$(ls assets/*.rpm)
-          for target in fedora/44 fedora/43; do
+          # Keep in step with the list in release.yml.
+          for target in fedora/45 fedora/44 fedora/43; do
             cloudsmith push rpm "$CLOUDSMITH_REPO/$target" "$RPM" --republish
           done

@@ -231,7 +231,13 @@ jobs:
         run: |
           set -euo pipefail
           RPM=$(ls artifacts/rpm/*.rpm)
-          for target in fedora/44 fedora/43; do
+          # One push per supported Fedora release, like the .deb above:
+          # the package holds wheels and builds its own environment at
+          # install time, so one build serves them all. The ``fcNN`` in
+          # its file name is only the release it happened to be built on
+          # (``fedora:latest``). Add the new release here when Fedora
+          # ships one; drop a release when it reaches end of life.
+          for target in fedora/45 fedora/44 fedora/43; do
             cloudsmith push rpm "$CLOUDSMITH_REPO/$target" "$RPM" --republish
           done
 

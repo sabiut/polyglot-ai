@@ -30,7 +30,7 @@ notice and exits green. Nothing breaks by leaving this unconfigured.
 
 4. **Cut the next release.** The `publish-repos` job will push the
    `.deb` to `debian/trixie`, `debian/bookworm`, `ubuntu/noble`, and
-   `ubuntu/jammy`, and the `.rpm` to `fedora/44` and `fedora/43`.
+   `ubuntu/jammy`, and the `.rpm` to `fedora/45`, `fedora/44` and `fedora/43`.
    Adjust the target lists in `.github/workflows/release.yml` as
    distro releases move on.
 
