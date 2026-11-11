@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -41,6 +42,13 @@ from polyglot_ai.ui.widgets.icon_button import make_icon_button
 
 logger = logging.getLogger(__name__)
 
+#: ``us-east-1``, ``ap-southeast-2``, ``us-gov-west-1``… Checked before a
+#: typed region is used: a typo would otherwise cost a dozen failing calls.
+_REGION_RE = re.compile(r"[a-z]{2}(-[a-z]+)+-\d+")
+
+#: Added to the details title when a refresh no longer lists the resource.
+_GONE_SUFFIX = " · no longer listed"
+
 
 def _pretty(output: str) -> str:
     """Pretty-print JSON output; pass anything else through."""
@@ -61,12 +69,16 @@ def fetch_overview(profile: str, region: str) -> dict:
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    result: dict = {"identity": None, "errors": {}}
+    result: dict = {"identity": None, "errors": {}, "notes": {}}
     for rt in RESOURCE_TYPES:
         result[rt.key] = []
     lock = threading.Lock()
 
     def make_call(section: str):
+        def note(text: str) -> None:
+            with lock:
+                result["notes"].setdefault(section, text)
+
         def call(argv: list[str], *, global_call: bool = False):
             out, code = aws_cli.run(argv, profile=profile, region="" if global_call else region)
             if code != 0:
@@ -74,12 +86,20 @@ def fetch_overview(profile: str, region: str) -> dict:
                     result["errors"].setdefault(section, out.removeprefix("Error: "))
                 return None
             try:
-                return json.loads(out) if out else {}
+                data = json.loads(out) if out else {}
             except json.JSONDecodeError:
                 with lock:
                     result["errors"].setdefault(section, "Unexpected (non-JSON) output")
                 return None
+            # ``--max-items N`` stops the listing at N and leaves a
+            # NextToken; without a note the section would look complete.
+            if isinstance(data, dict) and data.get("NextToken") and "--max-items" in argv:
+                limit = argv[argv.index("--max-items") + 1]
+                note(f"Only the first {limit} are shown — there are more.")
+            return data
 
+        # Fetchers with their own caps (ECS) report them the same way.
+        call.note = note
         return call
 
     ident = make_call("identity")(["sts", "get-caller-identity"], global_call=True)
@@ -114,7 +134,7 @@ class AwsPanel(QWidget):
         self._profile = ""
         self._region = ""
         self._identity: dict | None = None
-        self._overview: dict = {"errors": {}, **{rt.key: [] for rt in RESOURCE_TYPES}}
+        self._overview: dict = self._empty_overview()
         self._details_request = 0
         #: Bumped per refresh: switching profile/region quickly could let an
         #: older fetch finish last and overwrite the newer result.
@@ -123,12 +143,29 @@ class AwsPanel(QWidget):
         self._current_details_text = ""
         #: The row whose details are showing (for Open in Console / Copy).
         self._details_row: dict | None = None
+        #: True when the pane shows that row's describe output (re-run on
+        #: refresh), False for an action result or a log tail (kept as is).
+        self._details_is_describe = False
+        #: (profile, region) the details were fetched with.
+        self._details_context: tuple[str, str] = ("", "")
+        #: One later refresh after an action, so the settled state shows.
+        self._follow_up_timer = QTimer(self)
+        self._follow_up_timer.setSingleShot(True)
+        self._follow_up_timer.timeout.connect(self._follow_up_refresh)
+        self._follow_up_request = 0
         #: Sections the user collapsed — kept across refreshes.
         self._collapsed: set[str] = set()
 
         self._setup_ui()
         self._apply_theme_styles()
         theme.connect_theme_changed(self._apply_theme_styles)
+
+    #: Delay before the follow-up refresh after an action (0 disables it).
+    _FOLLOW_UP_REFRESH_MS = 10_000
+
+    @staticmethod
+    def _empty_overview() -> dict:
+        return {"errors": {}, "notes": {}, **{rt.key: [] for rt in RESOURCE_TYPES}}
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -178,7 +215,17 @@ class AwsPanel(QWidget):
         self._region_combo = QComboBox()
         self._region_combo.setEditable(True)
         self._region_combo.addItems(aws_cli.REGIONS)
-        self._region_combo.currentTextChanged.connect(self._on_region_changed)
+        # Not ``currentTextChanged``: in an editable combo that fires on
+        # every keystroke, so typing "eu-west-3" started nine refreshes
+        # against half-typed regions. Act on a pick from the list, or on
+        # Enter / leaving the field.
+        self._region_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._region_combo.activated.connect(
+            lambda _index: self._on_region_changed(self._region_combo.currentText())
+        )
+        self._region_combo.lineEdit().editingFinished.connect(
+            lambda: self._on_region_changed(self._region_combo.currentText())
+        )
         region_row.addWidget(self._region_combo, stretch=1)
         sel.addLayout(region_row)
 
@@ -367,13 +414,41 @@ class AwsPanel(QWidget):
             if region:
                 self._region_combo.setCurrentText(region)
                 self._region = region
-            self._refresh()
+            self._context_changed()
 
     def _on_region_changed(self, text: str) -> None:
-        text = text.strip()
-        if text and text != self._region:
-            self._region = text
-            self._refresh()
+        text = text.strip().lower()
+        if not text or text == self._region:
+            return
+        if not _REGION_RE.fullmatch(text):
+            self._status_label.setText(
+                f"  “{text}” isn't an AWS region name — expected something like eu-west-1"
+            )
+            return
+        self._region = text
+        self._context_changed()
+
+    def _context_changed(self) -> None:
+        """Profile or region switched: nothing on screen belongs to it.
+
+        The old rows must go before the new listing arrives — a right-click
+        on one would run its action against the new account — and so must
+        the details, which the Console button and "Send to AI" would
+        otherwise attribute to the new profile and region.
+        """
+        self._details_request += 1  # drop a describe that is still in flight
+        self._follow_up_timer.stop()
+        self._details_row = None
+        self._details_is_describe = False
+        self._console_btn.setEnabled(False)
+        self._details_title.setText("DETAILS")
+        self._details.setPlainText("")
+        self._current_details_text = ""
+        self._overview = self._empty_overview()
+        self._identity = None
+        self._identity_label.setText("")
+        self._show_hint("Loading…")
+        self._refresh()
 
     # ── Overview ────────────────────────────────────────────────────
 
@@ -393,6 +468,8 @@ class AwsPanel(QWidget):
         def failed(exc: Exception) -> None:
             if request == self._overview_request:
                 self._status_label.setText(f"  Error: {exc}")
+                if self._identity is None:  # nothing listed yet: don't sit on "Loading…"
+                    self._show_hint(f"Error: {exc}")
 
         run_in_thread(
             lambda: fetch_overview(profile, region),
@@ -438,13 +515,14 @@ class AwsPanel(QWidget):
         hint.setFirstColumnSpanned(True)
 
     @staticmethod
-    def _section_text(title: str, count: int, expanded: bool) -> str:
-        return f"{'▾' if expanded else '▸'}  {title} ({count})"
+    def _section_text(title: str, count: int, expanded: bool, more: bool = False) -> str:
+        return f"{'▾' if expanded else '▸'}  {title} ({count}{'+' if more else ''})"
 
     def _populate_tree(self) -> None:
         self._tree.clear()
         data = self._overview
         errors: dict = data.get("errors", {})
+        notes: dict = data.get("notes", {})
         bold = QFont()
         bold.setBold(True)
         empty: list[str] = []
@@ -455,11 +533,14 @@ class AwsPanel(QWidget):
                 empty.append(rt.title)
                 continue
             expanded = rt.key not in self._collapsed
+            more = rt.key in notes
             root = QTreeWidgetItem(self._tree)
-            root.setText(0, self._section_text(rt.title, len(rows), expanded))
+            root.setText(0, self._section_text(rt.title, len(rows), expanded, more))
             root.setFont(0, bold)
             root.setFirstColumnSpanned(True)
-            root.setData(0, Qt.ItemDataRole.UserRole, {"section": rt.key, "title": rt.title})
+            root.setData(
+                0, Qt.ItemDataRole.UserRole, {"section": rt.key, "title": rt.title, "more": more}
+            )
             if rt.key in errors:
                 err = QTreeWidgetItem(root)
                 err.setText(0, errors[rt.key])
@@ -476,6 +557,13 @@ class AwsPanel(QWidget):
                 if colour:
                     item.setForeground(1, QColor(tc.get(colour)))
                 item.setData(0, Qt.ItemDataRole.UserRole, {"type": rt.key, **row})
+            if more:
+                # The listing was cut short: say so, or it reads as complete.
+                cut = QTreeWidgetItem(root)
+                cut.setText(0, notes[rt.key])
+                cut.setForeground(0, QColor(tc.get("text_muted")))
+                cut.setFlags(Qt.ItemFlag.NoItemFlags)
+                cut.setFirstColumnSpanned(True)
             # Expand only after the children exist.
             root.setExpanded(expanded)
 
@@ -493,6 +581,44 @@ class AwsPanel(QWidget):
             hint.setFlags(Qt.ItemFlag.NoItemFlags)
             hint.setFirstColumnSpanned(True)
         self._apply_filter(self._filter.text())
+        self._restore_details_row()
+
+    def _find_item(self, kind: str, ident: str):
+        for i in range(self._tree.topLevelItemCount()):
+            section = self._tree.topLevelItem(i)
+            for j in range(section.childCount()):
+                data = section.child(j).data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(data, dict) and data.get("type") == kind and data.get("id") == ident:
+                    return section.child(j)
+        return None
+
+    def _restore_details_row(self) -> None:
+        """After a refresh: re-select the row the details are about, or say it has gone.
+
+        Rebuilding the tree drops the selection, and the details pane used
+        to keep showing a resource that was no longer in the list (a
+        database that had finished deleting) as if it were current.
+        """
+        row = self._details_row
+        if row is None:
+            return
+        item = self._find_item(row.get("type", ""), row.get("id", ""))
+        if item is None:
+            self._details_row = None
+            self._details_is_describe = False
+            self._console_btn.setEnabled(False)
+            title = self._details_title.text()
+            if not title.endswith(_GONE_SUFFIX):
+                self._details_title.setText(title + _GONE_SUFFIX)
+            return
+        self._tree.blockSignals(True)  # selecting must not count as a click
+        self._tree.setCurrentItem(item)
+        self._tree.blockSignals(False)
+        self._details_row = item.data(0, Qt.ItemDataRole.UserRole)
+        if self._details_is_describe:
+            # Bring the details up to date with the refreshed row; an
+            # action result or a log tail is left alone.
+            self._on_item_selected(item, None, keep_text=True)
 
     def _on_item_clicked(self, item, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -513,7 +639,7 @@ class AwsPanel(QWidget):
             for i in range(item.childCount())
             if isinstance(item.child(i).data(0, Qt.ItemDataRole.UserRole), dict)
         )
-        item.setText(0, self._section_text(data["title"], count, expanded))
+        item.setText(0, self._section_text(data["title"], count, expanded, data.get("more", False)))
 
     def _apply_filter(self, text: str) -> None:
         """Hide resources whose name/info don't contain ``text``."""
@@ -544,12 +670,24 @@ class AwsPanel(QWidget):
         *,
         json_output: bool = True,
         summarize=None,
+        describe: bool = False,
+        keep_text: bool = False,
+        after=None,
     ) -> None:
+        """Run ``argv`` and show its output in the details pane.
+
+        ``describe`` marks the output as the selected row's own details
+        (re-fetched on refresh). ``keep_text`` leaves the current text up
+        while reloading. ``after`` runs once the command has succeeded.
+        """
         self._details_title.setText(title)
-        self._details.setPlainText("Loading...")
+        if not keep_text:
+            self._details.setPlainText("Loading...")
+        self._details_is_describe = describe
         self._details_request += 1
         request = self._details_request
         profile, region = self._profile, self._region
+        self._details_context = (profile, region)
 
         def work():
             return aws_cli.run(
@@ -557,9 +695,13 @@ class AwsPanel(QWidget):
             )
 
         def done(result):
+            output, code = result
+            if code == 0 and after is not None:
+                # The action happened even if the pane has since moved on
+                # to another resource, so this must not depend on it.
+                after()
             if request != self._details_request:
                 return
-            output, code = result
             text = _pretty(output) if code == 0 else output
             if code == 0 and summarize is not None:
                 try:
@@ -577,7 +719,7 @@ class AwsPanel(QWidget):
 
         run_in_thread(work, done, failed, owner=self, name="aws-details")
 
-    def _on_item_selected(self, current, previous) -> None:
+    def _on_item_selected(self, current, previous, *, keep_text: bool = False) -> None:
         if not current:
             return
         data = current.data(0, Qt.ItemDataRole.UserRole)
@@ -593,6 +735,8 @@ class AwsPanel(QWidget):
             rt.describe(data),
             json_output=not rt.describe_is_text,
             summarize=rt.summarize,
+            describe=True,
+            keep_text=keep_text,
         )
 
     def _console_url(self, row: dict | None) -> str:
@@ -780,21 +924,41 @@ class AwsPanel(QWidget):
         )
         return reply == QMessageBox.StandardButton.Yes
 
+    def _where(self) -> str:
+        """``eu-west-1 (profile work)`` — for confirmation dialogs."""
+        return f"{self._region} (profile {self._profile or 'default'})"
+
+    def _refresh_after_action(self) -> None:
+        """An action changed something: the tree shows the state from before it."""
+        self._refresh()
+        if self._FOLLOW_UP_REFRESH_MS:
+            # Stopping, starting and redeploying take a while. One later
+            # look shows the settled state without making the panel poll.
+            self._follow_up_request = self._overview_request
+            self._follow_up_timer.start(self._FOLLOW_UP_REFRESH_MS)
+
+    def _follow_up_refresh(self) -> None:
+        # Skip it if anything refreshed (or the profile/region changed) since.
+        if self._follow_up_request == self._overview_request:
+            self._refresh()
+
     def _ec2_action(self, verb: str, instance_id: str, label: str) -> None:
         if not self._confirm(
             f"{label} instance",
-            f"{label} EC2 instance {instance_id} in {self._region}?\n\n"
+            f"{label} EC2 instance {instance_id} in {self._where()}?\n\n"
             f"This runs: aws ec2 {verb} --instance-ids {instance_id}",
         ):
             return
         self._show_in_details(
-            f"{label.upper()} — {instance_id}", ["ec2", verb, "--instance-ids", instance_id]
+            f"{label.upper()} — {instance_id}",
+            ["ec2", verb, "--instance-ids", instance_id],
+            after=self._refresh_after_action,
         )
 
     def _ecs_redeploy(self, cluster: str, service: str) -> None:
         if not self._confirm(
             "Force new deployment",
-            f"Force a new deployment of {service} in cluster {cluster}?\n\n"
+            f"Force a new deployment of {service} in cluster {cluster}, {self._where()}?\n\n"
             "Running tasks are replaced with fresh ones using the current task definition.",
         ):
             return
@@ -811,6 +975,7 @@ class AwsPanel(QWidget):
                 "--query",
                 "service.deployments",
             ],
+            after=self._refresh_after_action,
         )
 
     def _eks_update_kubeconfig(self, cluster: str) -> None:
@@ -847,14 +1012,16 @@ class AwsPanel(QWidget):
             QMessageBox.warning(self, "Invalid JSON", f"The payload isn't valid JSON:\n{exc}")
             return
         if not self._confirm(
-            "Invoke Lambda", f"Invoke {name} in {self._region} with that payload?"
+            "Invoke Lambda", f"Invoke {name} in {self._where()} with that payload?"
         ):
             return
         self._details_title.setText(f"INVOKE — {name}")
         self._details.setPlainText("Invoking...")
+        self._details_is_describe = False
         self._details_request += 1
         request = self._details_request
         profile, region = self._profile, self._region
+        self._details_context = (profile, region)
 
         def work():
             with tempfile.TemporaryDirectory() as tmp:
@@ -925,9 +1092,10 @@ class AwsPanel(QWidget):
         text = redact_secrets_in_content(text)
         if len(text) > 12_000:
             text = text[:12_000] + "\n... (truncated)"
+        profile, region = self._details_context
         chat.prefill_input(
-            f"Here is AWS output ({title}, profile {self._profile or 'default'}, "
-            f"region {self._region}). Explain what it shows, flag anything wrong, "
+            f"Here is AWS output ({title}, profile {profile or 'default'}, "
+            f"region {region}). Explain what it shows, flag anything wrong, "
             f"and tell me what to do next:\n\n```\n{text}\n```"
         )
         right_tabs = getattr(window, "_right_tabs", None)

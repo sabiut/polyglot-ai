@@ -177,11 +177,22 @@ _ECS_MAX_SERVICES = 100
 
 def _fetch_ecs(call: Call) -> list[dict]:
     clusters = call(["ecs", "list-clusters"])
+    # The panel's ``call`` can attach a note to the section; a plain stub can't.
+    note = getattr(call, "note", lambda text: None)
+    cluster_arns = (clusters or {}).get("clusterArns", [])
+    if len(cluster_arns) > _ECS_MAX_CLUSTERS:
+        note(f"Only the first {_ECS_MAX_CLUSTERS} of {len(cluster_arns)} clusters are shown.")
     rows = []
-    for cluster_arn in (clusters or {}).get("clusterArns", [])[:_ECS_MAX_CLUSTERS]:
+    for cluster_arn in cluster_arns[:_ECS_MAX_CLUSTERS]:
         cluster = cluster_arn.rsplit("/", 1)[-1]
         services = call(["ecs", "list-services", "--cluster", cluster])
-        arns = (services or {}).get("serviceArns", [])[:_ECS_MAX_SERVICES]
+        all_arns = (services or {}).get("serviceArns", [])
+        if len(all_arns) > _ECS_MAX_SERVICES:
+            note(
+                f"Only the first {_ECS_MAX_SERVICES} of {len(all_arns)} services "
+                f"in cluster {cluster} are shown."
+            )
+        arns = all_arns[:_ECS_MAX_SERVICES]
         # describe-services takes at most 10 per call; this used to stop at
         # the first 10 services in a cluster without saying so.
         for start in range(0, len(arns), 10):

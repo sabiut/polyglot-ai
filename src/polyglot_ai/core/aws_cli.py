@@ -36,6 +36,9 @@ REGIONS = [
 ]
 
 # Sub-command verbs that only read state. Anything else is a mutation.
+# ``query``, ``scan`` and ``select`` are deliberately absent: they return
+# table rows / object contents, and customer data must not go to the AI
+# provider without the user seeing the command first.
 _READ_VERB_PREFIXES = (
     "describe",
     "list",
@@ -43,11 +46,8 @@ _READ_VERB_PREFIXES = (
     "head",
     "search",
     "lookup",
-    "query",
-    "scan",
     "filter",
     "batch-get",
-    "select",
     "check",
     "test",
     "estimate",
@@ -108,7 +108,17 @@ def list_profiles() -> list[str]:
         except (configparser.Error, OSError):
             continue
         for section in parser.sections():
-            name = section[len("profile ") :] if section.startswith("profile ") else section
+            if path == creds:
+                name = section  # every section of the credentials file is a profile
+            elif section == "default":
+                name = section
+            elif section.startswith("profile "):
+                name = section[len("profile ") :].strip()
+            else:
+                # ``[sso-session x]``, ``[services x]``, ``[plugins]``… are
+                # settings, not profiles; listing them offered choices
+                # that can only fail.
+                continue
             if name and name not in profiles:
                 profiles.append(name)
     if "default" in profiles:
@@ -179,8 +189,8 @@ _NEVER_READ_OPTIONS = frozenset(
         "--cli-input-yaml",
     }
 )
-#: Read-shaped calls that return credentials or secrets, or write a local
-#: file. They need approval like any mutation.
+#: Read-shaped calls that return credentials or secrets. They need approval
+#: like any mutation.
 _SECRET_OR_FILE_READS = frozenset(
     {
         ("secretsmanager", "get-secret-value"),
@@ -197,19 +207,107 @@ _SECRET_OR_FILE_READS = frozenset(
         ("eks", "get-token"),
         ("rds", "generate-db-auth-token"),
         ("cognito-identity", "get-credentials-for-identity"),
-        ("s3api", "get-object"),
-        ("s3api", "get-object-torrent"),
         ("lambda", "get-function"),
+        ("redshift", "get-cluster-credentials"),
+        ("redshift", "get-cluster-credentials-with-iam"),
+        ("redshift-serverless", "get-credentials"),
+        ("lightsail", "get-instance-access-details"),
+        ("lightsail", "get-relational-database-master-user-password"),
+        ("gamelift", "get-instance-access"),
+        ("gamelift", "get-compute-access"),
+        ("gamelift", "get-compute-auth-token"),
+        ("cognito-identity", "get-open-id-token"),
+        ("cognito-identity", "get-open-id-token-for-developer-identity"),
+        ("cognito-idp", "describe-user-pool-client"),
+        ("sso", "get-role-credentials"),
+        ("connect", "get-federation-token"),
+        ("emr-containers", "get-managed-endpoint-session-credentials"),
+        ("apigateway", "get-api-key"),
+        ("apigateway", "get-api-keys"),
+        ("appsync", "list-api-keys"),
+        ("ec2", "get-password-data"),
     }
 )
+#: Reads that return stored data (table items, stream records, query
+#: results, repository files) rather than configuration. Output is
+#: secret-redacted, but redaction can't recognise customer data.
+_DATA_READS = frozenset(
+    {
+        ("dynamodb", "get-item"),
+        ("dynamodb", "batch-get-item"),
+        ("dynamodbstreams", "get-records"),
+        ("kinesis", "get-records"),
+        ("athena", "get-query-results"),
+        ("redshift-data", "get-statement-result"),
+        ("codecommit", "get-file"),
+        ("codecommit", "get-blob"),
+    }
+)
+#: Read-shaped operations that take an ``outfile`` argument and write the
+#: response body to a path of the caller's choosing. Generated from the
+#: service definitions bundled with AWS CLI 2.35.11: every operation whose
+#: output payload is a blob (that is what makes the CLI add ``outfile``)
+#: and whose name starts with a read prefix. Regenerate when bumping it.
+_OUTFILE_READS = frozenset(
+    {
+        ("agenttoolkit", "get-skill-file"),
+        ("apigateway", "get-export"),
+        ("apigateway", "get-sdk"),
+        ("appconfig", "get-configuration"),
+        ("appconfig", "get-hosted-configuration-version"),
+        ("appconfigdata", "get-latest-configuration"),
+        ("appsync", "get-introspection-schema"),
+        ("cloudfront", "get-connection-function"),
+        ("cloudfront", "get-function"),
+        ("codeartifact", "get-package-version-asset"),
+        ("codeguruprofiler", "get-profile"),
+        ("datazone", "get-lineage-event"),
+        ("ebs", "get-snapshot-block"),
+        ("geo-maps", "get-glyphs"),
+        ("geo-maps", "get-sprites"),
+        ("geo-maps", "get-static-map"),
+        ("geo-maps", "get-style-descriptor"),
+        ("geo-maps", "get-tile"),
+        ("glacier", "get-job-output"),
+        ("iot-data", "get-thing-shadow"),
+        ("iotwireless", "get-position-estimate"),
+        ("iotwireless", "get-resource-position"),
+        ("kinesis-video-archived-media", "get-clip"),
+        ("kinesis-video-archived-media", "get-media-for-fragment-list"),
+        ("kinesis-video-media", "get-media"),
+        ("lakeformation", "get-work-unit-results"),
+        ("location", "get-map-glyphs"),
+        ("location", "get-map-sprites"),
+        ("location", "get-map-style-descriptor"),
+        ("location", "get-map-tile"),
+        ("medialive", "describe-input-device-thumbnail"),
+        ("mediastore-data", "get-object"),
+        ("medical-imaging", "get-image-frame"),
+        ("medical-imaging", "get-image-set-metadata"),
+        ("omics", "get-read-set"),
+        ("omics", "get-reference"),
+        ("s3api", "get-object"),
+        ("s3api", "get-object-annotation"),
+        ("s3api", "get-object-torrent"),
+        ("sagemaker-geospatial", "get-tile"),
+        ("schemas", "get-code-binding-source"),
+        ("tnb", "get-sol-function-package-content"),
+        ("tnb", "get-sol-function-package-descriptor"),
+        ("tnb", "get-sol-network-package-content"),
+        ("tnb", "get-sol-network-package-descriptor"),
+        ("workmailmessageflow", "get-raw-message-content"),
+    }
+)
+_APPROVAL_READS = _SECRET_OR_FILE_READS | _DATA_READS | _OUTFILE_READS
 
 
-def _service_and_operation(argv: list[str]) -> tuple[str, str] | None:
-    """The first two positional words, skipping global options and their values.
+def _service_and_operation(argv: list[str]) -> tuple[str, str, list[str]] | None:
+    """``(service, operation, the operation's own arguments)``.
 
-    None when an option we don't know appears before the operation — we
-    can't tell whether it takes a value, so the caller must assume the
-    worst.
+    The first two positional words, skipping global options and their
+    values. None when an option we don't know appears before the
+    operation — we can't tell whether it takes a value, so the caller
+    must assume the worst.
     """
     positionals: list[str] = []
     i = 0
@@ -226,7 +324,39 @@ def _service_and_operation(argv: list[str]) -> tuple[str, str] | None:
             return None
         positionals.append(tok.lower())
         i += 1
-    return (positionals[0], positionals[1]) if len(positionals) == 2 else None
+    if len(positionals) != 2:
+        return None
+    return positionals[0], positionals[1], argv[i:]
+
+
+def _reads_local_file(argv: list[str]) -> bool:
+    """A ``file://`` / ``fileb://`` value: the CLI loads that local file
+    and sends its contents to AWS as the parameter — a way to read files
+    outside the project sandbox."""
+    return any("file://" in tok or "fileb://" in tok for tok in argv)
+
+
+def _has_stray_path(rest: list[str]) -> bool:
+    """A path-looking argument that isn't the value of an option.
+
+    ``_OUTFILE_READS`` lists the operations known to write a file, but a
+    newer CLI can add more; a bare path after the operation is the sign
+    of one. The first word after ``--option`` is that option's value
+    (``--log-group-name /aws/lambda/fn`` is fine); anything after that
+    is only questioned when it looks like a path.
+    """
+    expecting_value = False
+    for tok in rest:
+        if tok.startswith("-"):
+            name = tok.split("=", 1)[0]
+            expecting_value = "=" not in tok and name not in _FLAG_OPTIONS
+            continue
+        if expecting_value:
+            expecting_value = False
+            continue
+        if tok.startswith(("/", "~", ".")) or "/" in tok or "\\" in tok:
+            return True
+    return False
 
 
 def classify(command: str | list[str]) -> str:
@@ -242,7 +372,7 @@ def classify(command: str | list[str]) -> str:
     parsed = _service_and_operation(argv)
     if parsed is None:
         return "mutate"
-    service, verb = parsed
+    service, verb, rest = parsed
     # Destructive wins over everything below, so the warning colour shows.
     if service == "s3" and verb in _S3_DESTRUCTIVE_VERBS:
         return "destructive"
@@ -250,7 +380,9 @@ def classify(command: str | list[str]) -> str:
         return "destructive"
     if any(tok.split("=", 1)[0] in _NEVER_READ_OPTIONS for tok in argv):
         return "mutate"
-    if (service, verb) in _SECRET_OR_FILE_READS:
+    if (service, verb) in _APPROVAL_READS:
+        return "mutate"
+    if _reads_local_file(argv):
         return "mutate"
     if service == "s3":
         return "read" if verb in _S3_READ_VERBS else "mutate"
@@ -259,8 +391,11 @@ def classify(command: str | list[str]) -> str:
     if service == "configure":
         # ``configure get aws_secret_access_key`` prints the secret.
         return "read" if verb in ("list", "list-profiles") else "mutate"
-    if service == "logs" and verb in ("tail", "filter-log-events", "get-log-events"):
-        return "read"
+    if service == "logs" and verb == "tail":
+        # Its one positional is the log group, which looks like a path.
+        return "mutate" if _has_stray_path(rest[1:]) else "read"
+    if _has_stray_path(rest):
+        return "mutate"
     if verb.startswith(_READ_VERB_PREFIXES):
         return "read"
     return "mutate"
@@ -293,11 +428,13 @@ def run(
     region: str = "",
     timeout: int = 30,
     json_output: bool = True,
+    cwd: str | None = None,
 ) -> tuple[str, int]:
     """Run ``aws <args>`` synchronously; returns (stdout-or-stderr, returncode).
 
     Runs on whatever thread calls it — the panel uses the thread
-    bridge, the AI tool uses ``asyncio.to_thread``.
+    bridge, the AI tool uses ``asyncio.to_thread``. ``cwd`` sets the
+    working directory relative paths resolve against.
     """
     if not aws_available():
         return "Error: the AWS CLI (`aws`) is not installed on this machine.", 127
@@ -310,7 +447,9 @@ def run(
         cmd.extend(["--output", "json"])
     env = dict(os.environ, AWS_PAGER="")  # never block on a pager
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd
+        )
     except subprocess.TimeoutExpired:
         return f"Error: `aws {' '.join(args[:2])}` timed out after {timeout}s", 124
     except OSError as exc:

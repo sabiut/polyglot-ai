@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 
 from polyglot_ai.core import aws_cli
 
@@ -42,9 +43,18 @@ async def aws_cli_tool(args: dict) -> str:
         return "Error: empty command."
     profile = str(args.get("profile") or "")
     region = str(args.get("region") or "")
-    output, code = await asyncio.to_thread(
-        aws_cli.run, argv, profile=profile, region=region, timeout=60
-    )
+
+    def run() -> tuple[str, int]:
+        if aws_cli.classify(argv) != "read":
+            return aws_cli.run(argv, profile=profile, region=region, timeout=60)
+        # Nobody approved this call, so it must not be able to leave a
+        # file behind: if it turns out to write one after all (an
+        # operation newer than the classifier's list), a relative path
+        # lands in a directory that is deleted straight away.
+        with tempfile.TemporaryDirectory(prefix="polyglot-aws-") as scratch:
+            return aws_cli.run(argv, profile=profile, region=region, timeout=60, cwd=scratch)
+
+    output, code = await asyncio.to_thread(run)
     if code != 0:
         return output
     return _truncate(output) or "(no output)"
@@ -55,6 +65,10 @@ async def aws_logs_tail(args: dict) -> str:
     group = str(args.get("log_group") or "").strip()
     if not group:
         return "Error: 'log_group' is required, e.g. '/aws/lambda/my-function'."
+    if group.startswith("-"):
+        # This tool never asks for approval, so the group must not be
+        # readable as an option (``--endpoint-url=…``).
+        return "Error: 'log_group' must be a log group name, not an option."
     since = str(args.get("since") or "1h")
     filter_pattern = str(args.get("filter") or "").strip()
     argv = ["logs", "tail", group, "--since", since, "--format", "short"]

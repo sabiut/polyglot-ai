@@ -480,3 +480,300 @@ def test_stale_overview_does_not_overwrite_newer(qapp, monkeypatch):
     _pump_until(lambda: False, timeout_s=0.5)  # let the stale one land
     assert "eu-west-1" in panel._identity_label.text()
     assert calls == ["us-east-1", "eu-west-1"]
+
+
+# ── Details must never outlive what they describe ────────────────────
+
+
+def _describe_by_argv(argv, **kw):
+    if argv[:2] == ["lambda", "get-function-configuration"]:
+        return '{"FunctionName": "api-handler", "Runtime": "python3.12"}', 0
+    if argv[:2] == ["ec2", "describe-instances"]:
+        return '{"Reservations": []}', 0
+    if argv[:2] == ["ec2", "stop-instances"]:
+        return '{"StoppingInstances": [{"InstanceId": "i-0abc"}]}', 0
+    return "{}", 0
+
+
+class TestDetailsFollowTheTree:
+    def test_refresh_without_the_row_marks_details_as_gone(self, qapp, monkeypatch):
+        """The screenshot bug: a deleted database stayed in the details pane
+        as if current, with a live Console button."""
+        monkeypatch.setattr(aws_cli, "run", _describe_by_argv)
+        panel = AwsPanel()
+        panel._on_overview(SAMPLE)
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))
+        assert _pump_until(lambda: "python3.12" in panel._details.toPlainText())
+        assert panel._console_btn.isEnabled()
+
+        gone = dict(SAMPLE, **{"lambda": []})
+        panel._on_overview(gone)
+        assert panel._details_title.text() == "LAMBDA — api-handler · no longer listed"
+        assert not panel._console_btn.isEnabled()
+        assert panel._details_row is None
+        assert "python3.12" in panel._details.toPlainText()  # still readable
+        panel._on_overview(gone)  # a second refresh doesn't stack the suffix
+        assert panel._details_title.text().count("no longer listed") == 1
+
+    def test_refresh_keeps_the_selection_and_reloads_its_details(self, qapp, monkeypatch):
+        outputs = iter(
+            [
+                '{"FunctionName": "api-handler", "Runtime": "python3.12"}',
+                '{"FunctionName": "api-handler", "Runtime": "python3.13"}',
+            ]
+        )
+        monkeypatch.setattr(aws_cli, "run", lambda argv, **kw: (next(outputs), 0))
+        panel = AwsPanel()
+        panel._on_overview(SAMPLE)
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))
+        assert _pump_until(lambda: "python3.12" in panel._details.toPlainText())
+
+        panel._on_overview(SAMPLE)
+        assert panel._tree.currentItem().text(0) == "api-handler"
+        assert "Loading" not in panel._details.toPlainText()  # no flicker while reloading
+        assert _pump_until(lambda: "python3.13" in panel._details.toPlainText())
+        assert panel._console_btn.isEnabled()
+
+    def test_switching_region_clears_rows_and_details(self, qapp, monkeypatch):
+        """Old rows are actionable and old details get the new region's
+        label and Console link, so both go the moment the context changes."""
+        import threading
+
+        import polyglot_ai.ui.panels.aws_panel as mod
+
+        describe_gate, fetch_gate = threading.Event(), threading.Event()
+
+        def slow_describe(argv, **kw):
+            describe_gate.wait(2)
+            return '{"FunctionName": "api-handler", "Runtime": "python3.12"}', 0
+
+        def slow_fetch(profile, region):
+            fetch_gate.wait(2)
+            return dict(SAMPLE, identity={"Account": region, "Arn": "arn:aws:iam::1:user/x"})
+
+        monkeypatch.setattr(aws_cli, "run", slow_describe)
+        monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+        monkeypatch.setattr(mod, "fetch_overview", slow_fetch)
+        panel = AwsPanel()
+        panel._profile, panel._region = "default", "us-east-1"
+        panel._on_overview(SAMPLE)
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))  # describe in flight
+
+        panel._on_region_changed("eu-west-1")
+        assert panel._tree.topLevelItemCount() == 1
+        assert "Loading" in panel._tree.topLevelItem(0).text(0)
+        assert panel._details.toPlainText() == ""
+        assert panel._details_title.text() == "DETAILS"
+        assert not panel._console_btn.isEnabled()
+        assert panel._console_url(panel._details_row) == ""
+
+        describe_gate.set()  # the us-east-1 describe finishes late: dropped
+        _pump_until(lambda: False, timeout_s=0.3)
+        assert panel._details.toPlainText() == ""
+
+        fetch_gate.set()
+        assert _pump_until(lambda: "eu-west-1" in panel._identity_label.text())
+        assert "Lambda (1)" in _rows(panel)
+
+    def test_send_to_ai_names_the_context_the_details_came_from(self, qapp, monkeypatch):
+        monkeypatch.setattr(aws_cli, "run", _describe_by_argv)
+        panel = AwsPanel()
+        sent = []
+
+        class _Chat:
+            def prefill_input(self, text):
+                sent.append(text)
+
+        panel.chat_panel = _Chat()
+        panel._profile, panel._region = "work", "eu-west-1"
+        panel._on_overview(SAMPLE)
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))
+        assert _pump_until(lambda: "python3.12" in panel._details.toPlainText())
+        panel._profile, panel._region = "personal", "us-east-1"  # selectors moved on
+        panel._send_details_to_ai()
+        assert "profile work, region eu-west-1" in sent[0]
+
+
+class TestRegionField:
+    @pytest.fixture
+    def panel(self, qapp, monkeypatch):
+        import polyglot_ai.ui.panels.aws_panel as mod
+
+        self.fetched = []
+        monkeypatch.setattr(
+            mod, "fetch_overview", lambda p, r: self.fetched.append(r) or dict(SAMPLE)
+        )
+        monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+        panel = AwsPanel()
+        panel._profile, panel._region = "default", "us-east-1"
+        return panel
+
+    def test_typing_does_not_refresh_until_enter(self, panel):
+        """Each keystroke used to start a full refresh against a half-typed region."""
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        edit = panel._region_combo.lineEdit()
+        edit.selectAll()
+        QTest.keyClicks(edit, "eu-west-3")
+        _pump_until(lambda: False, timeout_s=0.2)
+        assert self.fetched == [] and panel._region == "us-east-1"
+
+        QTest.keyClick(edit, Qt.Key.Key_Return)
+        assert _pump_until(lambda: self.fetched == ["eu-west-3"])
+        assert panel._region == "eu-west-3"
+        _pump_until(lambda: False, timeout_s=0.2)
+        assert self.fetched == ["eu-west-3"]  # Enter then focus-out is still one refresh
+
+    def test_picking_from_the_list_refreshes_once(self, panel):
+        index = panel._region_combo.findText("ap-southeast-2")
+        panel._region_combo.setCurrentIndex(index)
+        panel._region_combo.activated.emit(index)
+        assert _pump_until(lambda: self.fetched == ["ap-southeast-2"])
+
+    def test_a_typo_is_refused_without_any_calls(self, panel):
+        panel._on_region_changed("eu-west")
+        _pump_until(lambda: False, timeout_s=0.2)
+        assert self.fetched == [] and panel._region == "us-east-1"
+        assert "isn't an AWS region" in panel._status_label.text()
+
+    @pytest.mark.parametrize(
+        "region", ["us-east-1", "ap-southeast-2", "us-gov-west-1", "cn-north-1", "il-central-1"]
+    )
+    def test_real_region_names_are_accepted(self, region):
+        import polyglot_ai.ui.panels.aws_panel as mod
+
+        assert mod._REGION_RE.fullmatch(region)
+
+
+class TestActionsRefreshTheTree:
+    @pytest.fixture
+    def panel(self, qapp, monkeypatch):
+        import polyglot_ai.ui.panels.aws_panel as mod
+
+        self.fetched, self.prompts = [], []
+        monkeypatch.setattr(
+            mod, "fetch_overview", lambda p, r: self.fetched.append(r) or dict(SAMPLE)
+        )
+        monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+        monkeypatch.setattr(aws_cli, "run", _describe_by_argv)
+        monkeypatch.setattr(AwsPanel, "_FOLLOW_UP_REFRESH_MS", 0)
+        panel = AwsPanel()
+        monkeypatch.setattr(
+            panel, "_confirm", lambda title, text: self.prompts.append(text) or True
+        )
+        panel._profile, panel._region = "work", "eu-west-1"
+        panel._on_overview(SAMPLE)
+        return panel
+
+    def test_stop_refreshes_and_keeps_the_result_on_screen(self, panel):
+        panel._tree.setCurrentItem(_section(panel, "ec2").child(0))
+        assert _pump_until(lambda: "Reservations" in panel._details.toPlainText())
+
+        panel._ec2_action("stop-instances", "i-0abc", "Stop")
+        assert "eu-west-1 (profile work)" in self.prompts[0]
+        assert _pump_until(lambda: self.fetched == ["eu-west-1"])
+        _pump_until(lambda: False, timeout_s=0.3)  # let the refresh land
+        # The refresh re-selects the instance but must not replace the
+        # action's output with a fresh describe.
+        assert panel._details_title.text() == "STOP — i-0abc"
+        assert "StoppingInstances" in panel._details.toPlainText()
+        assert panel._tree.currentItem().text(0) == "web-1  (i-0abc)"
+
+    def test_refreshes_even_if_another_row_was_clicked_meanwhile(self, panel, monkeypatch):
+        import threading
+
+        gate = threading.Event()
+
+        def run(argv, **kw):
+            if argv[:2] == ["ec2", "stop-instances"]:
+                gate.wait(2)
+            return _describe_by_argv(argv, **kw)
+
+        monkeypatch.setattr(aws_cli, "run", run)
+        panel._ec2_action("stop-instances", "i-0abc", "Stop")
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))  # pane moves on
+        assert _pump_until(lambda: "python3.12" in panel._details.toPlainText())
+        assert self.fetched == []
+        gate.set()
+        assert _pump_until(lambda: self.fetched == ["eu-west-1"])
+        _pump_until(lambda: False, timeout_s=0.3)
+        assert panel._details_title.text() == "LAMBDA — api-handler"  # not overwritten
+
+    def test_a_failed_action_does_not_refresh(self, panel, monkeypatch):
+        monkeypatch.setattr(aws_cli, "run", lambda argv, **kw: ("Error: Access denied", 254))
+        panel._ec2_action("stop-instances", "i-0abc", "Stop")
+        assert _pump_until(lambda: "Access denied" in panel._details.toPlainText())
+        _pump_until(lambda: False, timeout_s=0.2)
+        assert self.fetched == []
+
+    def test_declining_runs_nothing(self, panel, monkeypatch):
+        monkeypatch.setattr(panel, "_confirm", lambda title, text: False)
+        panel._ecs_redeploy("prod", "api")
+        _pump_until(lambda: False, timeout_s=0.2)
+        assert self.fetched == [] and panel._details.toPlainText() == ""
+
+    def test_one_follow_up_refresh_shows_the_settled_state(self, panel, monkeypatch):
+        monkeypatch.setattr(AwsPanel, "_FOLLOW_UP_REFRESH_MS", 40)
+        panel._ecs_redeploy("prod", "api")
+        assert "cluster prod, eu-west-1 (profile work)" in self.prompts[0]
+        assert _pump_until(lambda: len(self.fetched) == 2)
+        _pump_until(lambda: False, timeout_s=0.3)
+        assert len(self.fetched) == 2  # one follow-up, not a poll
+
+    def test_follow_up_is_dropped_when_the_region_changes(self, panel, monkeypatch):
+        monkeypatch.setattr(AwsPanel, "_FOLLOW_UP_REFRESH_MS", 150)
+        panel._ecs_redeploy("prod", "api")
+        assert _pump_until(lambda: self.fetched == ["eu-west-1"])
+        panel._on_region_changed("us-west-2")
+        assert _pump_until(lambda: self.fetched == ["eu-west-1", "us-west-2"])
+        _pump_until(lambda: False, timeout_s=0.4)
+        assert self.fetched == ["eu-west-1", "us-west-2"]
+
+
+class TestTruncatedListings:
+    def test_fetch_reports_listings_that_were_cut_short(self, monkeypatch):
+        import json
+
+        def run(argv, **kw):
+            if argv[:2] == ["sts", "get-caller-identity"]:
+                return '{"Account": "1", "Arn": "arn:aws:iam::1:user/x"}', 0
+            if argv[:2] == ["lambda", "list-functions"]:
+                return json.dumps({"Functions": [{"FunctionName": "f"}], "NextToken": "abc"}), 0
+            if argv[:2] == ["ecs", "list-clusters"]:
+                arns = [f"arn:aws:ecs:us-east-1:1:cluster/c{i}" for i in range(25)]
+                return json.dumps({"clusterArns": arns}), 0
+            return "{}", 0
+
+        monkeypatch.setattr(aws_cli, "run", run)
+        data = fetch_overview("default", "us-east-1")
+        assert data["notes"]["lambda"] == "Only the first 200 are shown — there are more."
+        assert data["notes"]["ecs"] == "Only the first 20 of 25 clusters are shown."
+        assert "ec2" not in data["notes"]  # complete listings carry no note
+
+    def test_ecs_reports_its_per_cluster_service_cap(self):
+        from polyglot_ai.core import aws_resources
+
+        notes = []
+
+        def call(argv, **kw):
+            if argv[:2] == ["ecs", "list-clusters"]:
+                return {"clusterArns": ["arn:aws:ecs:us-east-1:1:cluster/prod"]}
+            if argv[:2] == ["ecs", "list-services"]:
+                return {"serviceArns": [f"arn:svc/{i}" for i in range(130)]}
+            return {"services": []}
+
+        call.note = notes.append
+        aws_resources._fetch_ecs(call)
+        assert notes == ["Only the first 100 of 130 services in cluster prod are shown."]
+
+    def test_tree_marks_the_section_and_says_why(self, qapp):
+        note = "Only the first 200 are shown — there are more."
+        panel = AwsPanel()
+        panel._on_overview(dict(SAMPLE, notes={"ec2": note}))
+        rows = _rows(panel)
+        assert rows["EC2 (2+)"] == ["web-1  (i-0abc)", "i-0def", note]
+        assert "Lambda (1)" in rows
+        ec2 = _section(panel, "ec2")
+        panel._on_item_clicked(ec2, 0)  # collapse: the "+" must survive
+        assert ec2.text(0) == "▸  EC2 (2+)"

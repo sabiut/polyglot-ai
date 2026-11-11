@@ -646,8 +646,10 @@ TOOL_DEFINITIONS = [
                 "Give the command WITHOUT the leading 'aws', e.g. "
                 "'ec2 describe-instances --max-items 5' or 'lambda list-functions'. "
                 "Output is JSON unless you pass --output. Read-only calls "
-                "(describe-*, list-*, get-*, s3 ls, logs tail) run immediately; anything "
-                "that changes state asks the user for approval first."
+                "(describe-*, list-*, get-*, s3 ls, logs tail) run immediately. The user "
+                "is asked for approval first for anything that changes state, returns "
+                "stored data or credentials (dynamodb scan/query/get-item, secrets, "
+                "tokens), reads a local file (file://) or writes one (an outfile)."
             ),
             "parameters": {
                 "type": "object",
