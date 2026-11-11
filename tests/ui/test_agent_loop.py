@@ -231,3 +231,59 @@ async def test_stop_during_a_long_run_ends_cleanly(qtbot):
     await asyncio.wait([panel._stream_task], timeout=5)
     assert registry.executed == 4
     assert panel._streaming is False
+
+
+@pytest.mark.asyncio
+async def test_aws_call_is_approved_and_run_with_the_same_pinned_arguments(qtbot):
+    """The AWS panel's profile/region are filled in once, before the
+    approval card, so the card names the account and the command that
+    runs is the one that was approved — even if the selection moves on
+    while the card is waiting."""
+    import json
+
+    from polyglot_ai.core import panel_state
+
+    class _AwsProvider:
+        display_name = "Fake"
+        calls = 0
+
+        async def stream_chat(self, *, messages, model, tools=None, system_prompt=None, **kw):
+            self.calls += 1
+            if self.calls == 1:
+                call = {"name": "aws_cli", "arguments": '{"command": "ec2 stop-instances"}'}
+                yield StreamChunk(tool_calls=[{"index": 0, "id": "call_1", "function": call}])
+            else:
+                yield StreamChunk(delta_content="Stopped.")
+
+    class _Gated(_Registry):
+        ran: list[str] = []
+
+        def needs_approval(self, name, args=None):
+            return True
+
+        async def execute(self, name, arguments):
+            self.ran.append(arguments)
+            return "{}"
+
+    registry = _Gated()
+    panel, conv = _make_panel(qtbot, _AwsProvider(), registry)
+    shown = []
+
+    async def approve(tool_name, arguments):
+        shown.append(arguments)
+        panel_state.set_aws_context("prod", "us-east-1")  # user switches while it waits
+        return True
+
+    panel._request_tool_approval = approve
+    panel_state.set_aws_context("staging", "eu-west-1")
+    try:
+        await panel._stream_response()
+    finally:
+        panel_state.clear()
+
+    assert json.loads(shown[0]) == {
+        "command": "ec2 stop-instances",
+        "profile": "staging",
+        "region": "eu-west-1",
+    }
+    assert registry.ran == shown  # exactly what was approved

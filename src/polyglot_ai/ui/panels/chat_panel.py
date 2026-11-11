@@ -2167,10 +2167,19 @@ class ChatPanel(QWidget):
                     and self._tool_registry.needs_approval(tool_call.function_name)
                 )
 
+            # What the user approves and what runs must be the same
+            # string, so defaults (the AWS panel's profile and region)
+            # are pinned once, here.
+            from polyglot_ai.core.ai.tools import prepare_arguments
+
+            arguments = (
+                tool_call.arguments
+                if is_mcp
+                else prepare_arguments(tool_call.function_name, tool_call.arguments)
+            )
+
             if needs_approval:
-                approved = await self._request_tool_approval(
-                    tool_call.function_name, tool_call.arguments
-                )
+                approved = await self._request_tool_approval(tool_call.function_name, arguments)
                 if not approved:
                     self._add_separator()
                     self._add_message_widget(
@@ -2203,9 +2212,7 @@ class ChatPanel(QWidget):
                         {"tool": tool_call.function_name, "auto_approved": not needs_approval},
                     )
             elif self._tool_registry:
-                result = await self._tool_registry.execute(
-                    tool_call.function_name, tool_call.arguments
-                )
+                result = await self._tool_registry.execute(tool_call.function_name, arguments)
             elif tool_call.function_name == "web_search":
                 # Standalone mode (no project) — web_search still works
                 import json as _json
@@ -2242,7 +2249,7 @@ class ChatPanel(QWidget):
             done_label = _tool_done_labels.get(
                 tool_call.function_name, f"Ran {tool_call.function_name}"
             )
-            self._add_tool_activity(done_label, tool_call.arguments, result)
+            self._add_tool_activity(done_label, arguments, result)
 
             self._current_conversation.messages.append(
                 Message(role="tool", content=result, tool_call_id=tool_call.id)

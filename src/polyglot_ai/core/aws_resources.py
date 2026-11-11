@@ -12,13 +12,21 @@ a stubbed ``call``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
 #: ``call(argv, global_call=False)`` → parsed JSON (dict) or None on error.
-#: The caller records the error against the section.
+#: The caller records the error against the section. The panel's ``call``
+#: also carries ``call.quiet`` (same, but a failure is not reported) and
+#: ``call.note(text)`` (a line shown under the section).
 Call = Callable[..., "dict | None"]
+
+#: ``run(argv)`` → ``(output, return code)`` with the panel's profile, for
+#: the extra calls a details summary needs.
+Run = Callable[[list[str]], "tuple[str, int]"]
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,12 @@ class ResourceType:
     status_colour: Callable[[dict], str | None] = field(default=lambda row: None)
     #: describe output is plain text (``s3 ls``), not JSON.
     describe_is_text: bool = False
+    #: More facts for the summary that need calls of their own:
+    #: ``facts(row, run) -> [(field, value), ...]``. Runs off-thread
+    #: alongside ``describe``.
+    facts: Callable[[dict, Run], list[tuple[str, str]]] | None = None
+    #: Heading over the describe output when a summary sits above it.
+    output_label: str = "Full output"
 
 
 def _console(region: str, service_path: str) -> str:
@@ -59,6 +73,32 @@ def _kv(pairs: list[tuple[str, object]]) -> list[tuple[str, str]]:
 
 def _ts(value) -> str:
     return str(value or "")[:19].replace("T", " ")
+
+
+#: Per-row lookups are one CLI process each, so only the first few rows of
+#: a section get them; the rest keep empty Status/Info columns.
+_ENRICH_MAX = 12
+
+
+def _enrich(call: Call, rows: list[dict], argv_for, apply) -> None:
+    """Fill Status/Info for services whose list call returns names only.
+
+    Failures are silent (``call.quiet``): the listing worked, and a
+    missing describe permission shouldn't put an error under it.
+    """
+    quiet = getattr(call, "quiet", call)
+
+    def one(row: dict) -> None:
+        data = quiet(argv_for(row))
+        if not data:
+            return
+        try:
+            apply(row, data)
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(one, rows[:_ENRICH_MAX]))
 
 
 # ── Compute ──────────────────────────────────────────────────────────
@@ -141,6 +181,9 @@ def _fetch_lambda(call: Call) -> list[dict]:
                 "runtime": fn.get("Runtime", fn.get("PackageType", "")),
                 "modified": _ts(fn.get("LastModified"))[:16],
                 "memory": fn.get("MemorySize"),
+                # A function can log somewhere other than /aws/lambda/<name>.
+                "log_group": (fn.get("LoggingConfig") or {}).get("LogGroup")
+                or f"/aws/lambda/{name}",
             }
         )
     for row in rows:
@@ -182,8 +225,9 @@ def _fetch_ecs(call: Call) -> list[dict]:
     cluster_arns = (clusters or {}).get("clusterArns", [])
     if len(cluster_arns) > _ECS_MAX_CLUSTERS:
         note(f"Only the first {_ECS_MAX_CLUSTERS} of {len(cluster_arns)} clusters are shown.")
-    rows = []
-    for cluster_arn in cluster_arns[:_ECS_MAX_CLUSTERS]:
+
+    def one_cluster(cluster_arn: str) -> list[dict]:
+        rows = []
         cluster = cluster_arn.rsplit("/", 1)[-1]
         services = call(["ecs", "list-services", "--cluster", cluster])
         all_arns = (services or {}).get("serviceArns", [])
@@ -218,7 +262,20 @@ def _fetch_ecs(call: Call) -> list[dict]:
                 row["status"] = f"{row['running']}/{row['desired']}"
                 row["info"] = svc.get("status", "")
                 rows.append(row)
-    return rows
+        return rows
+
+    # Every cluster is two or more CLI calls of about a second each; one
+    # after another, a dozen clusters held the whole refresh up.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        per_cluster = list(pool.map(one_cluster, cluster_arns[:_ECS_MAX_CLUSTERS]))
+    return [row for rows in per_cluster for row in rows]
+
+
+def _ecs_colour(row: dict) -> str | None:
+    desired = row.get("desired", 0)
+    if desired == 0:
+        return "text_muted"  # scaled to zero on purpose, not unhealthy
+    return "accent_success_muted" if row.get("running", 0) >= desired else "accent_warning"
 
 
 def _summarize_ecs(d: dict) -> list[tuple[str, str]]:
@@ -251,10 +308,29 @@ def _summarize_ecs(d: dict) -> list[tuple[str, str]]:
 
 def _fetch_eks(call: Call) -> list[dict]:
     data = call(["eks", "list-clusters"])
-    return [
+    rows = [
         {"id": name, "name": name, "label": name, "status": "", "info": ""}
         for name in (data or {}).get("clusters", [])
     ]
+
+    def apply(row: dict, d: dict) -> None:
+        cluster = d["cluster"]
+        row["status"] = cluster.get("status", "")
+        row["info"] = f"Kubernetes {cluster['version']}" if cluster.get("version") else ""
+
+    _enrich(call, rows, lambda r: ["eks", "describe-cluster", "--name", r["name"]], apply)
+    return rows
+
+
+#: Shared by EKS clusters and DynamoDB tables: ACTIVE is healthy, anything
+#: else (CREATING, UPDATING, DELETING, FAILED) is worth a look.
+def _active_colour(row: dict) -> str | None:
+    status = row.get("status", "")
+    if not status:
+        return None
+    if status == "ACTIVE":
+        return "accent_success_muted"
+    return "accent_error" if status == "FAILED" else "accent_warning"
 
 
 def _summarize_eks(d: dict) -> list[tuple[str, str]]:
@@ -277,21 +353,119 @@ def _summarize_eks(d: dict) -> list[tuple[str, str]]:
 
 
 def _fetch_s3(call: Call) -> list[dict]:
-    data = call(["s3api", "list-buckets"], global_call=True)
+    # Buckets are account-wide, so this lists every region's. S3 only says
+    # which region each is in when the request carries a parameter, and
+    # ``--page-size`` is the one that changes nothing else.
+    data = call(["s3api", "list-buckets", "--page-size", "1000"], global_call=True)
     rows = []
     for b in (data or {}).get("Buckets", []):
         name = b.get("Name", "")
+        region = b.get("BucketRegion") or ""
         rows.append(
             {
                 "id": name,
                 "name": name,
                 "label": name,
                 "created": (b.get("CreationDate") or "")[:10],
-                "status": "",
+                "region": region,
+                # The Status column shows where the bucket lives: the list
+                # is the same whichever region is selected above.
+                "status": region,
             }
         )
         rows[-1]["info"] = rows[-1]["created"]
     return rows
+
+
+def _s3_in_region(row: dict) -> list[str]:
+    return ["--region", row["region"]] if row.get("region") else []
+
+
+def _unknown(output: str) -> str:
+    return "unknown — " + output.removeprefix("Error: ")[:90]
+
+
+def _s3_public_access(output: str, code: int) -> str:
+    if code != 0:
+        if "NoSuchPublicAccessBlockConfiguration" in output:
+            return "no bucket-level block (the account-level setting may still apply)"
+        return _unknown(output)
+    cfg = (json.loads(output) or {}).get("PublicAccessBlockConfiguration") or {}
+    settings = ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets")
+    off = [name for name in settings if not cfg.get(name)]
+    return (
+        "blocked (all four settings on)"
+        if not off
+        else "NOT fully blocked — off: " + ", ".join(off)
+    )
+
+
+def _s3_encryption(output: str, code: int) -> str:
+    if code != 0:
+        if "ServerSideEncryptionConfigurationNotFound" in output:
+            return "none configured"
+        return _unknown(output)
+    rules = ((json.loads(output) or {}).get("ServerSideEncryptionConfiguration") or {}).get("Rules")
+    default = (rules or [{}])[0].get("ApplyServerSideEncryptionByDefault") or {}
+    algorithm = default.get("SSEAlgorithm", "")
+    if algorithm == "AES256":
+        return "SSE-S3 (AES256)"
+    if algorithm.startswith("aws:kms"):
+        key = (default.get("KMSMasterKeyID") or "").rsplit("/", 1)[-1]
+        kind = "DSSE-KMS" if algorithm.endswith("dsse") else "SSE-KMS"
+        return f"{kind} ({key})" if key else f"{kind} (AWS managed key)"
+    return algorithm or "none configured"
+
+
+def _s3_versioning(output: str, code: int) -> str:
+    if code != 0:
+        return _unknown(output)
+    data = json.loads(output) if output else {}
+    status = (data or {}).get("Status")
+    if not status:
+        return "off"
+    return f"{status}, MFA delete on" if (data or {}).get("MFADelete") == "Enabled" else status
+
+
+def _s3_region(output: str, code: int) -> str:
+    if code != 0:
+        return _unknown(output)
+    constraint = (json.loads(output) or {}).get("LocationConstraint")
+    # Two historical spellings: null is us-east-1, "EU" is eu-west-1.
+    return {None: "us-east-1", "": "us-east-1", "EU": "eu-west-1"}.get(constraint, constraint)
+
+
+def _s3_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """Where a bucket is and how exposed it is — one small call per fact."""
+    bucket = ["--bucket", row["name"], *_s3_in_region(row)]
+    lookups = {
+        "Public access": (["s3api", "get-public-access-block", *bucket], _s3_public_access),
+        "Encryption": (["s3api", "get-bucket-encryption", *bucket], _s3_encryption),
+        "Versioning": (["s3api", "get-bucket-versioning", *bucket], _s3_versioning),
+    }
+    if not row.get("region"):
+        lookups = {
+            "Region": (["s3api", "get-bucket-location", *bucket], _s3_region),
+            **lookups,
+        }
+
+    def one(item):
+        label, (argv, parse) = item
+        try:
+            return label, parse(*run(argv))
+        except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+            return label, "unknown — unexpected output"
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        found = list(pool.map(one, lookups.items()))
+    return _kv(
+        [
+            ("Bucket", row.get("name")),
+            ("Region", row.get("region")),
+            ("Created", row.get("created")),
+            *found,
+        ]
+    )
 
 
 _RDS_STATUS = {
@@ -350,10 +524,19 @@ def _summarize_rds(d: dict) -> list[tuple[str, str]]:
 
 def _fetch_dynamodb(call: Call) -> list[dict]:
     data = call(["dynamodb", "list-tables"])
-    return [
+    rows = [
         {"id": name, "name": name, "label": name, "status": "", "info": ""}
         for name in (data or {}).get("TableNames", [])
     ]
+
+    def apply(row: dict, d: dict) -> None:
+        table = d["Table"]
+        row["status"] = table.get("TableStatus", "")
+        if isinstance(table.get("ItemCount"), int):
+            row["info"] = f"{table['ItemCount']:,} items"
+
+    _enrich(call, rows, lambda r: ["dynamodb", "describe-table", "--table-name", r["name"]], apply)
+    return rows
 
 
 def _summarize_dynamodb(d: dict) -> list[tuple[str, str]]:
@@ -385,7 +568,33 @@ def _fetch_sqs(call: Call) -> list[dict]:
     for url in (data or {}).get("QueueUrls", []):
         name = url.rstrip("/").rsplit("/", 1)[-1]
         rows.append({"id": url, "name": name, "url": url, "label": name, "status": "", "info": ""})
+
+    def apply(row: dict, d: dict) -> None:
+        attrs = d["Attributes"]
+        row["status"] = f"{int(attrs.get('ApproximateNumberOfMessages', 0)):,} waiting"
+        in_flight = int(attrs.get("ApproximateNumberOfMessagesNotVisible", 0))
+        parts = [f"{in_flight:,} in flight" if in_flight else "", "FIFO" if _is_fifo(row) else ""]
+        row["info"] = "  ".join(filter(None, parts))
+
+    _enrich(
+        call,
+        rows,
+        lambda r: [
+            "sqs",
+            "get-queue-attributes",
+            "--queue-url",
+            r["url"],
+            "--attribute-names",
+            "ApproximateNumberOfMessages",
+            "ApproximateNumberOfMessagesNotVisible",
+        ],
+        apply,
+    )
     return rows
+
+
+def _is_fifo(row: dict) -> bool:
+    return row.get("name", "").endswith(".fifo")
 
 
 def _summarize_sqs(d: dict) -> list[tuple[str, str]]:
@@ -419,6 +628,13 @@ def _fetch_sns(call: Call) -> list[dict]:
         arn = t.get("TopicArn", "")
         name = arn.rsplit(":", 1)[-1]
         rows.append({"id": arn, "name": name, "arn": arn, "label": name, "status": "", "info": ""})
+
+    def apply(row: dict, d: dict) -> None:
+        confirmed = int(d["Attributes"].get("SubscriptionsConfirmed", 0))
+        row["status"] = f"{confirmed:,} subscriber{'' if confirmed == 1 else 's'}"
+        row["info"] = "FIFO" if _is_fifo(row) else ""
+
+    _enrich(call, rows, lambda r: ["sns", "get-topic-attributes", "--topic-arn", r["arn"]], apply)
     return rows
 
 
@@ -575,11 +791,7 @@ RESOURCE_TYPES: list[ResourceType] = [
             reg,
             f"ecs/v2/clusters/{quote(r['cluster'])}/services/{quote(r['name'])}/health?region={reg}",
         ),
-        status_colour=lambda r: (
-            "accent_success_muted"
-            if r.get("running", 0) >= r.get("desired", 0) > 0
-            else "accent_warning"
-        ),
+        status_colour=_ecs_colour,
     ),
     ResourceType(
         key="eks",
@@ -591,16 +803,28 @@ RESOURCE_TYPES: list[ResourceType] = [
         console_url=lambda r, reg: _console(
             reg, f"eks/home?region={reg}#/clusters/{quote(r['name'])}"
         ),
+        status_colour=_active_colour,
     ),
     ResourceType(
         key="s3",
         title="S3 buckets",
         group="Data",
         fetch=_fetch_s3,
-        describe=lambda r: ["s3", "ls", f"s3://{r['name']}", "--human-readable", "--summarize"],
+        describe=lambda r: [
+            "s3",
+            "ls",
+            f"s3://{r['name']}",
+            "--human-readable",
+            "--summarize",
+            *_s3_in_region(r),
+        ],
         describe_is_text=True,
+        facts=_s3_facts,
+        output_label="Top-level objects",
+        # The bucket's own region when known, not the one selected above.
         console_url=lambda r, reg: (
-            f"https://s3.console.aws.amazon.com/s3/buckets/{quote(r['name'])}?region={reg}"
+            f"https://s3.console.aws.amazon.com/s3/buckets/{quote(r['name'])}"
+            f"?region={r.get('region') or reg}"
         ),
     ),
     ResourceType(
@@ -627,6 +851,7 @@ RESOURCE_TYPES: list[ResourceType] = [
         console_url=lambda r, reg: _console(
             reg, f"dynamodbv2/home?region={reg}#table?name={quote(r['name'])}"
         ),
+        status_colour=_active_colour,
     ),
     ResourceType(
         key="sqs",

@@ -305,3 +305,121 @@ def test_config_settings_sections_are_not_profiles(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_CONFIG_FILE", str(cfg))
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(creds))
     assert aws_cli.list_profiles() == ["default", "dev", "legacy"]
+
+
+def test_access_denied_names_what_was_refused():
+    """The action is the one thing needed to fix the policy."""
+    iam = (
+        "\nAn error occurred (AccessDenied) when calling the DescribeDBInstances operation: "
+        "User: arn:aws:iam::1:user/sum is not authorized to perform: rds:DescribeDBInstances "
+        "on resource: arn:aws:rds:ap-southeast-2:1:db:* because no identity-based policy allows it"
+    )
+    assert aws_cli.explain_error(iam) == (
+        "Access denied — this profile lacks permission for rds:DescribeDBInstances."
+    )
+    s3 = "\nAn error occurred (AccessDenied) when calling the ListBuckets operation: Access Denied"
+    assert aws_cli.explain_error(s3) == (
+        "Access denied — this profile isn't allowed to call ListBuckets."
+    )
+    assert "denied" in aws_cli.explain_error("AccessDenied").lower()
+
+
+class TestPanelContextForTheAiTools:
+    """The AI's AWS tools default to the profile/region on screen, and the
+    approval card shows the command with them — pinned before approval, so
+    what runs is what was approved."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from polyglot_ai.core import panel_state
+
+        panel_state.clear()
+        yield
+        panel_state.clear()
+
+    def test_nothing_changes_until_the_panel_has_loaded(self):
+        from polyglot_ai.core.ai.tools import prepare_arguments
+
+        raw = '{"command": "lambda list-functions"}'
+        assert prepare_arguments("aws_cli", raw) is raw
+
+    def test_missing_profile_and_region_come_from_the_panel(self):
+        import json
+
+        from polyglot_ai.core import panel_state
+        from polyglot_ai.core.ai.tools import prepare_arguments
+
+        panel_state.set_aws_context("staging", "eu-west-1")
+        pinned = json.loads(prepare_arguments("aws_cli", '{"command": "lambda list-functions"}'))
+        assert pinned == {
+            "command": "lambda list-functions",
+            "profile": "staging",
+            "region": "eu-west-1",
+        }
+        logs = json.loads(prepare_arguments("aws_logs_tail", '{"log_group": "/aws/lambda/f"}'))
+        assert (logs["profile"], logs["region"]) == ("staging", "eu-west-1")
+
+    def test_what_the_model_asked_for_wins(self):
+        import json
+
+        from polyglot_ai.core import panel_state
+        from polyglot_ai.core.ai.tools import prepare_arguments
+
+        panel_state.set_aws_context("staging", "eu-west-1")
+        explicit = json.loads(
+            prepare_arguments("aws_cli", '{"command": "ec2 describe-instances", "profile": "prod"}')
+        )
+        assert (explicit["profile"], explicit["region"]) == ("prod", "eu-west-1")
+        in_command = json.loads(
+            prepare_arguments(
+                "aws_cli", '{"command": "ec2 describe-instances --profile prod --region=us-west-2"}'
+            )
+        )
+        assert "profile" not in in_command and "region" not in in_command
+
+    def test_other_tools_and_bad_json_pass_through(self):
+        from polyglot_ai.core import panel_state
+        from polyglot_ai.core.ai.tools import prepare_arguments
+
+        panel_state.set_aws_context("staging", "eu-west-1")
+        assert prepare_arguments("shell_exec", '{"command": "ls"}') == '{"command": "ls"}'
+        assert prepare_arguments("aws_cli", "not json") == "not json"
+        assert prepare_arguments("aws_cli", "[1]") == "[1]"
+
+    def test_approval_card_shows_the_profile_and_region(self):
+        from polyglot_ai.ui.panels.inline_approval_card import _describe
+
+        _, _, detail = _describe(
+            "aws_cli",
+            {
+                "command": "ec2 stop-instances --instance-ids i-1",
+                "profile": "prod",
+                "region": "us-east-1",
+            },
+        )
+        assert (
+            detail == "aws ec2 stop-instances --instance-ids i-1 --profile prod --region us-east-1"
+        )
+        assert _describe("aws_cli", {"command": "s3 ls"})[2] == "aws s3 ls"
+
+    def test_the_tool_runs_with_the_pinned_values_only(self, monkeypatch):
+        """Resolved before approval, never again at run time."""
+        import asyncio
+
+        from polyglot_ai.core import panel_state
+        from polyglot_ai.core.ai.tools.aws_tools import aws_cli_tool
+
+        seen = {}
+        monkeypatch.setattr(aws_cli, "run", lambda argv, **kw: seen.update(kw) or ("{}", 0))
+        panel_state.set_aws_context("staging", "eu-west-1")  # selection after approval
+        asyncio.run(aws_cli_tool({"command": "ec2 describe-instances", "profile": "prod"}))
+        assert (seen["profile"], seen["region"]) == ("prod", "")
+
+    def test_system_prompt_says_which_account_the_tools_use(self):
+        from polyglot_ai.core import panel_state
+        from polyglot_ai.core.ai.context import ContextBuilder
+
+        assert "AWS panel" not in ContextBuilder().build_system_prompt()
+        panel_state.set_aws_context("staging", "eu-west-1")
+        prompt = ContextBuilder().build_system_prompt()
+        assert "AWS panel: profile staging, region eu-west-1." in prompt

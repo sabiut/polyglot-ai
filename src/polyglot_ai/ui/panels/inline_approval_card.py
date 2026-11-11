@@ -63,7 +63,11 @@ def _describe(tool_name: str, args: dict) -> tuple[str, str, str]:
     if tool_name == "git_commit":
         return "GIT", "Commit", args.get("message", "")
     if tool_name == "aws_cli":
-        return "AWS", "Run AWS command", "aws " + str(args.get("command", ""))
+        # With the profile and region: the same command against another
+        # account is a different thing to approve.
+        from polyglot_ai.core.ai.tools.aws_tools import display_command
+
+        return "AWS", "Run AWS command", display_command(args)
     if tool_name == "db_query":
         return "SQL", f"Query {args.get('connection', 'database')}", args.get("sql", "")
     if tool_name == "db_execute":

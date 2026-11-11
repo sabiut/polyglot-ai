@@ -404,10 +404,21 @@ class ContextBuilder:
         review = panel_state.get_last_review()
         workflow = panel_state.get_last_workflow_run()
         arduino = panel_state.get_last_arduino_state()
-        if not review and not workflow and not arduino:
+        aws = panel_state.get_aws_context()
+        if not review and not workflow and not arduino and not aws:
             return ""
 
         lines: list[str] = ["--- PANEL STATE ---", ""]
+
+        if aws:
+            # The AWS tools default to what the panel shows; saying so
+            # stops the model guessing which account an answer is about.
+            profile, region = aws
+            lines.append(
+                f"AWS panel: profile {profile or 'default'}, region {region or 'not set'}. "
+                "aws_cli and aws_logs_tail use these unless you pass profile/region."
+            )
+            lines.append("")
 
         # Arduino panel goes first when present — for users in the
         # middle of an MCU project it's almost always what they're

@@ -44,6 +44,8 @@ _last_arduino_state: dict[str, Any] | None = None
 # and copying the whole buffer on every PTY write would be wasteful.
 # The reader is called lazily when the AI actually asks.
 _terminal_reader: Callable[[], str | None] | None = None
+# (profile, region) selected in the AWS panel, once it has loaded.
+_aws_context: tuple[str, str] | None = None
 
 
 def set_last_review(snapshot: dict[str, Any] | None) -> None:
@@ -132,10 +134,29 @@ def read_terminal() -> str | None:
     return reader()
 
 
+def set_aws_context(profile: str, region: str) -> None:
+    """Publish the profile and region selected in the AWS panel.
+
+    The AI's AWS tools default to these, so "why is my Lambda failing?"
+    looks at the account the user has on screen rather than whatever
+    the CLI's default profile happens to be.
+    """
+    global _aws_context
+    with _lock:
+        _aws_context = (profile, region)
+
+
+def get_aws_context() -> tuple[str, str] | None:
+    """``(profile, region)`` from the AWS panel, or ``None`` if it never loaded."""
+    with _lock:
+        return _aws_context
+
+
 def clear() -> None:
     """Reset all panel state. Primarily used by tests."""
-    global _last_review, _last_workflow_run, _last_arduino_state, _terminal_reader
+    global _last_review, _last_workflow_run, _last_arduino_state, _terminal_reader, _aws_context
     with _lock:
+        _aws_context = None
         _last_review = None
         _last_workflow_run = None
         _last_arduino_state = None

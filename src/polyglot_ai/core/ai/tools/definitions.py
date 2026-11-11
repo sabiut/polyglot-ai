@@ -660,11 +660,17 @@ TOOL_DEFINITIONS = [
                     },
                     "profile": {
                         "type": "string",
-                        "description": "AWS profile name (optional; default profile otherwise)",
+                        "description": (
+                            "AWS profile name. Optional: defaults to the profile "
+                            "selected in the AWS panel, else the CLI's default profile"
+                        ),
                     },
                     "region": {
                         "type": "string",
-                        "description": "AWS region, e.g. us-east-1 (optional)",
+                        "description": (
+                            "AWS region, e.g. us-east-1. Optional: defaults to the "
+                            "region selected in the AWS panel"
+                        ),
                     },
                 },
                 "required": ["command"],

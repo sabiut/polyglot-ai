@@ -26,6 +26,37 @@ def _truncate(text: str) -> str:
     return text[:_MAX_OUTPUT] + f"\n... (truncated, {len(text) - _MAX_OUTPUT} more characters)"
 
 
+def with_panel_context(args: dict) -> dict:
+    """Fill a missing profile/region from the AWS panel's selection.
+
+    Called before the approval card is shown, so what the user approves
+    names the account and region and is exactly what runs — the tools
+    themselves never look the selection up at run time. Returns ``args``
+    unchanged when there is nothing to add.
+    """
+    from polyglot_ai.core import panel_state
+
+    context = panel_state.get_aws_context()
+    if context is None:
+        return args
+    command = aws_cli.split_command(str(args.get("command") or ""))
+    filled = dict(args)
+    for key, value in zip(("profile", "region"), context):
+        in_command = any(tok.split("=", 1)[0] == f"--{key}" for tok in command)
+        if value and not args.get(key) and not in_command:
+            filled[key] = value
+    return filled if filled != args else args
+
+
+def display_command(args: dict) -> str:
+    """``aws …`` as it will run, including the profile and region arguments."""
+    text = "aws " + str(args.get("command") or "").strip()
+    for key in ("profile", "region"):
+        if args.get(key):
+            text += f" --{key} {args[key]}"
+    return text
+
+
 def is_read_only(args: dict | None) -> bool:
     """True when the ``aws_cli`` call only reads state (auto-approvable)."""
     if not args:

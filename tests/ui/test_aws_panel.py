@@ -15,8 +15,16 @@ os.environ.setdefault("POLYGLOT_AI_DISABLE_UPDATE_CHECK", "1")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from polyglot_ai.core import aws_cli  # noqa: E402
+from polyglot_ai.core import aws_cli, panel_state  # noqa: E402
 from polyglot_ai.ui.panels.aws_panel import AwsPanel, fetch_overview  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_panel_state():
+    """The panel publishes its profile/region for the AI tools; don't let
+    one test's selection reach another test's prompt or tool call."""
+    yield
+    panel_state.clear()
 
 
 @pytest.fixture(scope="module")
@@ -193,6 +201,8 @@ class TestDetails:
         seen = {}
 
         def fake_run(argv, **kw):
+            if argv[:2] != ["s3", "ls"]:
+                return "{}", 0  # the summary's own lookups
             seen.update(kw)
             seen["argv"] = list(argv)
             return "2025-01-01 10:00:00   12 Bytes hello.txt", 0
@@ -414,7 +424,20 @@ class TestFindableSections:
             panel._tree.topLevelItem(i).text(0) for i in range(panel._tree.topLevelItemCount())
         ]
         assert texts[0].startswith("▾")
-        assert any(t.startswith("None here:") and "RDS databases" in t for t in texts)
+        # In a wrapping label under the tree: as a tree row the list was
+        # cut off after the first few names.
+        assert not any("None here" in t for t in texts)
+        note = panel._empty_note
+        assert note.wordWrap() and note.text().startswith("None here:")
+        for title in ("RDS databases", "DynamoDB tables", "CloudWatch alarms"):
+            assert title in note.text()
+        assert not note.isHidden()
+        panel._filter.setText("web")  # it's about the account, not the filter
+        assert note.isHidden()
+        panel._filter.setText("")
+        assert not note.isHidden()
+        panel._show_hint("Loading…")
+        assert note.isHidden() and note.text() == ""
 
     def test_click_toggles_and_collapse_survives_refresh(self, qapp):
         panel = AwsPanel()
@@ -543,7 +566,10 @@ class TestDetailsFollowTheTree:
 
         describe_gate, fetch_gate = threading.Event(), threading.Event()
 
+        started = threading.Event()
+
         def slow_describe(argv, **kw):
+            started.set()
             describe_gate.wait(2)
             return '{"FunctionName": "api-handler", "Runtime": "python3.12"}', 0
 
@@ -557,7 +583,8 @@ class TestDetailsFollowTheTree:
         panel = AwsPanel()
         panel._profile, panel._region = "default", "us-east-1"
         panel._on_overview(SAMPLE)
-        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))  # describe in flight
+        panel._tree.setCurrentItem(_section(panel, "lambda").child(0))
+        assert _pump_until(started.is_set)  # the describe is in flight
 
         panel._on_region_changed("eu-west-1")
         assert panel._tree.topLevelItemCount() == 1
@@ -777,3 +804,107 @@ class TestTruncatedListings:
         ec2 = _section(panel, "ec2")
         panel._on_item_clicked(ec2, 0)  # collapse: the "+" must survive
         assert ec2.text(0) == "▸  EC2 (2+)"
+
+
+# ── Second round: S3 summary, selection debounce, AI context ─────────
+
+
+class TestS3Details:
+    def _run(self, ls=("2025-01-01 10:00:00   12 Bytes hello.txt", 0)):
+        import json
+
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(list(argv))
+            if argv[:2] == ["s3", "ls"]:
+                return ls
+            if argv[:2] == ["s3api", "get-public-access-block"]:
+                cfg = dict.fromkeys(
+                    ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy"), True
+                )
+                cfg["RestrictPublicBuckets"] = False
+                return json.dumps({"PublicAccessBlockConfiguration": cfg}), 0
+            if argv[:2] == ["s3api", "get-bucket-encryption"]:
+                rule = {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+                return json.dumps({"ServerSideEncryptionConfiguration": {"Rules": [rule]}}), 0
+            if argv[:2] == ["s3api", "get-bucket-versioning"]:
+                return '{"Status": "Enabled"}', 0
+            return "{}", 0
+
+        return run, calls
+
+    def _open_bucket(self, panel, region="ap-southeast-2"):
+        bucket = dict(SAMPLE["s3"][0], region=region, status=region)
+        panel._on_overview(dict(SAMPLE, s3=[bucket]))
+        panel._tree.setCurrentItem(_section(panel, "s3").child(0))
+
+    def test_summary_sits_above_the_listing(self, qapp, monkeypatch):
+        run, calls = self._run()
+        monkeypatch.setattr(aws_cli, "run", run)
+        panel = AwsPanel()
+        panel._region = "us-east-1"  # the bucket lives elsewhere
+        self._open_bucket(panel)
+        assert _pump_until(lambda: "hello.txt" in panel._details.toPlainText())
+        text = panel._details.toPlainText()
+        assert "Region" in text and "ap-southeast-2" in text
+        assert "NOT fully blocked — off: RestrictPublicBuckets" in text
+        assert "SSE-S3 (AES256)" in text
+        assert "Versioning" in text and "Enabled" in text
+        assert text.index("Public access") < text.index("── Top-level objects ──")
+        assert text.index("── Top-level objects ──") < text.index("hello.txt")
+        # every call goes to the bucket's own region, not the selected one
+        assert all(argv[-2:] == ["--region", "ap-southeast-2"] for argv in calls)
+        assert not any(argv[:2] == ["s3api", "get-bucket-location"] for argv in calls)
+        assert "region=ap-southeast-2" in panel._console_url(panel._details_row)
+
+    def test_facts_show_even_when_the_listing_is_refused(self, qapp, monkeypatch):
+        run, _ = self._run(ls=("Error: Access denied — not allowed to call ListObjectsV2.", 254))
+        monkeypatch.setattr(aws_cli, "run", run)
+        panel = AwsPanel()
+        self._open_bucket(panel)
+        assert _pump_until(lambda: "Access denied" in panel._details.toPlainText())
+        text = panel._details.toPlainText()
+        assert "SSE-S3 (AES256)" in text and "── Top-level objects ──" in text
+
+
+def test_arrowing_through_rows_describes_only_where_it_stops(qapp, monkeypatch):
+    """Each row passed used to start its own CLI process."""
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(list(argv))
+        return _describe_by_argv(argv, **kw)
+
+    monkeypatch.setattr(aws_cli, "run", run)
+    panel = AwsPanel()
+    panel._on_overview(SAMPLE)
+    ec2 = _section(panel, "ec2")
+    panel._tree.setCurrentItem(ec2.child(0))
+    panel._tree.setCurrentItem(ec2.child(1))
+    panel._tree.setCurrentItem(_section(panel, "lambda").child(0))
+    assert _pump_until(lambda: "python3.12" in panel._details.toPlainText())
+    _pump_until(lambda: False, timeout_s=0.3)
+    assert calls == [["lambda", "get-function-configuration", "--function-name", "api-handler"]]
+
+
+def test_lambda_log_tail_uses_the_functions_own_log_group(qapp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(aws_cli, "run", lambda argv, **kw: calls.append(list(argv)) or ("", 0))
+    panel = AwsPanel()
+    panel._tail_lambda_logs({"name": "api-handler", "log_group": "/custom/api"})
+    panel._tail_lambda_logs({"name": "old-fn"})
+    assert _pump_until(lambda: len(calls) == 2)
+    assert sorted(argv[2] for argv in calls) == ["/aws/lambda/old-fn", "/custom/api"]
+
+
+def test_panel_publishes_its_selection_for_the_ai_tools(qapp, monkeypatch):
+    import polyglot_ai.ui.panels.aws_panel as mod
+
+    monkeypatch.setattr(mod, "fetch_overview", lambda p, r: dict(SAMPLE))
+    monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+    panel = AwsPanel()
+    assert panel_state.get_aws_context() is None  # nothing until the panel is used
+    panel._profile, panel._region = "work", "us-east-1"
+    panel._on_region_changed("eu-west-1")
+    assert panel_state.get_aws_context() == ("work", "eu-west-1")

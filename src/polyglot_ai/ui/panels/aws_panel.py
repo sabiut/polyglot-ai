@@ -79,17 +79,19 @@ def fetch_overview(profile: str, region: str) -> dict:
             with lock:
                 result["notes"].setdefault(section, text)
 
-        def call(argv: list[str], *, global_call: bool = False):
+        def fail(text: str) -> None:
+            with lock:
+                result["errors"].setdefault(section, text)
+
+        def call(argv: list[str], *, global_call: bool = False, report=fail):
             out, code = aws_cli.run(argv, profile=profile, region="" if global_call else region)
             if code != 0:
-                with lock:
-                    result["errors"].setdefault(section, out.removeprefix("Error: "))
+                report(out.removeprefix("Error: "))
                 return None
             try:
                 data = json.loads(out) if out else {}
             except json.JSONDecodeError:
-                with lock:
-                    result["errors"].setdefault(section, "Unexpected (non-JSON) output")
+                report("Unexpected (non-JSON) output")
                 return None
             # ``--max-items N`` stops the listing at N and leaves a
             # NextToken; without a note the section would look complete.
@@ -100,6 +102,9 @@ def fetch_overview(profile: str, region: str) -> dict:
 
         # Fetchers with their own caps (ECS) report them the same way.
         call.note = note
+        # For the per-row lookups that only fill in Status/Info: the
+        # listing itself worked, so their failures aren't worth a line.
+        call.quiet = lambda argv, **kw: call(argv, report=lambda text: None, **kw)
         return call
 
     ident = make_call("identity")(["sts", "get-caller-identity"], global_call=True)
@@ -153,6 +158,11 @@ class AwsPanel(QWidget):
         self._follow_up_timer.setSingleShot(True)
         self._follow_up_timer.timeout.connect(self._follow_up_refresh)
         self._follow_up_request = 0
+        #: Arrowing through the tree would start a describe (a CLI process)
+        #: per row passed; wait until the selection settles.
+        self._select_timer = QTimer(self)
+        self._select_timer.setSingleShot(True)
+        self._select_timer.timeout.connect(self._describe_current)
         #: Sections the user collapsed — kept across refreshes.
         self._collapsed: set[str] = set()
 
@@ -162,6 +172,8 @@ class AwsPanel(QWidget):
 
     #: Delay before the follow-up refresh after an action (0 disables it).
     _FOLLOW_UP_REFRESH_MS = 10_000
+    #: How long the selection must rest before its details are fetched.
+    _SELECT_DEBOUNCE_MS = 150
 
     @staticmethod
     def _empty_overview() -> dict:
@@ -247,7 +259,7 @@ class AwsPanel(QWidget):
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Resource", "Status", "Info"])
         self._tree.setColumnWidth(0, 200)
-        self._tree.setColumnWidth(1, 80)
+        self._tree.setColumnWidth(1, 110)  # fits "ap-southeast-2", "2 subscribers"
         # Section rows carry their own ▾/▸ in the text: the theme's branch
         # arrows are invisible on the dark background, so a collapsed
         # section looked empty with no way back. One click toggles it.
@@ -256,11 +268,23 @@ class AwsPanel(QWidget):
         self._tree.setIndentation(14)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
-        self._tree.currentItemChanged.connect(self._on_item_selected)
+        self._tree.currentItemChanged.connect(self._on_current_item_changed)
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.itemExpanded.connect(lambda it: self._on_section_toggled(it, True))
         self._tree.itemCollapsed.connect(lambda it: self._on_section_toggled(it, False))
-        self._splitter.addWidget(self._tree)
+
+        # The services with nothing in them, under the tree. A label wraps;
+        # as a tree row the list was cut off after the first few names.
+        self._empty_note = QLabel("")
+        self._empty_note.setWordWrap(True)
+        self._empty_note.setVisible(False)
+        listing = QWidget()
+        listing_layout = QVBoxLayout(listing)
+        listing_layout.setContentsMargins(0, 0, 0, 0)
+        listing_layout.setSpacing(0)
+        listing_layout.addWidget(self._tree, stretch=1)
+        listing_layout.addWidget(self._empty_note)
+        self._splitter.addWidget(listing)
 
         details = QWidget()
         d = QVBoxLayout(details)
@@ -353,6 +377,10 @@ class AwsPanel(QWidget):
             f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
             f"padding: 3px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
         )
+        self._empty_note.setStyleSheet(
+            f"color: {tc.get('text_muted')}; background: {tc.get('bg_base')}; "
+            f"font-size: {tc.FONT_XS}px; padding: 4px 8px;"
+        )
         self._details_header.setStyleSheet(
             f"#awsDetailsHeader {{ background: {tc.get('bg_surface')}; "
             f"border-top: 1px solid {tc.get('border_secondary')}; }}"
@@ -403,6 +431,7 @@ class AwsPanel(QWidget):
             self._region_combo.setCurrentText(region)
             self._region_combo.blockSignals(False)
             self._region = region
+            self._publish_context()
             self._refresh()
 
         run_in_thread(work, done, owner=self, name="aws-profiles")
@@ -428,6 +457,12 @@ class AwsPanel(QWidget):
         self._region = text
         self._context_changed()
 
+    def _publish_context(self) -> None:
+        """Tell the AI's AWS tools which profile and region are on screen."""
+        from polyglot_ai.core import panel_state
+
+        panel_state.set_aws_context(self._profile, self._region)
+
     def _context_changed(self) -> None:
         """Profile or region switched: nothing on screen belongs to it.
 
@@ -436,8 +471,10 @@ class AwsPanel(QWidget):
         the details, which the Console button and "Send to AI" would
         otherwise attribute to the new profile and region.
         """
+        self._publish_context()
         self._details_request += 1  # drop a describe that is still in flight
         self._follow_up_timer.stop()
+        self._select_timer.stop()
         self._details_row = None
         self._details_is_describe = False
         self._console_btn.setEnabled(False)
@@ -508,6 +545,8 @@ class AwsPanel(QWidget):
 
     def _show_hint(self, text: str) -> None:
         self._tree.clear()
+        self._empty_note.setText("")
+        self._empty_note.setVisible(False)
         hint = QTreeWidgetItem(self._tree)
         hint.setText(0, text)
         hint.setForeground(0, QColor(tc.get("text_muted")))
@@ -567,14 +606,10 @@ class AwsPanel(QWidget):
             # Expand only after the children exist.
             root.setExpanded(expanded)
 
-        if empty and self._tree.topLevelItemCount():
-            note = QTreeWidgetItem(self._tree)
-            note.setText(0, "None here: " + ", ".join(empty))
-            note.setToolTip(0, "No resources found for: " + ", ".join(empty))
-            note.setForeground(0, QColor(tc.get("text_muted")))
-            note.setFlags(Qt.ItemFlag.NoItemFlags)
-            note.setFirstColumnSpanned(True)
-        elif not self._tree.topLevelItemCount():
+        self._empty_note.setText(
+            "None here: " + ", ".join(empty) if empty and self._tree.topLevelItemCount() else ""
+        )
+        if not self._tree.topLevelItemCount():
             hint = QTreeWidgetItem(self._tree)
             hint.setText(0, "Nothing found in this region for this profile.")
             hint.setForeground(0, QColor(tc.get("text_muted")))
@@ -644,6 +679,8 @@ class AwsPanel(QWidget):
     def _apply_filter(self, text: str) -> None:
         """Hide resources whose name/info don't contain ``text``."""
         needle = text.strip().lower()
+        # Not while filtering: "None here" is about the account, not the filter.
+        self._empty_note.setVisible(bool(self._empty_note.text()) and not needle)
         for i in range(self._tree.topLevelItemCount()):
             section = self._tree.topLevelItem(i)
             meta = section.data(0, Qt.ItemDataRole.UserRole)
@@ -673,12 +710,16 @@ class AwsPanel(QWidget):
         describe: bool = False,
         keep_text: bool = False,
         after=None,
+        facts=None,
+        output_label: str = "Full output",
     ) -> None:
         """Run ``argv`` and show its output in the details pane.
 
         ``describe`` marks the output as the selected row's own details
         (re-fetched on refresh). ``keep_text`` leaves the current text up
         while reloading. ``after`` runs once the command has succeeded.
+        ``facts(run)`` makes further calls for the summary; it runs
+        alongside ``argv`` and its rows come first.
         """
         self._details_title.setText(title)
         if not keep_text:
@@ -689,13 +730,26 @@ class AwsPanel(QWidget):
         profile, region = self._profile, self._region
         self._details_context = (profile, region)
 
+        def run(extra_argv: list[str]) -> tuple[str, int]:
+            return aws_cli.run(extra_argv, profile=profile, region=region, timeout=30)
+
         def work():
-            return aws_cli.run(
-                argv, profile=profile, region=region, timeout=60, json_output=json_output
-            )
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                extra = pool.submit(facts, run) if facts is not None else None
+                main = aws_cli.run(
+                    argv, profile=profile, region=region, timeout=60, json_output=json_output
+                )
+                try:
+                    pairs = extra.result() if extra is not None else []
+                except Exception:  # the summary is a bonus; never lose the output to it
+                    logger.exception("AWS details: extra facts failed")
+                    pairs = []
+            return main, pairs
 
         def done(result):
-            output, code = result
+            (output, code), pairs = result
             if code == 0 and after is not None:
                 # The action happened even if the pane has since moved on
                 # to another resource, so this must not depend on it.
@@ -705,11 +759,14 @@ class AwsPanel(QWidget):
             text = _pretty(output) if code == 0 else output
             if code == 0 and summarize is not None:
                 try:
-                    summary = format_summary(summarize(json.loads(output)))
+                    pairs = [*pairs, *summarize(json.loads(output))]
                 except (json.JSONDecodeError, TypeError, ValueError):
-                    summary = ""
-                if summary:
-                    text = f"{summary}\n\n── Full output ──\n{text}"
+                    pass
+            # The facts stand on their own calls, so they show even when
+            # the main one failed (a bucket you can't list still has them).
+            summary = format_summary(pairs)
+            if summary:
+                text = f"{summary}\n\n── {output_label} ──\n{text}"
             self._current_details_text = text
             self._details.setPlainText(text or "(no output)")
 
@@ -718,6 +775,20 @@ class AwsPanel(QWidget):
                 self._details.setPlainText(f"Error: {exc}")
 
         run_in_thread(work, done, failed, owner=self, name="aws-details")
+
+    def _on_current_item_changed(self, current, previous) -> None:
+        """The selection moved: fetch its details once it has settled."""
+        if current is None:
+            self._select_timer.stop()
+        elif self._SELECT_DEBOUNCE_MS:
+            self._select_timer.start(self._SELECT_DEBOUNCE_MS)
+        else:
+            self._on_item_selected(current, previous)
+
+    def _describe_current(self) -> None:
+        # Whatever is current now — the item that started the timer may
+        # have been replaced by a refresh since.
+        self._on_item_selected(self._tree.currentItem(), None)
 
     def _on_item_selected(self, current, previous, *, keep_text: bool = False) -> None:
         if not current:
@@ -737,6 +808,8 @@ class AwsPanel(QWidget):
             summarize=rt.summarize,
             describe=True,
             keep_text=keep_text,
+            facts=(lambda run: rt.facts(data, run)) if rt.facts is not None else None,
+            output_label=rt.output_label,
         )
 
     def _console_url(self, row: dict | None) -> str:
@@ -807,11 +880,7 @@ class AwsPanel(QWidget):
         if kind == "lambda":
             name = data["name"]
             menu.addAction("Tail logs (last hour)").triggered.connect(
-                lambda: self._show_in_details(
-                    f"LOGS — {name}",
-                    ["logs", "tail", f"/aws/lambda/{name}", "--since", "1h", "--format", "short"],
-                    json_output=False,
-                )
+                lambda: self._tail_lambda_logs(data)
             )
             menu.addAction("Configuration").triggered.connect(
                 lambda: self._on_item_selected(item, None)
@@ -997,6 +1066,16 @@ class AwsPanel(QWidget):
         )
         self._status_label.setText(
             f"  {cluster} added to kubeconfig — open the Kubernetes panel (Ctrl+Shift+8) to browse it"
+        )
+
+    def _tail_lambda_logs(self, function: dict) -> None:
+        name = function["name"]
+        # The function's configured group; /aws/lambda/<name> is only the default.
+        log_group = function.get("log_group") or f"/aws/lambda/{name}"
+        self._show_in_details(
+            f"LOGS — {name}",
+            ["logs", "tail", log_group, "--since", "1h", "--format", "short"],
+            json_output=False,
         )
 
     def _invoke_lambda(self, name: str) -> None:

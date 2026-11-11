@@ -72,6 +72,30 @@ _STANDALONE_TOOL_NAMES = frozenset(
 )
 
 
+def prepare_arguments(tool_name: str, arguments: str) -> str:
+    """Pin context-dependent defaults into a tool call's arguments.
+
+    Callers run this once, before asking for approval, and use the
+    result for both the approval card and :meth:`execute`. The AWS
+    tools default to the profile and region selected in the AWS
+    panel; resolving that at execution time instead would let the
+    selection change while a card is waiting, so the command that
+    ran would not be the one that was approved.
+    """
+    if tool_name not in ("aws_cli", "aws_logs_tail"):
+        return arguments
+    try:
+        args = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError):
+        return arguments
+    if not isinstance(args, dict):
+        return arguments
+    from polyglot_ai.core.ai.tools.aws_tools import with_panel_context
+
+    pinned = with_panel_context(args)
+    return arguments if pinned is args else json.dumps(pinned)
+
+
 class ToolRegistry:
     """Manages tool execution with sandboxing.
 

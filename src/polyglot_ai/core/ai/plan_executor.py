@@ -153,8 +153,13 @@ class PlanExecutor:
             for tc_idx, tc in enumerate(tool_calls):
                 tool_name = tc.function_name
                 tool_call_id = tool_call_ids[tc_idx]
+                # Pin defaults (the AWS panel's profile/region) once, so the
+                # approval card shows exactly the call that then runs.
+                from polyglot_ai.core.ai.tools import prepare_arguments
+
+                arguments = prepare_arguments(tool_name, tc.arguments)
                 try:
-                    args = json.loads(tc.arguments)
+                    args = json.loads(arguments)
                 except Exception:
                     args = {}
 
@@ -162,7 +167,7 @@ class PlanExecutor:
                 # (InlineApprovalCard json.loads()es it), not the parsed dict.
                 needs_approval = self._tools and not self._tools.is_auto_approved(tool_name)
                 if needs_approval and on_tool_approval:
-                    approved = await on_tool_approval(tool_name, tc.arguments)
+                    approved = await on_tool_approval(tool_name, arguments)
                     if not approved:
                         # Raise so execute()'s failure path handles it —
                         # returning here would let the caller mark the

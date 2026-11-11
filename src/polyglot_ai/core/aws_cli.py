@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -412,6 +413,13 @@ def explain_error(stderr: str) -> str:
     if "could not connect to the endpoint" in low or "endpoint url" in low:
         return "Couldn't reach AWS — check the region and your network connection."
     if "accessdenied" in low or "not authorized" in low or "unauthorizedoperation" in low:
+        # Name what was refused: it is the one thing needed to fix the policy.
+        action = re.search(r"not authorized to perform: ([A-Za-z0-9-]+:[A-Za-z0-9*]+)", text)
+        if action:
+            return f"Access denied — this profile lacks permission for {action.group(1)}."
+        operation = re.search(r"when calling the (\w+) operation", text)
+        if operation:
+            return f"Access denied — this profile isn't allowed to call {operation.group(1)}."
         return "Access denied — this profile lacks permission for that call."
     if "invalid choice" in low or "argument command: invalid" in low:
         return "Unknown AWS command — check the service and sub-command names."
