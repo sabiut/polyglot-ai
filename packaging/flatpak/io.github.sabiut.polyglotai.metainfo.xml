@@ -23,6 +23,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.18" date="2026-11-12">
+      <description>
+        <p>AWS panel fixes. The details pane no longer keeps showing a
+        resource that has gone from the list, and switching profile or
+        region clears the old rows and details straight away. Typing a
+        region no longer refreshes on every keystroke. Stop, Start, Reboot
+        and Force new deployment refresh the list when they finish, and a
+        listing that was cut short says so. SSO and service settings in the
+        AWS config no longer appear as profiles. The AI now asks before
+        reading table data or credentials from AWS, before using a local
+        file as an argument, and before any call that writes a file.</p>
+      </description>
+    </release>
     <release version="0.18.17" date="2026-10-31">
       <description>
         <p>The AWS panel now covers EC2, Lambda, ECS, EKS, S3, RDS, DynamoDB,
