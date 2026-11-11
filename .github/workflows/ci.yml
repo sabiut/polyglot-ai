@@ -6,9 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Runners are pinned to ubuntu-24.04 here and in release.yml. On
+# 2026-11-11 ``ubuntu-latest`` resolved to an ubuntu-26.04 image whose
+# ``apt-get`` could not resolve the Ubuntu mirrors: every run sat in the
+# apt step for ten minutes and then failed, before any test ran. The
+# release packages have also only ever been built on 24.04. Move to a
+# newer image deliberately, in a change of its own.
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +23,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install Qt system dependencies
+        # A mirror outage should fail in minutes, not hold the job.
+        timeout-minutes: 5
         # libpulse0 + libxslt1.1 are pulled in for QtMultimedia /
         # QtWebEngine respectively — without them the module-level
         # imports in video_preview.py would short-circuit to the
@@ -75,7 +83,7 @@ jobs:
         run: pytest tests/ -q -p no:cacheprovider
 
   build-wheel:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

@@ -13,7 +13,7 @@ jobs:
     # Nothing used to run tests on the tagged commit, so a tag pushed past
     # a red CI (or onto a commit CI never saw) still shipped. Every build
     # below needs this job.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,7 +61,7 @@ jobs:
 
   build-wheel:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -78,7 +78,7 @@ jobs:
 
   build-deb:
     needs: build-wheel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -95,7 +95,7 @@ jobs:
 
   build-rpm:
     needs: build-wheel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: fedora:latest
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +110,7 @@ jobs:
 
   build-appimage:
     needs: build-wheel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -132,7 +132,7 @@ jobs:
 
   create-release:
     needs: [build-deb, build-rpm, build-appimage]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -184,7 +184,7 @@ jobs:
     # configured (see packaging/APT-REPO.md) this job logs a notice
     # and exits green, so forks and pre-setup releases don't fail.
     needs: create-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
       CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO || 'opensource-r6tx/polyglot-ai' }}
@@ -248,7 +248,7 @@ jobs:
     # It used to need only build-wheel, so PyPI could publish a version
     # whose deb/rpm/AppImage builds had failed.
     needs: create-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write  # OIDC token for PyPI trusted publishing
     steps:
