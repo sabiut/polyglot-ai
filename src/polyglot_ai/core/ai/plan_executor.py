@@ -155,7 +155,7 @@ class PlanExecutor:
                 tool_call_id = tool_call_ids[tc_idx]
                 # Pin defaults (the AWS panel's profile/region) once, so the
                 # approval card shows exactly the call that then runs.
-                from polyglot_ai.core.ai.tools import prepare_arguments
+                from polyglot_ai.core.ai.tools import parse_arguments, prepare_arguments
 
                 arguments = prepare_arguments(tool_name, tc.arguments)
                 try:
@@ -165,7 +165,11 @@ class PlanExecutor:
 
                 # Check approval — the callback expects the raw JSON string
                 # (InlineApprovalCard json.loads()es it), not the parsed dict.
-                needs_approval = self._tools and not self._tools.is_auto_approved(tool_name)
+                # The registry gets the arguments too: a read-only AWS call
+                # doesn't need asking, the same tool changing something does.
+                needs_approval = self._tools and not self._tools.is_auto_approved(
+                    tool_name, parse_arguments(arguments)
+                )
                 if needs_approval and on_tool_approval:
                     approved = await on_tool_approval(tool_name, arguments)
                     if not approved:

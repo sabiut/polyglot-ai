@@ -162,3 +162,52 @@ async def test_lifecycle_events_emitted_on_provided_bus():
     assert all(kw["plan"] is plan for _, kw in events)
     assert plan.status == PlanStatus.COMPLETED
     assert plan.steps[0].status == PlanStepStatus.COMPLETED
+
+
+async def test_approval_check_is_given_the_call_arguments():
+    """Whether a call needs asking depends on what it does: the registry
+    must see the arguments, not just the tool's name."""
+    raw_args = '{"path": "a.py", "content": "x"}'
+    seen: list = []
+
+    class Registry(FakeRegistry):
+        def is_auto_approved(self, tool_name, args=None):
+            seen.append((tool_name, args))
+            return True
+
+    provider = FakeProvider([_tool_call_turn(raw_args, call_id="call_abc"), _text_turn()])
+    await _executor(provider, Registry()).execute(_plan())
+    assert seen == [("file_write", {"path": "a.py", "content": "x"})]
+
+
+async def test_read_only_aws_call_in_a_plan_is_not_sent_for_approval():
+    from polyglot_ai.core.ai.tools import ToolRegistry
+
+    class Registry(ToolRegistry):
+        def __init__(self) -> None:
+            super().__init__()
+            self.executed: list[tuple[str, str]] = []
+
+        async def execute(self, tool_name, args_str):
+            self.executed.append((tool_name, args_str))
+            return "{}"
+
+    def aws_turn(command: str) -> list[StreamChunk]:
+        call = {"name": "aws_cli", "arguments": json.dumps({"command": command})}
+        return [
+            StreamChunk(tool_calls=[{"index": 0, "id": "call_1", "function": call}]),
+            StreamChunk(finish_reason="tool_calls"),
+        ]
+
+    asked: list = []
+
+    async def on_tool_approval(tool_name, arguments):
+        asked.append(json.loads(arguments)["command"])
+        return True
+
+    for command in ("lambda list-functions", "lambda delete-function --function-name f"):
+        registry = Registry()
+        provider = FakeProvider([aws_turn(command), _text_turn()])
+        await _executor(provider, registry).execute(_plan(), on_tool_approval=on_tool_approval)
+        assert [json.loads(a)["command"] for _, a in registry.executed] == [command]
+    assert asked == ["lambda delete-function --function-name f"]

@@ -2137,14 +2137,6 @@ class ChatPanel(QWidget):
             "git_show_file": "Reading file from git...",
         }
         for tool_call in tool_calls_list:
-            logger.info(
-                "Executing tool: %s (id=%s, needs_approval=%s)",
-                tool_call.function_name,
-                tool_call.id,
-                self._tool_registry.needs_approval(tool_call.function_name)
-                if self._tool_registry
-                else "no_registry",
-            )
             status = _tool_status_map.get(
                 tool_call.function_name, f"Running {tool_call.function_name}..."
             )
@@ -2159,23 +2151,36 @@ class ChatPanel(QWidget):
             # approval entirely, including the fetch server seeded on
             # first run, which injected text could use to send project
             # data to any URL.
-            if is_mcp:
-                needs_approval = self._mcp_client.tool_needs_approval(tool_call.function_name)
-            else:
-                needs_approval = bool(
-                    self._tool_registry
-                    and self._tool_registry.needs_approval(tool_call.function_name)
-                )
-
             # What the user approves and what runs must be the same
             # string, so defaults (the AWS panel's profile and region)
             # are pinned once, here.
-            from polyglot_ai.core.ai.tools import prepare_arguments
+            from polyglot_ai.core.ai.tools import parse_arguments, prepare_arguments
 
             arguments = (
                 tool_call.arguments
                 if is_mcp
                 else prepare_arguments(tool_call.function_name, tool_call.arguments)
+            )
+
+            if is_mcp:
+                needs_approval = self._mcp_client.tool_needs_approval(tool_call.function_name)
+            else:
+                # Decided on the call, not just the tool's name: a read-only
+                # AWS command or a bootstrap-mode install runs without
+                # asking, the same tool doing anything else asks. The
+                # registry was only ever given the name here, so those
+                # two rules never applied and every such call prompted.
+                needs_approval = bool(
+                    self._tool_registry
+                    and self._tool_registry.needs_approval(
+                        tool_call.function_name, parse_arguments(arguments)
+                    )
+                )
+            logger.info(
+                "Executing tool: %s (id=%s, needs_approval=%s)",
+                tool_call.function_name,
+                tool_call.id,
+                needs_approval,
             )
 
             if needs_approval:

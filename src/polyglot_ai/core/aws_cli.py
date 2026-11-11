@@ -227,6 +227,16 @@ _SECRET_OR_FILE_READS = frozenset(
         ("apigateway", "get-api-keys"),
         ("appsync", "list-api-keys"),
         ("ec2", "get-password-data"),
+        ("emr", "get-cluster-session-credentials"),
+        # Pre-signed download links.
+        ("lambda", "get-layer-version"),
+        ("lambda", "get-layer-version-by-arn"),
+        ("ecr", "get-download-url-for-layer"),
+        # User data comes back base64-encoded, which secret redaction
+        # can't see through, and it is where bootstrap secrets live.
+        ("ec2", "describe-instance-attribute"),
+        ("ec2", "describe-launch-template-versions"),
+        ("autoscaling", "describe-launch-configurations"),
     }
 )
 #: Reads that return stored data (table items, stream records, query

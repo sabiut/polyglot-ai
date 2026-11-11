@@ -72,6 +72,20 @@ _STANDALONE_TOOL_NAMES = frozenset(
 )
 
 
+def parse_arguments(arguments: str) -> dict | None:
+    """A tool call's JSON arguments as a dict, or ``None`` if they aren't one.
+
+    For the approval check. ``None`` makes the registry decide on the
+    tool's name alone, which is the cautious answer for anything that
+    needs its arguments to be judged safe.
+    """
+    try:
+        args = json.loads(arguments) if arguments else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return args if isinstance(args, dict) else None
+
+
 def prepare_arguments(tool_name: str, arguments: str) -> str:
     """Pin context-dependent defaults into a tool call's arguments.
 
