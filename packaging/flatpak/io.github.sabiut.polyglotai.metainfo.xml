@@ -23,6 +23,21 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.19" date="2026-11-12">
+      <description>
+        <p>The AI's AWS tools now use the profile and region selected in the
+        AWS panel, and the approval card shows them. Read-only AWS commands
+        (describe, list, get) run without a prompt; anything that changes
+        state, returns stored data or credentials, or touches a local file
+        still asks. Before this release every AWS command asked, and
+        bootstrap mode never skipped a prompt; both now work as described.
+        In the AWS panel, S3 buckets show their region and a summary of
+        public access, encryption and versioning; EKS, DynamoDB, SQS and SNS
+        rows show a status and a count; access-denied messages name the
+        action that was refused; ECS lists faster; and the list of empty
+        services wraps instead of being cut off.</p>
+      </description>
+    </release>
     <release version="0.18.18" date="2026-11-12">
       <description>
         <p>AWS panel fixes. The details pane no longer keeps showing a
