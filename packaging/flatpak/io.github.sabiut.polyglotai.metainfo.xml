@@ -23,6 +23,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.26" date="2026-11-13">
+      <description>
+        <p>On Windows, a cancelled database backup that had to be given up
+        on no longer leaves its half-written file on disk.</p>
+      </description>
+    </release>
     <release version="0.18.25" date="2026-11-13">
       <description>
         <p>Cancel now stops a database backup while the database is busy
