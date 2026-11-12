@@ -23,6 +23,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.23" date="2026-11-12">
+      <description>
+        <p>A saved database connection can be deleted: select it and click
+        the bin next to the pencil. You are asked first, the database
+        itself is not touched, and its query history and snippets are kept
+        unless you choose to delete them too. On Windows, saving settings
+        and connections a second time no longer fails.</p>
+      </description>
+    </release>
     <release version="0.18.22" date="2026-11-12">
       <description>
         <p>The Database panel can back up a database to a file and restore
