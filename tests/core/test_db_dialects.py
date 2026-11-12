@@ -11,6 +11,7 @@ from polyglot_ai.core.db_dialects import (
     ENGINES,
     build_url,
     db_type_for_rds_engine,
+    form_values,
     make_ssl_context,
     parse_url,
     preview_query,
@@ -125,3 +126,71 @@ def test_only_engines_that_can_verify_offer_it():
     sql_server = [mode for _label, mode in ssl_modes_for("mssql")]
     assert sql_server == ["prefer", "require", "disable"]  # pymssql can't check a certificate
     assert ENGINES["mssql"].verifies_certificate is False
+
+
+class TestFormValues:
+    """A saved connection, turned back into the dialog's fields for editing."""
+
+    def test_server_connection_with_ssh_tunnel(self):
+        url = build_url("postgresql", "db.internal", 5433, "app", "p@ss/w:rd", "orders")
+        options = {
+            "url_encoded": True,
+            "ssl": "verify",
+            "ca_file": "~/global-bundle.pem",
+            "engine_label": "Amazon Aurora (PostgreSQL)",
+            "tunnel": {"kind": "ssh", "host": "bastion", "user": "ec2-user", "port": 2222},
+        }
+        values = form_values("prod", "postgresql", url, options, read_only=False)
+        assert values == {
+            "name": "prod",
+            "db_type": "postgresql",
+            "engine_label": "Amazon Aurora (PostgreSQL)",
+            "read_only": False,
+            "host": "db.internal",
+            "port": 5433,
+            "user": "app",
+            "password": "p@ss/w:rd",
+            "database": "orders",
+            "ssl": "verify",
+            "ca_file": "~/global-bundle.pem",
+            "route": "ssh",
+            "ssh_host": "bastion",
+            "ssh_port": 2222,
+            "ssh_user": "ec2-user",
+            "ssh_key": "",
+        }
+
+    def test_iam_and_session_manager_share_one_profile_and_region(self):
+        url = build_url("mysql", "db.internal", 3306, "iam_user", "", "app")
+        options = {
+            "url_encoded": True,
+            "ssl": "require",
+            "iam": {"profile": "prod", "region": "eu-west-1"},
+            "tunnel": {"kind": "ssm", "target": "i-0abc", "profile": "prod", "region": "eu-west-1"},
+        }
+        values = form_values("aurora", "mysql", url, options)
+        assert values["auth"] == "iam" and values["password"] == ""
+        assert (values["route"], values["ssm_target"]) == ("ssm", "i-0abc")
+        assert (values["profile"], values["region"]) == ("prod", "eu-west-1")
+
+        # Session Manager alone: the pair comes from the tunnel.
+        del options["iam"]
+        values = form_values("aurora", "mysql", url, options)
+        assert "auth" not in values
+        assert (values["profile"], values["region"]) == ("prod", "eu-west-1")
+
+    def test_sqlite_is_just_a_path(self):
+        assert form_values("local", "sqlite", "/data/app.db") == {
+            "name": "local",
+            "db_type": "sqlite",
+            "read_only": True,
+            "path": "/data/app.db",
+        }
+
+    def test_connection_saved_before_options_shows_what_it_has_been_doing(self):
+        """No options: the URL is taken literally, and MySQL was never encrypted."""
+        mysql = form_values("old", "mysql", "mysql://root:pa%41ss@localhost:3306/shop")
+        assert mysql["password"] == "pa%41ss"  # not decoded to "paAss"
+        assert mysql["ssl"] == "disable" and mysql["route"] == "direct"
+        postgres = form_values("old", "postgresql", "postgresql://u:p@localhost:5432/shop")
+        assert postgres["ssl"] == "prefer"

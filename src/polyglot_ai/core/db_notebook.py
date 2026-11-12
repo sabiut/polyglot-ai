@@ -238,6 +238,22 @@ class DBNotebookStore:
         except sqlite3.Error as e:
             logger.warning("db_notebook: could not delete snippet: %s", e)
 
+    def rename_connection(self, old: str, new: str) -> None:
+        """Move a connection's history and snippets to its new name."""
+        if not old or not new or old == new:
+            return
+        try:
+            with self._conn() as c:
+                c.execute("UPDATE history SET connection = ? WHERE connection = ?", (new, old))
+                # A snippet left under the new name by an earlier connection
+                # gives way to the one being moved in.
+                c.execute(
+                    "UPDATE OR REPLACE snippets SET connection = ? WHERE connection = ?",
+                    (new, old),
+                )
+        except sqlite3.Error as e:
+            logger.warning("db_notebook: could not rename connection %r: %s", old, e)
+
 
 # Module-level singleton — both UI panels share the same store.
 _store: DBNotebookStore | None = None

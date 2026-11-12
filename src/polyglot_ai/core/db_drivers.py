@@ -29,11 +29,14 @@ class UnsupportedOption(Exception):
 def describe_error(exc: Exception) -> str:
     """One readable line from a driver exception.
 
-    pymssql raises ``(number, b"message…DB-Lib error message …")`` tuples
-    whose ``str()`` is the tuple's repr; oracledb's messages come with a
-    help URL on a second line.
+    pymssql raises ``(number, b"message…DB-Lib error message …")`` — as
+    one tuple when a login fails, as two arguments when a query does —
+    and either way its ``str()`` is a tuple's repr; oracledb's messages
+    come with a help URL on a second line.
     """
     detail = exc.args[0] if exc.args else exc
+    if len(exc.args) >= 2 and isinstance(exc.args[0], int):
+        detail = exc.args
     if isinstance(detail, tuple) and len(detail) >= 2:
         code, message = detail[0], detail[1]
         if isinstance(message, bytes):
@@ -93,14 +96,14 @@ class MssqlDriver:
         SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
                CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END,
                CASE WHEN pk.COLUMN_NAME IS NULL THEN 0 ELSE 1 END
-        FROM INFORMATION_SCHEMA.COLUMNS c
-        JOIN INFORMATION_SCHEMA.TABLES t
+        FROM {db}INFORMATION_SCHEMA.COLUMNS c
+        JOIN {db}INFORMATION_SCHEMA.TABLES t
           ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
          AND t.TABLE_TYPE = 'BASE TABLE'
         LEFT JOIN (
             SELECT ku.TABLE_SCHEMA, ku.TABLE_NAME, ku.COLUMN_NAME
-            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+            FROM {db}INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            JOIN {db}INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
               ON ku.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
              AND ku.TABLE_SCHEMA = tc.TABLE_SCHEMA
             WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
@@ -150,10 +153,31 @@ class MssqlDriver:
         if conn is not None:
             conn.close()
 
-    def schema(self) -> list[TableInfo]:
+    #: Online databases this login may open. ``rdsadmin`` is Amazon's own.
+    _DATABASES_SQL = """
+        SELECT name, CASE WHEN name = DB_NAME() THEN 1 ELSE 0 END,
+               CASE WHEN database_id <= 4 OR name = 'rdsadmin' THEN 1 ELSE 0 END
+        FROM sys.databases
+        WHERE state = 0 AND HAS_DBACCESS(name) = 1
+        ORDER BY name
+    """
+
+    def databases(self) -> list[tuple[str, bool, bool]]:
+        """``(name, is the connected one, is a system database)`` for each database."""
         cursor = self._conn.cursor()
         try:
-            cursor.execute(self._SCHEMA_SQL)
+            cursor.execute(self._DATABASES_SQL)
+            rows = cursor.fetchall()
+            return [(name, bool(current), bool(system)) for name, current, system in rows]
+        finally:
+            cursor.close()
+
+    def schema(self, database: str | None = None) -> list[TableInfo]:
+        """The connected database's tables, or those of another one on the server."""
+        prefix = "[" + database.replace("]", "]]") + "]." if database else ""
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(self._SCHEMA_SQL.format(db=prefix))
             rows = cursor.fetchall()
         finally:
             cursor.close()
@@ -244,7 +268,15 @@ class OracleDriver:
         if conn is not None:
             conn.close()
 
-    def schema(self) -> list[TableInfo]:
+    def databases(self) -> list[tuple[str, bool, bool]]:
+        """An Oracle session sees one database: the one it signed in to."""
+        with self._conn.cursor() as cursor:
+            # The pluggable database's name; the database's own before 12c.
+            cursor.execute("SELECT SYS_CONTEXT('USERENV', 'CON_NAME') FROM dual")
+            name = cursor.fetchone()[0]
+        return [(name or self._target.database or "database", True, False)]
+
+    def schema(self, database: str | None = None) -> list[TableInfo]:
         with self._conn.cursor() as cursor:
             cursor.execute(self._SCHEMA_SQL)
             return _group(cursor.fetchall())

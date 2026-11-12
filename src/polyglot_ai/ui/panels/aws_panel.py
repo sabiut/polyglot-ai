@@ -33,7 +33,15 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core import aws_cli
-from polyglot_ai.core.aws_resources import BY_KEY, RESOURCE_TYPES, format_summary
+from polyglot_ai.core.aws_resources import (
+    BY_KEY,
+    RESOURCE_TYPES,
+    default_snapshot_name,
+    format_summary,
+    list_snapshots_command,
+    snapshot_command,
+    snapshot_name_problem,
+)
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels import shared_icons
@@ -1035,6 +1043,9 @@ class AwsPanel(QWidget):
                 connect.setEnabled(False)
                 connect.setToolTip(self._database_unsupported_reason(data))
             connect.triggered.connect(lambda: self._connect_database(data))
+            menu.addSeparator()
+            menu.addAction("Snapshots").triggered.connect(lambda: self._rds_snapshots(data))
+            menu.addAction("Create snapshot…").triggered.connect(lambda: self._rds_snapshot(data))
         elif kind == "s3":
             bucket = data["name"]
             menu.addAction("List top-level objects").triggered.connect(
@@ -1120,6 +1131,42 @@ class AwsPanel(QWidget):
                 "service.deployments",
             ],
             after=self._refresh_after_action,
+        )
+
+    def _rds_snapshots(self, db: dict) -> None:
+        self._show_in_details(
+            f"SNAPSHOTS — {db.get('cluster') or db['id']}", list_snapshots_command(db)
+        )
+
+    def _rds_snapshot(self, db: dict) -> None:
+        """Take a manual snapshot: AWS's own backup of the whole instance."""
+        cluster = db.get("cluster", "")
+        what = f"cluster {cluster} (which {db['id']} belongs to)" if cluster else db["id"]
+        name, ok = QInputDialog.getText(
+            self,
+            "Create snapshot",
+            f"Name for the snapshot of {what}:",
+            text=default_snapshot_name(db),
+        )
+        if not ok:
+            return
+        name = name.strip()
+        problem = snapshot_name_problem(name, db)
+        if problem:
+            QMessageBox.warning(self, "Snapshot name", problem)
+            return
+        argv = snapshot_command(db, name)
+        if not self._confirm(
+            "Create snapshot",
+            f"Create snapshot {name} of RDS {what} in {self._where()}?\n\n"
+            "A manual snapshot is kept, and billed as backup storage, until you delete "
+            "it. On a Single-AZ instance, reads and writes can pause for a moment while "
+            "it starts.\n\n"
+            f"This runs: aws {' '.join(argv)}",
+        ):
+            return
+        self._show_in_details(
+            f"SNAPSHOT — {cluster or db['id']}", argv, after=self._refresh_after_action
         )
 
     def _eks_update_kubeconfig(self, cluster: str) -> None:

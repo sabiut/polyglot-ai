@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -33,18 +34,25 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from polyglot_ai.core.async_utils import safe_task
-from polyglot_ai.core.db_dialects import parse_url, preview_query, quote_identifier, quote_table
+from polyglot_ai.core.db_dialects import (
+    describe_target,
+    form_values,
+    parse_url,
+    preview_query,
+    quote_identifier,
+    quote_table,
+)
 from polyglot_ai.core.db_explorer import QueryResult, get_global_db_manager
 from polyglot_ai.core.db_notebook import get_notebook_store
 from polyglot_ai.ui import theme
 from polyglot_ai.ui import theme_colors as tc
+from polyglot_ai.ui.panels.database_backup_dialog import BackupDialog, RestoreDialog
 from polyglot_ai.ui.panels.database_dialogs import (
     AddConnectionDialog,
     EditCellDialog,
@@ -52,8 +60,22 @@ from polyglot_ai.ui.panels.database_dialogs import (
     combo_dropdown_style,
     prompt_text,
 )
+from polyglot_ai.ui.panels.database_widgets import (
+    fill_schema_tree,
+    load_database_into,
+    other_database_problem,
+    ElidedLabel,
+    HistoryDelegate,
+    SchemaTree,
+    history_meta,
+    history_preview,
+    history_tooltip,
+    refresh_icon,
+    schema_tree_style,
+)
 from polyglot_ai.ui.widgets.result_chart import ResultChartWidget
 from polyglot_ai.ui.widgets.result_profile import ResultProfileWidget
+from polyglot_ai.ui.widgets.sql_highlighter import SqlHighlighter
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +155,41 @@ class DatabasePanel(QWidget):
         self._conn_combo.currentTextChanged.connect(self._on_connection_changed)
         conn_layout.addWidget(self._conn_combo, stretch=1)
 
+        # Edit icon button (a pencil)
+        edit_btn = QPushButton()
+        edit_btn.setObjectName("dbEditBtn")
+        edit_btn.setFixedSize(26, 26)
+        edit_btn.setToolTip("Edit connection details")
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_pixmap = QPixmap(16, 16)
+        edit_pixmap.fill(QColor(0, 0, 0, 0))
+        ep = QPainter(edit_pixmap)
+        ep.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ep_pen = QPen(QColor(tc.get("text_secondary")))
+        ep_pen.setWidthF(1.4)
+        ep_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        ep.setPen(ep_pen)
+        # Shaft from the eraser (top right) down to the shoulders, then the tip.
+        ep.drawPolygon(
+            QPolygonF(
+                [
+                    QPointF(11.0, 2.5),
+                    QPointF(13.5, 5.0),
+                    QPointF(6.0, 12.5),
+                    QPointF(3.5, 10.0),
+                ]
+            )
+        )
+        ep.drawPolyline(QPolygonF([QPointF(3.5, 10.0), QPointF(2.5, 13.5), QPointF(6.0, 12.5)]))
+        ep.end()
+        edit_btn.setIcon(QIcon(edit_pixmap))
+        edit_btn.setStyleSheet(
+            "#dbEditBtn { background: transparent; border: none; }"
+            "#dbEditBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        edit_btn.clicked.connect(self._edit_selected)
+        conn_layout.addWidget(edit_btn)
+
         # Connect icon button
         connect_btn = QPushButton()
         connect_btn.setObjectName("dbConnectBtn")
@@ -187,10 +244,9 @@ class DatabasePanel(QWidget):
         layout.addWidget(self._conn_bar)
 
         # Schema tree (compact, in sidebar)
-        self._schema_tree = QTreeWidget()
-        self._schema_tree.setHeaderLabels(["Name", "Type"])
-        self._schema_tree.setColumnWidth(0, 180)
+        self._schema_tree = SchemaTree()
         self._schema_tree.itemDoubleClicked.connect(self._on_schema_double_click)
+        self._schema_tree.database_requested.connect(self._load_database)
         layout.addWidget(self._schema_tree)
 
         layout.addStretch()
@@ -207,7 +263,20 @@ class DatabasePanel(QWidget):
         self._open_btn.setFixedHeight(28)
         self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_btn.clicked.connect(self._open_full_window)
-        ob_layout.addWidget(self._open_btn)
+        ob_layout.addWidget(self._open_btn, stretch=1)
+
+        self._backup_btn = QPushButton("Backup")
+        self._backup_btn.setObjectName("dbBackupBtn")
+        self._backup_btn.setFixedHeight(28)
+        self._backup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._backup_btn.setToolTip("Back up this database, or load a backup into it")
+        self._backup_menu = QMenu(self._backup_btn)
+        self._backup_action = self._backup_menu.addAction("Back up…")
+        self._backup_action.triggered.connect(self._backup_selected)
+        self._restore_action = self._backup_menu.addAction("Restore from a backup…")
+        self._restore_action.triggered.connect(self._restore_selected)
+        self._backup_btn.setMenu(self._backup_menu)
+        ob_layout.addWidget(self._backup_btn)
 
         layout.addWidget(self._open_bar)
 
@@ -239,15 +308,7 @@ class DatabasePanel(QWidget):
             f"border: 1px solid {tc.get('border_card')}; border-radius: 3px; "
             f"padding: 3px 8px; font-size: {tc.FONT_SM}px; }}"
         )
-        self._schema_tree.setStyleSheet(
-            f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
-            f"border: none; font-size: {tc.FONT_SM}px; }}"
-            f"QTreeWidget::item {{ padding: 2px; }}"
-            f"QTreeWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
-            f"QHeaderView::section {{ background: {tc.get('bg_surface')}; "
-            f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
-            f"padding: 3px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
-        )
+        self._schema_tree.setStyleSheet(schema_tree_style(item_padding=2))
         self._open_bar.setStyleSheet(
             f"#dbOpenBar {{ background: {tc.get('bg_surface')}; "
             f"border-top: 1px solid {tc.get('border_secondary')}; }}"
@@ -257,6 +318,19 @@ class DatabasePanel(QWidget):
             f"color: {tc.get('text_on_accent')}; border: none; border-radius: 4px; "
             f"padding: 0 16px; font-size: {tc.FONT_SM}px; font-weight: 600; }}"
             f"#dbOpenExplorer:hover {{ background: {tc.get('accent_primary_hover')}; }}"
+        )
+        self._backup_btn.setStyleSheet(
+            f"#dbBackupBtn {{ background: transparent; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; "
+            f"padding: 0 18px 0 10px; font-size: {tc.FONT_SM}px; }}"
+            f"#dbBackupBtn:hover {{ background: {tc.get('bg_hover')}; }}"
+            "#dbBackupBtn::menu-indicator { subcontrol-position: right center; right: 6px; }"
+        )
+        self._backup_menu.setStyleSheet(
+            f"QMenu {{ background: {tc.get('bg_surface')}; color: {tc.get('text_primary')}; "
+            f"border: 1px solid {tc.get('border_card')}; }}"
+            "QMenu::item { padding: 5px 20px; }"
+            f"QMenu::item:selected {{ background: {tc.get('bg_active')}; }}"
         )
         self._status_label.setStyleSheet(
             f"#dbStatusBar {{ color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
@@ -282,7 +356,11 @@ class DatabasePanel(QWidget):
     def _add_connection(self, new) -> None:
         if not (new.name and new.connection_string):
             return
-        replacing = new.name in self._db_manager.connection_names
+        if new.name in self._db_manager.connection_names:
+            # Same name as a saved connection: it is replaced, the way an
+            # edit would — which also closes the old one if it was open.
+            self._apply_edit(new.name, new)
+            return
         self._db_manager.add_connection_sync(
             new.name,
             new.db_type,
@@ -291,13 +369,100 @@ class DatabasePanel(QWidget):
             read_only=new.read_only,
             options=new.options,
         )
-        label = f"{new.name} ({new.db_type})"
-        index = self._conn_combo.findText(label) if replacing else -1
+        self._conn_combo.addItem(f"{new.name} ({new.db_type})")
+        self._conn_combo.setCurrentIndex(self._conn_combo.count() - 1)
+        self._save_connections()
+
+    def _edit_selected(self) -> None:
+        """Reopen the selected connection in the dialog, to change its details."""
+        name = self._active_connection
+        conn = self._db_manager.get_connection(name or "")
+        if conn is None:
+            self._status_label.setText("Add a connection first")
+            return
+        dialog = AddConnectionDialog(
+            self,
+            prefill=form_values(
+                conn.name,
+                conn.db_type,
+                conn._connection_string,
+                conn.options,
+                read_only=conn.read_only,
+            ),
+            editing=True,
+            taken_names=[n for n in self._db_manager.connection_names if n != name],
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_edit(conn.name, dialog.get_values())
+
+    def _apply_edit(self, old_name: str, new) -> None:
+        """Save an edited connection in place of ``old_name``.
+
+        A change of name or of the read-only switch keeps the connection
+        as it is, open or not. Anything else — host, user, password,
+        encryption, tunnel — means a new connection: the old one is
+        closed, and reopened with the new details if it was open.
+        """
+        old = self._db_manager.get_connection(old_name)
+        if old is None or not (new.name and new.connection_string):
+            return
+        old_label = f"{old_name} ({old.db_type})"
+        was_connected = old.is_connected
+        current, retired = self._db_manager.replace_connection_sync(
+            old_name,
+            new.name,
+            new.db_type,
+            new.connection_string,
+            mcp_client=self._mcp_client,
+            read_only=new.read_only,
+            options=new.options,
+        )
+
+        label = f"{current.name} ({current.db_type})"
+        index = self._conn_combo.findText(old_label)
         if index < 0:
             self._conn_combo.addItem(label)
             index = self._conn_combo.count() - 1
+        else:
+            self._conn_combo.setItemText(index, label)
         self._conn_combo.setCurrentIndex(index)
+        self._active_connection = current.name
+
+        if current.name != old_name:
+            self._forget_saved_name(old_name)
+            # Query history and snippets are filed under the name.
+            get_notebook_store().rename_connection(old_name, current.name)
         self._save_connections()
+
+        window = self._full_window
+        if window is not None and window._conn in (old, current):
+            window.set_connection(current)
+        if retired is None:
+            self._status_label.setText(f"Saved: {current.name}")
+            return
+
+        self._schema_tree.clear()
+        self._status_label.setText(f"Saved: {current.name}")
+        self._status_label.setToolTip("")
+
+        async def swap() -> None:
+            try:
+                await retired.disconnect()
+            except Exception:
+                logger.debug("Closing the edited connection %s failed", old_name, exc_info=True)
+            if was_connected and self._active_connection == current.name:
+                self._connect_selected()
+
+        safe_task(swap(), name="db_edit_swap")
+
+    def _forget_saved_name(self, name: str) -> None:
+        """Drop the keyring entry of a connection that no longer has this name."""
+        import keyring
+
+        try:
+            keyring.delete_password("polyglot-ai-db", name)
+        except Exception:
+            logger.debug("No keyring entry to remove for %s", name, exc_info=True)
 
     def _save_connections(self) -> None:
         """Persist connections to disk. Connection strings stored in keyring."""
@@ -388,8 +553,7 @@ class DatabasePanel(QWidget):
             if ok:
                 self._status_label.setText(f"Connected: {conn.name}")
                 self._status_label.setToolTip(msg)
-                tables = await conn.get_schema()
-                QTimer.singleShot(0, lambda: self._populate_schema(tables))
+                await self._show_schema_of(conn)
             else:
                 # The bar is one short line; the whole reason (which for a
                 # tunnel says what to do about it) goes in the tooltip and
@@ -399,6 +563,15 @@ class DatabasePanel(QWidget):
                 QTimer.singleShot(0, lambda: self._show_connect_error(msg))
 
         safe_task(do_connect(), name="db_connect")
+
+    async def _show_schema_of(self, conn) -> None:
+        """Fill the tree, and an open editor window's, with what ``conn`` holds now."""
+        tables = await conn.get_schema()
+        databases = await conn.list_databases()
+        QTimer.singleShot(0, lambda: self._populate_schema(tables, databases))
+        window = self._full_window
+        if window is not None and window.isVisible() and window._conn is conn:
+            QTimer.singleShot(0, lambda: window.show_schema(tables, databases))
 
     def _show_connect_error(self, message: str) -> None:
         self._schema_tree.clear()
@@ -425,27 +598,63 @@ class DatabasePanel(QWidget):
 
         safe_task(do_disconnect(), name="db_disconnect")
 
-    def _populate_schema(self, tables) -> None:
-        self._schema_tree.clear()
-        for table in tables:
-            table_item = QTreeWidgetItem(self._schema_tree)
-            table_item.setText(0, table.name)
-            table_item.setText(1, "table")
-            for col in table.columns:
-                col_item = QTreeWidgetItem(table_item)
-                col_item.setText(0, col.name)
-                type_str = col.data_type
-                if col.primary_key:
-                    type_str += " PK"
-                col_item.setText(1, type_str)
-        self._schema_tree.expandAll()
+    def _populate_schema(self, tables, databases=()) -> None:
+        fill_schema_tree(self._schema_tree, tables, databases)
+
+    def _load_database(self, database: str) -> None:
+        """A database was opened in the tree: read its tables."""
+        conn = self._db_manager.get_connection(self._active_connection or "")
+        if conn is not None:
+            load_database_into(self._schema_tree, conn, database)
 
     def _on_schema_double_click(self, item: QTreeWidgetItem, column: int) -> None:
-        if item.parent() is None:
-            table_name = item.text(0)
-            conn = self._db_manager.get_connection(self._active_connection or "")
-            db_type = conn.db_type if conn else "sqlite"
-            self._open_full_window(initial_query=preview_query(db_type, table_name))
+        found = self._schema_tree.table_at(item)
+        conn = self._db_manager.get_connection(self._active_connection or "")
+        if found is None or conn is None:
+            return
+        database, table = found
+        problem = other_database_problem(conn.db_type, database)
+        if problem:
+            self._status_label.setText(problem[:70])
+            self._status_label.setToolTip(problem)
+            return
+        self._open_full_window(initial_query=preview_query(conn.db_type, table, database=database))
+
+    # ── Backup and restore ──────────────────────────────────────────
+
+    def _selected_connection(self):
+        if not self._active_connection:
+            self._status_label.setText("Add a connection first")
+            return None
+        return self._db_manager.get_connection(self._active_connection)
+
+    def _backup_selected(self) -> None:
+        conn = self._selected_connection()
+        if conn is None:
+            return
+        dialog = BackupDialog(conn, self)
+        dialog.exec()
+        if dialog.finished_ok:
+            self._status_label.setText(f"Backed up: {conn.name}")
+
+    def _restore_selected(self) -> None:
+        conn = self._selected_connection()
+        if conn is None:
+            return
+        was_connected = conn.is_connected
+        dialog = RestoreDialog(conn, self)
+        dialog.exec()
+        if dialog.finished_ok:
+            self._status_label.setText(f"Restored: {conn.name}")
+        if not was_connected:
+            return
+        if not conn.is_connected:
+            # A SQLite restore closes the panel's handle on the file,
+            # whether or not it then went through.
+            self._connect_selected()
+        elif dialog.finished_ok:
+            # Still open: show the tables that are there now.
+            safe_task(self._show_schema_of(conn), name="db_schema_after_restore")
 
     # ── Full Window ─────────────────────────────────────────────────
 
@@ -480,6 +689,9 @@ class _DatabaseWindow(QWidget):
     def __init__(self, connection, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self._conn = connection
+        # Counts schema loads, so one that finishes late can't overwrite
+        # the result of one started after it.
+        self._schema_load = 0
         self.resize(1000, 700)
         self.setMinimumSize(600, 400)
         self.setStyleSheet(f"background: {tc.get('bg_base')};")
@@ -510,6 +722,66 @@ class _DatabaseWindow(QWidget):
     def set_query(self, sql: str) -> None:
         self._sql_editor.setPlainText(sql)
 
+    def set_connection(self, connection) -> None:
+        """Carry on with an edited connection; the SQL in the editor stays.
+
+        The schema is cleared, not reloaded: the panel reconnects and
+        hands the tables over through :meth:`show_schema`.
+        """
+        changed = connection is not self._conn
+        self._conn = connection
+        self.setWindowTitle(f"Database — {self._extract_db_name()}")
+        self._refresh_header()
+        if changed:
+            self._schema_load += 1
+            self._schema_tree.clear()
+        self._refresh_history()
+        self._refresh_snippets()
+
+    def show_schema(self, tables, databases=()) -> None:
+        self._schema_load += 1  # newer than any load still on its way
+        self._populate_schema(tables, databases)
+
+    def _refresh_header(self) -> None:
+        """Say which connection this is, where it points, and whether it can write.
+
+        Also the two things in the editor that depend on the engine: the
+        example in the empty editor and what ``[name]`` means.
+        """
+        conn = self._conn
+        self._conn_label.setText(conn.name)
+        self._type_badge.setText(conn.db_type.upper())
+        try:
+            where = describe_target(conn.db_type, conn._connection_string, conn.options)
+        except Exception:
+            where = ""
+        if conn.route:
+            where = f"{where}  ·  {conn.route}" if where else conn.route
+        self._target_label.set_full_text(where)
+
+        if conn.read_only:
+            text, colour = "READ-ONLY", tc.get("text_secondary")
+            tip = (
+                "Statements that change data or structure are blocked on this "
+                "connection. To allow them, edit the connection (the pencil in "
+                "the Database panel) and untick Read-only."
+            )
+        else:
+            text, colour = "WRITE ACCESS", tc.get("accent_warning")
+            tip = "This connection can change data and structure. Statements run as written."
+        self._access_badge.setText(text)
+        self._access_badge.setToolTip(tip)
+        self._access_badge.setStyleSheet(
+            f"color: {colour}; border: 1px solid {colour}; border-radius: 3px; "
+            f"padding: 1px 7px; font-size: {tc.FONT_XS}px; font-weight: 600; "
+            "background: transparent;"
+        )
+
+        self._sql_editor.setPlaceholderText(
+            "-- Write your SQL query here\n" + preview_query(conn.db_type, "table_name")
+        )
+        self._highlighter.set_brackets(conn.db_type in ("mssql", "sqlite"))
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -526,22 +798,32 @@ class _DatabaseWindow(QWidget):
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(12, 0, 12, 0)
 
-        # Connection badge — extract database name from connection string
-        db_name = self._extract_db_name()
-        conn_label = QLabel(db_name)
+        h_layout.setSpacing(8)
+
+        # Which connection, which engine, where it points, and whether it
+        # can write — filled in by _refresh_header().
+        conn_label = self._conn_label = QLabel()
         conn_label.setStyleSheet(
             f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
             f"color: {tc.get('text_heading')}; background: transparent;"
         )
         h_layout.addWidget(conn_label)
 
-        type_badge = QLabel(self._conn.db_type.upper())
+        type_badge = self._type_badge = QLabel()
         type_badge.setStyleSheet(
             f"background: {tc.get('accent_primary')}; color: {tc.get('text_on_accent')}; "
             f"border-radius: 3px; padding: 2px 8px; font-size: {tc.FONT_XS}px; font-weight: 600;"
         )
-        h_layout.addWidget(type_badge)
-        h_layout.addStretch()
+        h_layout.addWidget(type_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._target_label = ElidedLabel()
+        self._target_label.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
+        )
+        h_layout.addWidget(self._target_label, stretch=1)
+
+        self._access_badge = QLabel()
+        h_layout.addWidget(self._access_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         layout.addWidget(header)
 
@@ -572,24 +854,32 @@ class _DatabaseWindow(QWidget):
             "font-weight: 600; letter-spacing: 0.5px; background: transparent;"
         )
         sh_layout.addWidget(sh_label)
+        sh_layout.addStretch()
+
+        self._refresh_btn = QPushButton()
+        self._refresh_btn.setObjectName("dbWinRefreshBtn")
+        self._refresh_btn.setFixedSize(22, 22)
+        self._refresh_btn.setToolTip("Reload tables and columns")
+        self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh_btn.setIcon(refresh_icon(tc.get("text_secondary")))
+        self._refresh_btn.setStyleSheet(
+            "#dbWinRefreshBtn { background: transparent; border: none; }"
+            "#dbWinRefreshBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        self._refresh_btn.clicked.connect(self._reload_schema)
+        sh_layout.addWidget(self._refresh_btn)
         s_layout.addWidget(schema_header)
 
-        self._schema_tree = QTreeWidget()
-        self._schema_tree.setHeaderLabels(["Name", "Type"])
-        self._schema_tree.setColumnWidth(0, 200)
-        self._schema_tree.setStyleSheet(
-            f"QTreeWidget {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; "
-            f"border: none; font-size: {tc.FONT_SM}px; }}"
-            f"QTreeWidget::item {{ padding: 3px; }}"
-            f"QTreeWidget::item:selected {{ background: {tc.get('bg_active')}; }}"
-            f"QHeaderView::section {{ background: {tc.get('bg_surface')}; "
-            f"color: {tc.get('text_heading')}; border: 1px solid {tc.get('border_secondary')}; "
-            f"padding: 4px; font-size: {tc.FONT_XS}px; font-weight: 600; }}"
-        )
+        self._schema_tree = SchemaTree()
+        self._schema_tree.setStyleSheet(schema_tree_style())
         self._schema_tree.itemClicked.connect(self._on_table_clicked)
         self._schema_tree.itemDoubleClicked.connect(self._on_table_double_click)
+        self._schema_tree.database_requested.connect(
+            lambda database: load_database_into(self._schema_tree, self._conn, database)
+        )
         s_layout.addWidget(self._schema_tree)
 
+        schema_widget.setMinimumWidth(190)
         main_splitter.addWidget(schema_widget)
 
         # History + Snippets sidebar — tabbed widget so the user can
@@ -619,18 +909,23 @@ class _DatabaseWindow(QWidget):
             f"QListWidget::item:selected {{ background: {tc.get('bg_active')}; "
             f"color: {tc.get('text_on_accent')}; }}"
         )
+        self._history_list.setItemDelegate(HistoryDelegate(self._history_list))
+        self._history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._history_list.itemDoubleClicked.connect(self._on_history_picked)
         side_tabs.addTab(self._history_list, "History")
 
         # Snippets tab
         self._snippets_list = QListWidget()
         self._snippets_list.setStyleSheet(self._history_list.styleSheet())
+        self._snippets_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._snippets_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._snippets_list.itemDoubleClicked.connect(self._on_snippet_picked)
         self._snippets_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._snippets_list.customContextMenuRequested.connect(self._show_snippets_menu)
         side_tabs.addTab(self._snippets_list, "Snippets")
 
         side_layout.addWidget(side_tabs)
+        side_widget.setMinimumWidth(150)
         main_splitter.addWidget(side_widget)
 
         # Right: SQL editor + results (vertical splitter)
@@ -696,18 +991,23 @@ class _DatabaseWindow(QWidget):
 
         # SQL text editor
         self._sql_editor = QPlainTextEdit()
-        self._sql_editor.setPlaceholderText(
-            "-- Write your SQL query here\nSELECT * FROM table_name LIMIT 100"
-        )
         mono = QFont("Monospace", 12)
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self._sql_editor.setFont(mono)
+        # The family has to be in the stylesheet too: the app-wide
+        # ``QWidget { font-family: … }`` rule outranks setFont(), which
+        # is how this editor came to show SQL in the UI's sans-serif.
         self._sql_editor.setStyleSheet(
             f"QPlainTextEdit {{ background: {tc.get('status_bar_bg')}; "
-            f"color: {tc.get('text_primary')}; "
+            f"color: {tc.get('text_primary')}; font-family: {tc.FONT_CODE}; "
             f"border: none; padding: 10px 12px; font-size: {tc.FONT_BASE}px; "
             f"selection-background-color: {tc.get('accent_primary')}; }}"
         )
+        self._sql_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._sql_editor.setTabStopDistance(
+            4 * self._sql_editor.fontMetrics().horizontalAdvance(" ")
+        )
+        self._highlighter = SqlHighlighter(self._sql_editor.document())
         sql_layout.addWidget(self._sql_editor)
 
         right_splitter.addWidget(sql_widget)
@@ -766,6 +1066,7 @@ class _DatabaseWindow(QWidget):
         # Results: Table / Chart / Profile views in a stacked widget so the
         # header dropdown can switch between them without re-running the query.
         self._current_table_name: str | None = None  # Track which table is shown
+        self._current_table_database = ""  # …and its database, when not the connected one
         self._results_stack = QStackedWidget()
 
         self._results_table = QTableWidget()
@@ -800,50 +1101,88 @@ class _DatabaseWindow(QWidget):
         right_splitter.setSizes([200, 400])
 
         main_splitter.addWidget(right_splitter)
-        main_splitter.setSizes([220, 200, 700])
+        main_splitter.setSizes([250, 230, 640])
+        # A wider window gives the room to the editor and results.
+        for index, stretch in enumerate((0, 0, 1)):
+            main_splitter.setStretchFactor(index, stretch)
 
         layout.addWidget(main_splitter)
+        self._refresh_header()
 
         # Keyboard shortcut
         run_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self._sql_editor)
         run_shortcut.activated.connect(self._execute_query)
 
     def _load_schema(self) -> None:
+        self._schema_load += 1
+        load = self._schema_load
+
         async def do_load():
-            tables = await self._conn.get_schema()
-            QTimer.singleShot(0, lambda: self._populate_schema(tables))
+            conn = self._conn
+            tables = await conn.get_schema()
+            databases = await conn.list_databases()
+            if load == self._schema_load:
+                self._populate_schema(tables, databases)
 
         safe_task(do_load(), name="db_window_schema")
 
-    def _populate_schema(self, tables) -> None:
-        self._schema_tree.clear()
-        for table in tables:
-            table_item = QTreeWidgetItem(self._schema_tree)
-            table_item.setText(0, table.name)
-            table_item.setText(1, "table")
-            for col in table.columns:
-                col_item = QTreeWidgetItem(table_item)
-                pk_marker = " (PK)" if col.primary_key else ""
-                col_item.setText(0, f"  {col.name}{pk_marker}")
-                col_item.setText(1, col.data_type)
-        self._schema_tree.expandAll()
+    def _reload_schema(self) -> None:
+        """The refresh button: after a CREATE or ALTER, or a dropped connection."""
+        conn = self._conn
+        self._schema_load += 1
+        load = self._schema_load
+        self._refresh_btn.setEnabled(False)
+        self._results_status.setText("Reloading schema…")
+
+        async def do_reload():
+            try:
+                ok, message = await conn.ensure_connected()
+                tables = await conn.get_schema() if ok else []
+                databases = await conn.list_databases() if ok else []
+            except Exception as exc:
+                logger.exception("db_window: schema reload failed")
+                ok, message, tables, databases = False, str(exc), [], []
+            finally:
+                self._refresh_btn.setEnabled(True)
+            if load != self._schema_load:
+                return  # overtaken: reloaded again, or the connection was edited
+            if ok:
+                self._populate_schema(tables, databases)
+                count = len(tables)
+                self._results_status.setText(
+                    f"Schema reloaded — {count} table{'' if count == 1 else 's'}"
+                )
+                self._results_status.setToolTip("")
+            else:
+                self._results_status.setText(f"Couldn't reload the schema: {message[:80]}")
+                self._results_status.setToolTip(message)
+
+        safe_task(do_reload(), name="db_window_schema_reload")
+
+    def _populate_schema(self, tables, databases=()) -> None:
+        fill_schema_tree(self._schema_tree, tables, databases)
 
     def _on_table_double_click(self, item: QTreeWidgetItem, column: int) -> None:
         """Double-click a table to query its contents."""
-        if item.parent() is None:
-            table_name = item.text(0)
-            self._query_table(table_name)
+        self._on_table_clicked(item, column)
 
     def _on_table_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Single-click a table to preview its contents."""
-        if item.parent() is None:
-            table_name = item.text(0)
-            self._query_table(table_name)
+        found = self._schema_tree.table_at(item)
+        if found is not None:
+            database, table = found
+            self._query_table(table, database)
 
-    def _query_table(self, table_name: str) -> None:
+    def _query_table(self, table_name: str, database: str = "") -> None:
+        problem = other_database_problem(self._conn.db_type, database)
+        if problem:
+            self._results_status.setText(problem)
+            self._results_status.setToolTip(problem)
+            return
         self._current_table_name = table_name
+        self._current_table_database = database
         # Each engine has its own quoting and its own "first 100 rows".
-        sql = preview_query(self._conn.db_type, table_name)
+        sql = preview_query(self._conn.db_type, table_name, database=database)
         self._sql_editor.setPlainText(sql)
         self._execute_query()
 
@@ -890,6 +1229,7 @@ class _DatabaseWindow(QWidget):
         except Exception:
             logger.exception("db_window: could not record history")
 
+        self._results_status.setToolTip(result.error or "")
         if result.error:
             self._results_status.setText(f"Error: {result.error[:80]}")
             self._results_table.clear()
@@ -1000,17 +1340,13 @@ class _DatabaseWindow(QWidget):
         self._history_list.clear()
         store = get_notebook_store()
         for entry in store.list_history(self._conn.name, limit=50):
-            preview = entry.sql.replace("\n", " ").strip()
-            if len(preview) > 64:
-                preview = preview[:61] + "…"
-            label = preview
-            if entry.error:
-                label = f"✗ {label}"
-            elif entry.row_count >= 0:
-                label = f"{label}  · {entry.row_count} rows"
-            item = QListWidgetItem(label)
+            # One line of SQL (the list shortens it to fit) and, beneath
+            # it, when it ran and how it went — see HistoryDelegate.
+            item = QListWidgetItem(history_preview(entry.sql))
             item.setData(Qt.ItemDataRole.UserRole, entry.sql)
-            item.setToolTip(entry.sql)
+            item.setData(HistoryDelegate.META_ROLE, history_meta(entry))
+            item.setData(HistoryDelegate.FAILED_ROLE, bool(entry.error))
+            item.setToolTip(history_tooltip(entry))
             self._history_list.addItem(item)
 
     def _refresh_snippets(self) -> None:
@@ -1038,8 +1374,6 @@ class _DatabaseWindow(QWidget):
             self._sql_editor.setFocus()
 
     def _show_snippets_menu(self, pos) -> None:
-        from PyQt6.QtWidgets import QMenu
-
         item = self._snippets_list.itemAt(pos)
         if not item:
             return
@@ -1066,8 +1400,6 @@ class _DatabaseWindow(QWidget):
     def _show_results_menu(self, pos) -> None:
         if not self._current_table_name:
             return
-
-        from PyQt6.QtWidgets import QMenu
 
         menu = QMenu(self)
         menu.setStyleSheet(
@@ -1174,7 +1506,9 @@ class _DatabaseWindow(QWidget):
 
     def _table_sql(self) -> str:
         """The current table, quoted for this connection's engine."""
-        return quote_table(self._conn.db_type, self._current_table_name)
+        return quote_table(
+            self._conn.db_type, self._current_table_name, self._current_table_database
+        )
 
     def _build_where_clause(self, row: int) -> str:
         """Build a WHERE clause to identify a specific row using all column values."""

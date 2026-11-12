@@ -20,6 +20,7 @@ the connection / query / schema controller logic. Public surface:
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -289,18 +290,31 @@ class NewConnection:
 
 
 class AddConnectionDialog(QDialog):
-    """Dialog to add a new database connection.
+    """Dialog to add a database connection, or edit a saved one.
 
     Covers every engine in :mod:`polyglot_ai.core.db_dialects`, plus the
     three things a database in a private network needs: encryption, a
     tunnel (SSH bastion or AWS Session Manager) and, on RDS, IAM
     authentication. ``prefill`` seeds the fields — the AWS panel uses it
-    to open the dialog for an RDS instance.
+    to open the dialog for an RDS instance. With ``editing`` the fields
+    come from a saved connection (``db_dialects.form_values``) and
+    ``taken_names`` are the other connections' names, which it may not
+    be renamed to.
     """
 
-    def __init__(self, parent: QWidget | None = None, prefill: dict | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        prefill: dict | None = None,
+        *,
+        editing: bool = False,
+        taken_names: Iterable[str] = (),
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("New Database Connection")
+        self._editing = editing
+        self._taken_names = set(taken_names)
+        title = "Edit Database Connection" if editing else "New Database Connection"
+        self.setWindowTitle(title)
         self.setFixedWidth(500)
         self.setStyleSheet(
             f"QDialog {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; }}"
@@ -320,7 +334,7 @@ class AddConnectionDialog(QDialog):
         )
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
-        header_title = QLabel("New Database Connection")
+        header_title = QLabel(title)
         header_title.setStyleSheet(
             f"font-size: {tc.FONT_BASE}px; font-weight: 600; "
             f"color: {tc.get('text_heading')}; background: transparent;"
@@ -530,7 +544,7 @@ class AddConnectionDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         f_layout.addWidget(cancel_btn)
 
-        connect_btn = QPushButton("Connect")
+        connect_btn = QPushButton("Save" if editing else "Connect")
         connect_btn.setObjectName("dbDialogConnBtn")
         connect_btn.setFixedHeight(32)
         connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -685,7 +699,10 @@ class AddConnectionDialog(QDialog):
     def prefill(self, values: dict) -> None:
         """Seed the form. Keys: name, db_type, engine_label, host, port, user,
         database, ssl, route ("ssh"/"ssm"), profile, region, read_only,
-        bastions ([(label, instance_id)] offered for Session Manager)."""
+        bastions ([(label, instance_id)] offered for Session Manager) — and,
+        when a saved connection is being edited, the rest of what it holds:
+        path (SQLite), password, auth ("iam"), ca_file, ssh_host, ssh_port,
+        ssh_user, ssh_key, ssm_target."""
         label = values.get("engine_label")
         index = self._type_combo.findText(label) if label else -1
         if index < 0 and values.get("db_type"):
@@ -700,9 +717,19 @@ class AddConnectionDialog(QDialog):
             ("database", self._db_input),
             ("profile", self._aws_profile),
             ("region", self._aws_region),
+            ("path", self._conn_input),
+            ("password", self._pass_input),
+            ("ca_file", self._ca_input),
+            ("ssh_host", self._ssh_host),
+            ("ssh_port", self._ssh_port),
+            ("ssh_user", self._ssh_user),
+            ("ssh_key", self._ssh_key),
         ):
             if values.get(key) not in (None, ""):
                 edit.setText(str(values[key]))
+        index = self._auth_combo.findData(values.get("auth"))
+        if index >= 0:
+            self._auth_combo.setCurrentIndex(index)
         if values.get("ssl"):
             self._select_ssl_mode(values["ssl"], self._db_type())
         index = self._route_combo.findData(values.get("route"))
@@ -711,7 +738,7 @@ class AddConnectionDialog(QDialog):
         for text, instance_id in values.get("bastions") or []:
             self._ssm_target.addItem(text, instance_id)
         self._ssm_target.setCurrentIndex(-1)
-        self._ssm_target.setEditText("")
+        self._ssm_target.setEditText(str(values.get("ssm_target") or ""))
         if "read_only" in values:
             self._read_only_cb.setChecked(bool(values["read_only"]))
         self._sync_visibility()
@@ -740,6 +767,8 @@ class AddConnectionDialog(QDialog):
         value = self.get_values()
         if not value.name:
             return "Give the connection a name."
+        if value.name in self._taken_names:
+            return f"Another connection is already called “{value.name}”. Choose a different name."
         if value.db_type == "sqlite":
             return "" if value.connection_string else "Choose a database file."
         if not self._host_input.text().strip():
@@ -784,6 +813,11 @@ class AddConnectionDialog(QDialog):
         # ``url_encoded`` marks the URL as built by build_url(), so its
         # parts are decoded when read back.
         options: dict = {"url_encoded": True, "ssl": self._ssl_combo.currentData()}
+        label = self._type_combo.currentText()
+        if self._type_combo.findData(db_type) != self._type_combo.currentIndex():
+            # MariaDB and Aurora share a type with MySQL / PostgreSQL; kept
+            # so the connection reopens under the name it was created with.
+            options["engine_label"] = label
         ca_file = self._ca_input.text().strip()
         if options["ssl"] == "verify" and ca_file:
             options["ca_file"] = ca_file

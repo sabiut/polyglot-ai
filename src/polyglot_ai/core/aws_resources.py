@@ -13,6 +13,8 @@ a stubbed ``call``.
 from __future__ import annotations
 
 import json
+import re
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -499,9 +501,88 @@ def _fetch_rds(call: Call) -> list[dict]:
                 "db_name": db.get("DBName") or "",
                 "public": bool(db.get("PubliclyAccessible")),
                 "iam_auth": bool(db.get("IAMDatabaseAuthenticationEnabled")),
+                # Set for Aurora and Multi-AZ cluster members, whose
+                # snapshots are taken of the cluster, not the instance.
+                "cluster": db.get("DBClusterIdentifier") or "",
             }
         )
     return rows
+
+
+# ── RDS snapshots ───────────────────────────────────────────────────
+
+_SNAPSHOT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+
+
+def snapshot_name_limit(db: dict) -> int:
+    """The longest snapshot name RDS takes for this row (shorter for clusters)."""
+    return 63 if db.get("cluster") else 255
+
+
+def default_snapshot_name(db: dict, when: float | None = None) -> str:
+    """``orders-db-manual-20261112-2215`` — the instance, and when it was taken."""
+    stamp = time.strftime("%Y%m%d-%H%M", time.localtime(when))
+    suffix = f"-manual-{stamp}"
+    base = (db.get("cluster") or db.get("id") or "db")[: snapshot_name_limit(db) - len(suffix)]
+    return base.rstrip("-") + suffix
+
+
+def snapshot_name_problem(name: str, db: dict) -> str:
+    """Why RDS would refuse ``name`` as a snapshot identifier; "" when it is fine."""
+    limit = snapshot_name_limit(db)
+    if not name:
+        return "Give the snapshot a name."
+    if len(name) > limit:
+        return f"A snapshot name can be at most {limit} characters."
+    if not _SNAPSHOT_NAME.fullmatch(name):
+        return "Use letters, digits and hyphens only, starting with a letter."
+    if name.endswith("-") or "--" in name:
+        return "A snapshot name can't end with a hyphen or have two in a row."
+    return ""
+
+
+def snapshot_command(db: dict, name: str) -> list[str]:
+    """The ``aws rds`` arguments that take a manual snapshot of this row."""
+    if db.get("cluster"):
+        return [
+            "rds",
+            "create-db-cluster-snapshot",
+            "--db-cluster-identifier",
+            db["cluster"],
+            "--db-cluster-snapshot-identifier",
+            name,
+        ]
+    return [
+        "rds",
+        "create-db-snapshot",
+        "--db-instance-identifier",
+        db["id"],
+        "--db-snapshot-identifier",
+        name,
+    ]
+
+
+def list_snapshots_command(db: dict) -> list[str]:
+    """The ``aws rds`` arguments that list this row's snapshots, manual and automated."""
+    if db.get("cluster"):
+        return [
+            "rds",
+            "describe-db-cluster-snapshots",
+            "--db-cluster-identifier",
+            db["cluster"],
+            "--query",
+            "DBClusterSnapshots[].{Snapshot:DBClusterSnapshotIdentifier,Status:Status,"
+            "Type:SnapshotType,Created:SnapshotCreateTime,Progress:PercentProgress}",
+        ]
+    return [
+        "rds",
+        "describe-db-snapshots",
+        "--db-instance-identifier",
+        db["id"],
+        "--query",
+        "DBSnapshots[].{Snapshot:DBSnapshotIdentifier,Status:Status,Type:SnapshotType,"
+        "Created:SnapshotCreateTime,Progress:PercentProgress}",
+    ]
 
 
 def _summarize_rds(d: dict) -> list[tuple[str, str]]:

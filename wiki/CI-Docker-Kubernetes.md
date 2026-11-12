@@ -194,7 +194,23 @@ Every resource has **Open in AWS Console**, **Copy ID / ARN / URL** and
 - **RDS** — *Describe*, *Connect in Database panel…* (opens the
   [Database panel](Database#connecting-to-an-rds-database-from-the-aws-panel)'s
   connection dialog with the endpoint, engine and user filled in, and a
-  Session Manager route if the database is private)
+  Session Manager route if the database is private); *Snapshots* (lists
+  the manual and automated snapshots that exist); *Create snapshot…*
+  (from 0.18.22 — see below)
+
+**Create snapshot…** takes a manual RDS snapshot: AWS's own complete,
+restorable copy of the instance. It asks for a name (suggesting
+`<instance>-manual-<date>-<time>`), checks it against RDS's naming
+rules, then shows a confirmation with the profile, region and the exact
+`aws rds create-db-snapshot …` command before running anything. For an
+Aurora instance, or a member of a Multi-AZ DB cluster, the snapshot is
+taken of the **cluster** (`create-db-cluster-snapshot`), because RDS
+doesn't snapshot those instance by instance — the confirmation says so.
+A manual snapshot is kept, and billed as backup storage, until you
+delete it; on a Single-AZ instance, reads and writes can pause for a
+moment while it starts. Restoring a snapshot creates a *new* instance
+and is done from the AWS console or CLI. To get the data as a file
+instead, use [Back up in the Database panel](Database#backing-up-and-restoring-from-01822).
 
 **Send details to AI** puts the details pane into the chat with a prompt
 to explain it and suggest next steps — the fastest route from "this

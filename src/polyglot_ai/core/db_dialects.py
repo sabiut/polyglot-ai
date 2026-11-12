@@ -165,6 +165,78 @@ def parse_url(url: str, db_type: str = "", *, encoded: bool = True) -> DbTarget:
     )
 
 
+def form_values(
+    name: str,
+    db_type: str,
+    connection_string: str,
+    options: dict | None = None,
+    *,
+    read_only: bool = True,
+) -> dict:
+    """A saved connection as the fields of the connection dialog.
+
+    The inverse of what the dialog saves, so a connection can be opened
+    for editing. Keys are the ones ``AddConnectionDialog.prefill`` takes.
+    A connection saved before encryption was a choice shows the mode it
+    has actually been using: none for MySQL, "if available" for the rest.
+    """
+    options = options or {}
+    values: dict = {"name": name, "db_type": db_type, "read_only": read_only}
+    if options.get("engine_label"):
+        values["engine_label"] = options["engine_label"]
+    if db_type == "sqlite":
+        values["path"] = connection_string
+        return values
+
+    target = parse_url(connection_string, db_type, encoded=bool(options.get("url_encoded")))
+    values.update(
+        host=target.host,
+        port=target.port,
+        user=target.user,
+        password=target.password,
+        database=target.database,
+        ssl=options.get("ssl") or ("disable" if db_type == "mysql" else "prefer"),
+        ca_file=options.get("ca_file", ""),
+        route="direct",
+    )
+    iam = options.get("iam")
+    if iam is not None:
+        values.update(auth="iam", profile=iam.get("profile", ""), region=iam.get("region", ""))
+    tunnel = options.get("tunnel") or {}
+    if tunnel.get("kind") == "ssh":
+        values.update(
+            route="ssh",
+            ssh_host=tunnel.get("host", ""),
+            ssh_port=tunnel.get("port", 22),
+            ssh_user=tunnel.get("user", ""),
+            ssh_key=tunnel.get("identity_file", ""),
+        )
+    elif tunnel.get("kind") == "ssm":
+        values.update(route="ssm", ssm_target=tunnel.get("target", ""))
+        # One profile/region pair in the form, shared with IAM sign-in.
+        values["profile"] = values.get("profile") or tunnel.get("profile", "")
+        values["region"] = values.get("region") or tunnel.get("region", "")
+    return values
+
+
+def describe_target(db_type: str, connection_string: str, options: dict | None = None) -> str:
+    """Where a connection points, for display: ``user@host:port/database``.
+
+    Never the password. For SQLite, the file.
+    """
+    if db_type == "sqlite":
+        return connection_string
+    options = options or {}
+    target = parse_url(connection_string, db_type, encoded=bool(options.get("url_encoded")))
+    host = f"[{target.host}]" if ":" in target.host else target.host
+    text = f"{host}:{target.port}" if target.port else host
+    if target.user:
+        text = f"{target.user}@{text}"
+    if target.database:
+        text = f"{text}/{target.database}"
+    return text
+
+
 # ── SQL dialect ──────────────────────────────────────────────────────
 
 
@@ -177,20 +249,28 @@ def quote_identifier(db_type: str, name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def quote_table(db_type: str, table: str) -> str:
+def quote_table(db_type: str, table: str, database: str = "") -> str:
     """A table name as the schema browser lists it, ready to use in SQL.
 
     SQL Server tables outside ``dbo`` are listed as ``schema.table``.
+    ``database`` names another database on the same server — which only
+    MySQL and SQL Server can reach from the session they have, so it is
+    ignored for the rest.
     """
-    if db_type == "mssql" and "." in table:
-        schema, _, name = table.partition(".")
-        return f"{quote_identifier(db_type, schema)}.{quote_identifier(db_type, name)}"
+    if db_type == "mssql":
+        schema, _, name = table.partition(".") if "." in table else ("", "", table)
+        parts = [schema, name] if schema else [name]
+        if database:
+            parts = [database, schema or "dbo", name]
+        return ".".join(quote_identifier(db_type, part) for part in parts)
+    if db_type == "mysql" and database:
+        return f"{quote_identifier(db_type, database)}.{quote_identifier(db_type, table)}"
     return quote_identifier(db_type, table)
 
 
-def preview_query(db_type: str, table: str, limit: int = 100) -> str:
+def preview_query(db_type: str, table: str, limit: int = 100, database: str = "") -> str:
     """``SELECT`` the first rows of a table in this engine's dialect."""
-    target = quote_table(db_type, table)
+    target = quote_table(db_type, table, database)
     if db_type == "mssql":
         return f"SELECT TOP {limit} * FROM {target}"
     if db_type == "oracle":

@@ -191,6 +191,18 @@ class TestMssqlDriver:
             "ORA-01017: invalid credentials"
         )
 
+    def test_query_failure_reads_as_a_sentence_too(self):
+        """A failed query carries the number and message as two arguments, not one tuple."""
+        exc = Exception(
+            208,
+            b"Invalid object name 'nope'.DB-Lib error message 20018, severity 16:\n"
+            b"General SQL Server error: Check messages from the SQL Server\n",
+        )
+        assert describe_error(exc) == "Invalid object name 'nope'. (error 208)"
+        assert describe_error(Exception(8134, "Divide by zero error encountered.")) == (
+            "Divide by zero error encountered. (error 8134)"
+        )
+
 
 class TestOracleDriver:
     def test_plain_connection(self, fake_oracledb):

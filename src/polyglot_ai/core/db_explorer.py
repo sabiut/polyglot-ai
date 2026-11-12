@@ -40,6 +40,15 @@ class TableInfo:
 
 
 @dataclass
+class DatabaseInfo:
+    """One database on a server, as the schema browser lists it."""
+
+    name: str
+    current: bool = False  # the one this connection is signed in to
+    system: bool = False  # the engine's own (master, information_schema, …)
+
+
+@dataclass
 class QueryResult:
     columns: list[str]
     rows: list[list]
@@ -107,6 +116,7 @@ class DatabaseConnection:
         self.options: dict = dict(options or {})
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._pg_pool = None  # asyncpg connection pool
+        self._pg_connect: tuple[tuple, dict] | None = None  # how the pool dials, minus the database
         self._mysql_pool = None  # db_mysql.MySQLSession (one connection, not a pool)
         self._driver = None  # db_drivers.MssqlDriver / OracleDriver
         self._tunnel = None  # db_tunnel.Tunnel while a port forward is up
@@ -271,6 +281,7 @@ class DatabaseConnection:
                         exc_info=True,
                     )
                 self._pg_pool = None
+                self._pg_connect = None
             if self._mysql_pool:
                 try:
                     self._mysql_pool.close()
@@ -311,7 +322,29 @@ class DatabaseConnection:
         except Exception as exc:
             return QueryResult.from_error(describe_error(exc))
 
-    async def get_schema(self) -> list[TableInfo]:
+    async def list_databases(self) -> list[DatabaseInfo]:
+        """The databases on this server, the connected one marked.
+
+        Empty when they can't be listed (not connected, an MCP-only
+        connection, a login that may not read the catalogue): the browser
+        then shows the connected database's tables on their own.
+        """
+        from polyglot_ai.core import db_catalog
+
+        async with self._lock:
+            try:
+                return await db_catalog.list_databases(self)
+            except Exception:
+                logger.exception("Failed to list databases for %s", self.name)
+                return []
+
+    async def get_schema(self, database: str | None = None) -> list[TableInfo]:
+        """Tables and columns of the connected database, or of another one on the server."""
+        if database:
+            from polyglot_ai.core import db_catalog
+
+            async with self._lock:
+                return await db_catalog.tables_of(self, database)
         async with self._lock:
             if self.db_type == "sqlite":
                 return await self._schema_sqlite()
@@ -460,6 +493,7 @@ class DatabaseConnection:
                 self._pg_pool = await asyncpg.create_pool(
                     self._connection_string, min_size=1, max_size=3, timeout=10
                 )
+                self._pg_connect = ((self._connection_string,), {})
             else:
                 from polyglot_ai.core.db_dialects import make_ssl_context
 
@@ -476,17 +510,17 @@ class DatabaseConnection:
                     # IAM tokens last 15 minutes; the pool opens connections
                     # later than that, so each one gets a fresh token.
                     password = self._fresh_iam_token
+                dial = {
+                    "host": target.host,
+                    "port": target.port,
+                    "user": target.user or None,
+                    "password": password or None,
+                    "ssl": ssl_arg,
+                }
                 self._pg_pool = await asyncpg.create_pool(
-                    host=target.host,
-                    port=target.port,
-                    user=target.user or None,
-                    password=password or None,
-                    database=target.database or None,
-                    ssl=ssl_arg,
-                    min_size=1,
-                    max_size=3,
-                    timeout=10,
+                    **dial, database=target.database or None, min_size=1, max_size=3, timeout=10
                 )
+                self._pg_connect = ((), dial)
             async with self._pg_pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
             return True, "Connected (direct)"
@@ -521,44 +555,49 @@ class DatabaseConnection:
             return []
         try:
             async with self._pg_pool.acquire() as conn:
-                # Single bulk query for all tables and columns (avoids N+1)
-                col_rows = await conn.fetch(
-                    "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, "
-                    "  c.ordinal_position, "
-                    "  CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_pk "
-                    "FROM information_schema.columns c "
-                    "LEFT JOIN ( "
-                    "  SELECT k.table_name, k.column_name "
-                    "  FROM information_schema.key_column_usage k "
-                    "  JOIN information_schema.table_constraints tc "
-                    "    ON k.constraint_name = tc.constraint_name "
-                    "    AND k.table_schema = tc.table_schema "
-                    "  WHERE tc.constraint_type = 'PRIMARY KEY' "
-                    "    AND tc.table_schema = 'public' "
-                    ") pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name "
-                    "WHERE c.table_schema = 'public' "
-                    "ORDER BY c.table_name, c.ordinal_position"
-                )
-
-                # Group columns by table
-                tables_map: dict[str, list[ColumnInfo]] = {}
-                for cr in col_rows:
-                    tname = cr["table_name"]
-                    if tname not in tables_map:
-                        tables_map[tname] = []
-                    tables_map[tname].append(
-                        ColumnInfo(
-                            name=cr["column_name"],
-                            data_type=cr["data_type"],
-                            nullable=cr["is_nullable"] == "YES",
-                            primary_key=cr["is_pk"] > 0,
-                        )
-                    )
-
-                return [TableInfo(name=tname, columns=cols) for tname, cols in tables_map.items()]
+                return await self._pg_schema_on(conn)
         except Exception:
             logger.exception("Failed to get PostgreSQL schema")
             return []
+
+    @staticmethod
+    async def _pg_schema_on(conn) -> list[TableInfo]:
+        """The ``public`` tables of whichever database ``conn`` is signed in to."""
+        # Single bulk query for all tables and columns (avoids N+1)
+        col_rows = await conn.fetch(
+            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, "
+            "  c.ordinal_position, "
+            "  CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_pk "
+            "FROM information_schema.columns c "
+            "LEFT JOIN ( "
+            "  SELECT k.table_name, k.column_name "
+            "  FROM information_schema.key_column_usage k "
+            "  JOIN information_schema.table_constraints tc "
+            "    ON k.constraint_name = tc.constraint_name "
+            "    AND k.table_schema = tc.table_schema "
+            "  WHERE tc.constraint_type = 'PRIMARY KEY' "
+            "    AND tc.table_schema = 'public' "
+            ") pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name "
+            "WHERE c.table_schema = 'public' "
+            "ORDER BY c.table_name, c.ordinal_position"
+        )
+
+        # Group columns by table
+        tables_map: dict[str, list[ColumnInfo]] = {}
+        for cr in col_rows:
+            tname = cr["table_name"]
+            if tname not in tables_map:
+                tables_map[tname] = []
+            tables_map[tname].append(
+                ColumnInfo(
+                    name=cr["column_name"],
+                    data_type=cr["data_type"],
+                    nullable=cr["is_nullable"] == "YES",
+                    primary_key=cr["is_pk"] > 0,
+                )
+            )
+
+        return [TableInfo(name=tname, columns=cols) for tname, cols in tables_map.items()]
 
     async def _execute_postgresql(self, sql: str, max_rows: int) -> QueryResult:
         if not self._pg_pool:
@@ -669,7 +708,7 @@ class DatabaseConnection:
                     return True, f"Direct connection failed ({e}); connected via MCP instead"
             return False, str(e)
 
-    async def _schema_mysql(self) -> list[TableInfo]:
+    async def _schema_mysql(self, database: str | None = None) -> list[TableInfo]:
         if not self._mysql_pool:
             return []
         try:
@@ -680,8 +719,9 @@ class DatabaseConnection:
                         "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, "
                         "  c.IS_NULLABLE, c.COLUMN_KEY "
                         "FROM information_schema.COLUMNS c "
-                        "WHERE c.TABLE_SCHEMA = DATABASE() "
-                        "ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION"
+                        "WHERE c.TABLE_SCHEMA = COALESCE(%s, DATABASE()) "
+                        "ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION",
+                        (database,),
                     )
                     col_rows = await cur.fetchall()
 
@@ -1012,6 +1052,51 @@ class DatabaseManager:
         )
         self._connections[name] = conn
         return conn
+
+    def replace_connection_sync(
+        self,
+        old_name: str,
+        name: str,
+        db_type: str,
+        connection_string: str,
+        mcp_client=None,
+        *,
+        read_only: bool = True,
+        options: dict | None = None,
+    ) -> tuple[DatabaseConnection, DatabaseConnection | None]:
+        """Give a saved connection new details, keeping its place in the list.
+
+        Returns ``(current, retired)``. When only the name or the
+        read-only flag changed, the same object carries on — still
+        connected if it was — and ``retired`` is None. Otherwise a new
+        connection takes its place and ``retired`` is the old one, which
+        the caller must disconnect (it may hold a pool and a tunnel).
+        """
+        old = self._connections.get(old_name)
+        options = dict(options or {})
+        if (
+            old is not None
+            and old.db_type == db_type
+            and old._connection_string == connection_string
+            and old.options == options
+        ):
+            current, retired = old, None
+            current.name = name
+            current.read_only = read_only
+        else:
+            current = DatabaseConnection(
+                name, db_type, connection_string, mcp_client, read_only=read_only, options=options
+            )
+            retired = old
+        rebuilt: dict[str, DatabaseConnection] = {}
+        for key, conn in self._connections.items():
+            if key == old_name:
+                rebuilt[name] = current
+            elif key != name:
+                rebuilt[key] = conn
+        rebuilt.setdefault(name, current)
+        self._connections = rebuilt
+        return current, retired
 
     async def remove_connection(self, name: str) -> None:
         conn = self._connections.pop(name, None)
