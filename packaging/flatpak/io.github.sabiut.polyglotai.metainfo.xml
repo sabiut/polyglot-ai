@@ -23,6 +23,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.25" date="2026-11-13">
+      <description>
+        <p>Cancel now stops a database backup while the database is busy
+        with one query, for example one that is waiting for a lock.
+        Before, a built-in export could only be cancelled between batches
+        of rows. Nothing is left on disk after a cancelled backup.</p>
+      </description>
+    </release>
     <release version="0.18.24" date="2026-11-12">
       <description>
         <p>Cancel now stops a database restore while a statement is
