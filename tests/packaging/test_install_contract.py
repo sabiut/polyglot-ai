@@ -381,11 +381,14 @@ def test_rpm_launcher_points_at_the_final_venv(tmp_path):
 def test_packaging_scripts_parse():
     import shutil
     import subprocess
+    import sys
 
     import pytest
 
-    if not shutil.which("bash"):
-        pytest.skip("needs bash")
+    # The packages are built on Linux only. On a Windows runner "bash" is
+    # the WSL launcher, which can't open a Windows path and exits 1.
+    if sys.platform != "linux" or not shutil.which("bash"):
+        pytest.skip("needs bash on Linux")
     for name in ("bundle_wheels.sh", "build_deb.sh", "build_rpm.sh", "debian/postinst"):
         result = subprocess.run(
             ["bash", "-n", str(_REPO_ROOT / "packaging" / name)], capture_output=True, text=True
