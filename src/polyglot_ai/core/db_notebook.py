@@ -254,6 +254,32 @@ class DBNotebookStore:
         except sqlite3.Error as e:
             logger.warning("db_notebook: could not rename connection %r: %s", old, e)
 
+    def counts(self, connection: str) -> tuple[int, int]:
+        """How many history entries and snippets are filed under ``connection``."""
+        try:
+            with self._conn() as c:
+                history = c.execute(
+                    "SELECT COUNT(*) FROM history WHERE connection = ?", (connection,)
+                ).fetchone()[0]
+                snippets = c.execute(
+                    "SELECT COUNT(*) FROM snippets WHERE connection = ?", (connection,)
+                ).fetchone()[0]
+            return int(history), int(snippets)
+        except sqlite3.Error as e:
+            logger.warning("db_notebook: could not count entries of %r: %s", connection, e)
+            return 0, 0
+
+    def forget_connection(self, connection: str) -> None:
+        """Delete everything filed under ``connection``: its history and its snippets."""
+        if not connection:
+            return
+        try:
+            with self._conn() as c:
+                c.execute("DELETE FROM history WHERE connection = ?", (connection,))
+                c.execute("DELETE FROM snippets WHERE connection = ?", (connection,))
+        except sqlite3.Error as e:
+            logger.warning("db_notebook: could not forget connection %r: %s", connection, e)
+
 
 # Module-level singleton — both UI panels share the same store.
 _store: DBNotebookStore | None = None

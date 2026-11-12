@@ -1098,6 +1098,14 @@ class DatabaseManager:
         self._connections = rebuilt
         return current, retired
 
+    def drop_connection_sync(self, name: str) -> DatabaseConnection | None:
+        """Take a connection off the list at once.
+
+        Returns it so the caller can disconnect it (it may hold a pool
+        and a tunnel), or None if there was no connection of that name.
+        """
+        return self._connections.pop(name, None)
+
     async def remove_connection(self, name: str) -> None:
         conn = self._connections.pop(name, None)
         if conn:

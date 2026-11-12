@@ -1,4 +1,4 @@
-"""Editing a saved database connection from the Database panel."""
+"""Editing and deleting a saved database connection from the Database panel."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ import pytest
 pytest.importorskip("PyQt6")
 os.environ.setdefault("POLYGLOT_AI_DISABLE_UPDATE_CHECK", "1")
 
-from PyQt6.QtWidgets import QApplication, QDialog  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton  # noqa: E402
 
 from polyglot_ai.core import db_explorer, db_notebook  # noqa: E402
 from polyglot_ai.core.db_dialects import build_url, form_values, parse_url  # noqa: E402
 from polyglot_ai.ui.panels import database_panel  # noqa: E402
 from polyglot_ai.ui.panels.database_dialogs import AddConnectionDialog, NewConnection  # noqa: E402
+from polyglot_ai.ui.panels.database_widgets import delete_explanation, notes_label  # noqa: E402
 
 AURORA_OPTIONS = {
     "url_encoded": True,
@@ -314,3 +315,239 @@ async def test_open_sql_editor_follows_the_edit(env, tmp_path):
     finally:
         window.close()
         await new.disconnect()
+
+
+# ── deleting ────────────────────────────────────────────────────────
+
+
+def _answer(monkeypatch, panel, go_ahead=True, with_notes=False) -> list[str]:
+    """Stand in for the question; returns the names it was asked about."""
+    asked: list[str] = []
+
+    def confirm(conn):
+        asked.append(conn.name)
+        return go_ahead, with_notes
+
+    monkeypatch.setattr(panel, "_confirm_delete", confirm)
+    return asked
+
+
+def _two_connections(panel, tmp_path):
+    first = _make_db(tmp_path / "a.db", "apples")
+    second = _make_db(tmp_path / "b.db", "bananas")
+    panel._add_connection(NewConnection("local", "sqlite", first, True))
+    panel._add_connection(NewConnection("other", "sqlite", second, True))
+    panel._conn_combo.setCurrentIndex(0)
+    return first, second
+
+
+async def test_delete_button_removes_the_connection_and_what_was_saved_for_it(
+    env, tmp_path, monkeypatch
+):
+    panel, keyring, config = env
+    _first, second = _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    panel._connect_selected()
+    await _settle(lambda: _tables(panel) == ["apples"])
+    db_notebook.get_notebook_store().add_history("local", "SELECT 1")
+    asked = _answer(monkeypatch, panel)
+
+    button = panel.findChild(QPushButton, "dbDeleteBtn")
+    assert button.toolTip() == "Delete this saved connection"
+    button.click()
+    await _settle(lambda: not conn.is_connected)
+
+    assert asked == ["local"]
+    assert panel._db_manager.connection_names == ["other"]
+    assert _labels(panel) == ["other (sqlite)"]
+    assert panel._active_connection == "other"
+    assert keyring.entries == {"other": second}
+    assert [e["name"] for e in json.loads(config.read_text())] == ["other"]
+    assert _tables(panel) == []
+    assert panel._status_label.text() == "Deleted: local"
+    # Not asked to delete them, so the notes stay.
+    assert db_notebook.get_notebook_store().counts("local") == (1, 0)
+
+
+async def test_delete_can_take_the_history_and_snippets_too(env, tmp_path, monkeypatch):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    store = db_notebook.get_notebook_store()
+    store.add_history("local", "SELECT 1")
+    store.save_snippet("local", "count", "SELECT count(*) FROM apples")
+    store.add_history("other", "SELECT 2")
+    _answer(monkeypatch, panel, with_notes=True)
+
+    panel._delete_selected()
+    await asyncio.sleep(0)
+
+    assert store.counts("local") == (0, 0)
+    assert store.counts("other") == (1, 0)
+
+
+async def test_answering_no_deletes_nothing(env, tmp_path, monkeypatch):
+    panel, keyring, config = env
+    first, second = _two_connections(panel, tmp_path)
+    saved = config.read_text()
+    _answer(monkeypatch, panel, go_ahead=False, with_notes=True)
+
+    panel._delete_selected()
+    await asyncio.sleep(0)
+
+    assert panel._db_manager.connection_names == ["local", "other"]
+    assert _labels(panel) == ["local (sqlite)", "other (sqlite)"]
+    assert keyring.entries == {"local": first, "other": second}
+    assert config.read_text() == saved
+
+
+async def test_deleting_the_last_connection_leaves_an_empty_list(env, tmp_path, monkeypatch):
+    panel, keyring, config = env
+    panel._add_connection(NewConnection("only", "sqlite", _make_db(tmp_path / "a.db", "t"), True))
+    asked = _answer(monkeypatch, panel)
+
+    panel._delete_selected()
+    await asyncio.sleep(0)
+
+    assert _labels(panel) == [] and panel._active_connection is None
+    assert keyring.entries == {} and json.loads(config.read_text()) == []
+
+    # Nothing is selected now: the button says so instead of asking again.
+    panel._delete_selected()
+    assert asked == ["only"]
+    assert panel._status_label.text() == "Add a connection first"
+
+    # And nothing comes back at the next start.
+    again = database_panel.DatabasePanel()
+    try:
+        assert again._conn_combo.count() == 0
+    finally:
+        again.deleteLater()
+
+
+async def test_delete_closes_the_sql_editor_that_was_using_it(env, tmp_path, monkeypatch):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    panel._connect_selected()
+    await _settle(lambda: _tables(panel) == ["apples"])
+    panel._open_full_window()
+    window = panel._full_window
+    assert window.isVisible()
+    _answer(monkeypatch, panel)
+
+    panel._delete_selected()
+    await _settle(lambda: not conn.is_connected)
+
+    assert panel._full_window is None and not window.isVisible()
+
+
+async def test_after_a_delete_the_next_connection_shows_its_tables_if_open(
+    env, tmp_path, monkeypatch
+):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    other = panel._db_manager.get_connection("other")
+    assert (await other.connect())[0]
+    _answer(monkeypatch, panel)
+
+    try:
+        panel._delete_selected()  # "local", which was never opened
+        await _settle(lambda: _tables(panel) == ["bananas"])
+        assert panel._active_connection == "other"
+    finally:
+        await other.disconnect()
+
+
+async def test_a_connection_deleted_while_connecting_is_not_left_open(env, tmp_path, monkeypatch):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    opened = []
+    real_connect = conn.connect
+
+    async def connect():
+        result = await real_connect()
+        opened.append(result[0])
+        return result
+
+    monkeypatch.setattr(conn, "connect", connect)
+    _answer(monkeypatch, panel)
+
+    panel._connect_selected()
+    panel._delete_selected()  # before the connect above has had a turn
+    await _settle(lambda: opened == [True] and not conn.is_connected)
+    await asyncio.sleep(0.05)
+    QApplication.processEvents()
+
+    assert not conn.is_connected
+    assert _tables(panel) == []
+    assert panel._status_label.text() == "Deleted: local"
+
+
+def _press(monkeypatch, button_text: str, tick: bool = False) -> dict:
+    """Run the real question box, pressing ``button_text`` instead of showing it."""
+    seen: dict = {}
+
+    def fake_exec(box):
+        seen["text"] = box.text()
+        seen["detail"] = box.informativeText()
+        seen["default"] = box.defaultButton().text().replace("&", "")
+        seen["tick"] = box.checkBox().text() if box.checkBox() else None
+        if tick:
+            box.checkBox().setChecked(True)
+        for button in box.buttons():
+            if button.text().replace("&", "") == button_text:
+                button.click()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    return seen
+
+
+async def test_the_question_names_the_connection_and_defaults_to_cancel(env, tmp_path, monkeypatch):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+
+    seen = _press(monkeypatch, "Cancel")
+    assert panel._confirm_delete(conn) == (False, False)
+    assert seen["text"] == "Delete the saved connection “local”?"
+    assert "The database itself isn't touched." in seen["detail"]
+    assert "will be closed" not in seen["detail"]
+    assert seen["default"] == "Cancel"
+    assert seen["tick"] is None  # nothing filed under it, so nothing to offer
+
+    seen = _press(monkeypatch, "Delete")
+    assert panel._confirm_delete(conn) == (True, False)
+
+
+async def test_the_question_offers_the_notes_only_when_there_are_some(env, tmp_path, monkeypatch):
+    panel, _keyring, _config = env
+    _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    store = db_notebook.get_notebook_store()
+    store.add_history("local", "SELECT 1")
+    store.add_history("local", "SELECT 2")
+    store.save_snippet("local", "count", "SELECT count(*) FROM apples")
+    assert (await conn.connect())[0]
+
+    try:
+        seen = _press(monkeypatch, "Delete")
+        assert panel._confirm_delete(conn) == (True, False)  # the box starts unticked
+        assert seen["tick"] == "Also delete its query history (2) and saved snippets (1)"
+        assert "It is open now and will be closed." in seen["detail"]
+        assert "are kept" in seen["detail"]
+
+        _press(monkeypatch, "Delete", tick=True)
+        assert panel._confirm_delete(conn) == (True, True)
+        _press(monkeypatch, "Cancel", tick=True)
+        assert panel._confirm_delete(conn) == (False, False)
+    finally:
+        await conn.disconnect()
+
+
+def test_the_wording_of_the_question():
+    assert notes_label(3, 0) == "Also delete its query history (3)"
+    assert notes_label(0, 2) == "Also delete its saved snippets (2)"
+    assert delete_explanation(False, False).count("\n\n") == 0
+    assert delete_explanation(True, True).count("\n\n") == 2

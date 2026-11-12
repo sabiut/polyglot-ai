@@ -18,6 +18,7 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -27,6 +28,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -67,9 +69,11 @@ from polyglot_ai.ui.panels.database_widgets import (
     ElidedLabel,
     HistoryDelegate,
     SchemaTree,
+    delete_explanation,
     history_meta,
     history_preview,
     history_tooltip,
+    notes_label,
     refresh_icon,
     schema_tree_style,
 )
@@ -189,6 +193,43 @@ class DatabasePanel(QWidget):
         )
         edit_btn.clicked.connect(self._edit_selected)
         conn_layout.addWidget(edit_btn)
+
+        # Delete icon button (a bin). The X further along only disconnects.
+        delete_btn = QPushButton()
+        delete_btn.setObjectName("dbDeleteBtn")
+        delete_btn.setFixedSize(26, 26)
+        delete_btn.setToolTip("Delete this saved connection")
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bin_pixmap = QPixmap(16, 16)
+        bin_pixmap.fill(QColor(0, 0, 0, 0))
+        bp = QPainter(bin_pixmap)
+        bp.setRenderHint(QPainter.RenderHint.Antialiasing)
+        bp_pen = QPen(QColor(tc.get("text_secondary")))
+        bp_pen.setWidthF(1.4)
+        bp_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        bp_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        bp.setPen(bp_pen)
+        bp.drawLine(QPointF(2.5, 4.5), QPointF(13.5, 4.5))  # lid
+        bp.drawPolyline(  # handle
+            QPolygonF(
+                [QPointF(6.0, 4.5), QPointF(6.0, 2.5), QPointF(10.0, 2.5), QPointF(10.0, 4.5)]
+            )
+        )
+        bp.drawPolyline(  # body
+            QPolygonF(
+                [QPointF(4.0, 4.5), QPointF(4.8, 13.5), QPointF(11.2, 13.5), QPointF(12.0, 4.5)]
+            )
+        )
+        bp.drawLine(QPointF(6.7, 7.0), QPointF(6.9, 11.0))
+        bp.drawLine(QPointF(9.3, 7.0), QPointF(9.1, 11.0))
+        bp.end()
+        delete_btn.setIcon(QIcon(bin_pixmap))
+        delete_btn.setStyleSheet(
+            "#dbDeleteBtn { background: transparent; border: none; }"
+            "#dbDeleteBtn:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        delete_btn.clicked.connect(self._delete_selected)
+        conn_layout.addWidget(delete_btn)
 
         # Connect icon button
         connect_btn = QPushButton()
@@ -455,6 +496,70 @@ class DatabasePanel(QWidget):
 
         safe_task(swap(), name="db_edit_swap")
 
+    def _confirm_delete(self, conn) -> tuple[bool, bool]:
+        """Ask before deleting ``conn``. Returns (go ahead, delete its notes too)."""
+        history, snippets = get_notebook_store().counts(conn.name)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Delete connection")
+        box.setText(f"Delete the saved connection “{conn.name}”?")
+        box.setInformativeText(delete_explanation(conn.is_connected, bool(history or snippets)))
+        notes = None
+        if history or snippets:
+            notes = QCheckBox(notes_label(history, snippets), box)
+            box.setCheckBox(notes)
+        delete = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        go_ahead = box.clickedButton() is delete
+        return go_ahead, bool(go_ahead and notes is not None and notes.isChecked())
+
+    def _delete_selected(self) -> None:
+        """Remove the selected connection from the list, after asking."""
+        name = self._active_connection
+        conn = self._db_manager.get_connection(name or "")
+        if conn is None:
+            self._status_label.setText("Add a connection first")
+            return
+        go_ahead, with_notes = self._confirm_delete(conn)
+        if not go_ahead:
+            return
+
+        self._db_manager.drop_connection_sync(name)
+        self._forget_saved_name(name)
+        if with_notes:
+            get_notebook_store().forget_connection(name)
+        self._save_connections()
+
+        window = self._full_window
+        if window is not None and window._conn is conn:
+            # Its editor has nothing left to run against.
+            self._full_window = None
+            window.close()
+
+        self._schema_tree.clear()
+        index = self._conn_combo.findText(f"{name} ({conn.db_type})")
+        if index >= 0:
+            # Selects a neighbour, or leaves the list empty.
+            self._conn_combo.removeItem(index)
+        if self._conn_combo.count() == 0:
+            self._active_connection = None
+        self._status_label.setText(f"Deleted: {name}")
+        self._status_label.setToolTip("")
+
+        async def finish() -> None:
+            try:
+                await conn.disconnect()
+            except Exception:
+                logger.debug("Closing the deleted connection %s failed", name, exc_info=True)
+            shown = self._db_manager.get_connection(self._active_connection or "")
+            if shown is not None and shown.is_connected:
+                await self._show_schema_of(shown)
+
+        safe_task(finish(), name="db_delete_connection")
+
     def _forget_saved_name(self, name: str) -> None:
         """Drop the keyring entry of a connection that no longer has this name."""
         import keyring
@@ -550,6 +655,12 @@ class DatabasePanel(QWidget):
 
         async def do_connect():
             ok, msg = await conn.connect()
+            if self._db_manager.get_connection(conn.name) is not conn:
+                # Deleted or replaced while it was connecting: don't leave
+                # it open with nothing in the list to close it from.
+                if ok:
+                    await conn.disconnect()
+                return
             if ok:
                 self._status_label.setText(f"Connected: {conn.name}")
                 self._status_label.setToolTip(msg)

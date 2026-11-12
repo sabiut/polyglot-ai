@@ -1,4 +1,4 @@
-"""Changing a saved connection: the manager's swap and the notebook's rename."""
+"""Changing or deleting a saved connection: the manager and the notebook."""
 
 from __future__ import annotations
 
@@ -76,3 +76,30 @@ def test_notebook_follows_a_rename(tmp_path):
     assert store.list_history("old") == [] and store.list_snippets("old") == []
     assert [s.sql for s in store.list_snippets("new")] == ["SELECT count(*) FROM t"]
     assert [s.sql for s in store.list_snippets("other")] == ["SELECT 2"]
+
+
+def test_dropping_a_connection_hands_it_back_and_keeps_the_others_in_order():
+    manager = _manager()
+    second = manager.get_connection("second")
+    assert manager.drop_connection_sync("second") is second
+    assert manager.connection_names == ["first", "third"]
+    assert manager.drop_connection_sync("second") is None
+
+
+def test_notebook_counts_and_forgets_one_connection_only(tmp_path):
+    store = DBNotebookStore(tmp_path / "nb.db")
+    for sql in ("SELECT 1", "SELECT 2", "SELECT 3"):
+        store.add_history("gone", sql)
+    store.save_snippet("gone", "count", "SELECT count(*) FROM t")
+    store.add_history("kept", "SELECT 9")
+    store.save_snippet("kept", "count", "SELECT 8")
+
+    assert store.counts("gone") == (3, 1)
+    assert store.counts("never-used") == (0, 0)
+
+    store.forget_connection("gone")
+
+    assert store.counts("gone") == (0, 0)
+    assert store.list_history("gone") == [] and store.list_snippets("gone") == []
+    assert [h.sql for h in store.list_history("kept")] == ["SELECT 9"]
+    assert [s.sql for s in store.list_snippets("kept")] == ["SELECT 8"]

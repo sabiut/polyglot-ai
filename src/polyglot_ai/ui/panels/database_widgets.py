@@ -355,6 +355,32 @@ def other_database_problem(db_type: str, database: str) -> str:
     )
 
 
+def delete_explanation(connected: bool, has_notes: bool) -> str:
+    """What deleting a saved connection does, for the question asked first."""
+    parts = [
+        "Its details and saved password are removed from this computer. "
+        "The database itself isn't touched."
+    ]
+    if connected:
+        parts.append("It is open now and will be closed.")
+    if has_notes:
+        parts.append(
+            "Unless you tick the box, its query history and snippets are kept, "
+            "and come back if you add a connection with the same name."
+        )
+    return "\n\n".join(parts)
+
+
+def notes_label(history: int, snippets: int) -> str:
+    """The tick box offering to delete a connection's history and snippets too."""
+    kinds = []
+    if history:
+        kinds.append(f"query history ({history})")
+    if snippets:
+        kinds.append(f"saved snippets ({snippets})")
+    return "Also delete its " + " and ".join(kinds)
+
+
 def refresh_icon(colour: str) -> QIcon:
     """A circular arrow."""
     pixmap = QPixmap(16, 16)

@@ -256,3 +256,18 @@ class TestValidateMcpCommand:
     def test_e_flag_blocked(self):
         allowed, _ = validate_mcp_command("node", ["-e", "process.exit(1)"])
         assert allowed is False
+
+
+class TestSecureWrite:
+    def test_a_second_write_replaces_the_first(self, tmp_path):
+        """``Path.rename`` onto an existing file fails on Windows; every later save did."""
+        from polyglot_ai.core.security import secure_write
+
+        target = tmp_path / "nested" / "connections.json"
+        secure_write(target, "first")
+        secure_write(target, "second")
+
+        assert target.read_text(encoding="utf-8") == "second"
+        assert [p.name for p in target.parent.iterdir()] == ["connections.json"]
+        if sys.platform != "win32":
+            assert target.stat().st_mode & 0o777 == 0o600

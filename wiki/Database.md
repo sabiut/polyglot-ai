@@ -115,6 +115,22 @@ click **Save**.
 Editing a saved connection is available from 0.18.22. In earlier
 versions, add a connection with the same name to replace it.
 
+## Deleting a connection
+
+Select the connection in the list and click the **bin** next to the
+pencil. You are asked first, and **Cancel** is the default.
+
+- The connection's details and its saved password are removed from this
+  computer. The database itself isn't touched.
+- If the connection is open it is closed, along with a tunnel it was
+  using and a SQL editor window that was working on it.
+- Its query history and saved snippets are kept unless you tick **Also
+  delete its query history and saved snippets**. Kept ones come back if
+  you later add a connection with the same name.
+
+The red **✕** only disconnects; it never removes a saved connection.
+Deleting a connection is available from 0.18.23.
+
 ## Layout
 
 The panel has a sidebar mode (compact tree) and an expanded mode (full
