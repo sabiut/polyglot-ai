@@ -282,6 +282,11 @@ For every method:
   nothing behind, and never replaces an earlier backup with half a one.
 - Passwords are never put on a command line.
 - A read-only connection can be backed up — a backup only reads.
+- **Cancel** stops a backup even while the database is busy with one
+  query — waiting for a lock, say. If the database hasn't let go ten
+  seconds later the backup ends anyway; nothing is left on disk either
+  way. (Before 0.18.25, Cancel on a built-in export only took effect
+  between batches of rows.)
 
 > For an Amazon RDS database, a **snapshot** is the complete,
 > restorable copy — take one from the

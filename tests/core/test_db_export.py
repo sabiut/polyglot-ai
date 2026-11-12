@@ -6,12 +6,20 @@ import asyncio
 import datetime as dt
 import decimal
 import gzip
+import threading
+import time
 import uuid
 
 import pytest
 
-from polyglot_ai.core import db_backup
-from polyglot_ai.core.db_backup import BackupCancelled, BackupSource, _write_export
+from polyglot_ai.core import db_backup, db_export
+from polyglot_ai.core.db_backup import (
+    BackupCancelled,
+    BackupError,
+    BackupSource,
+    _write_export,
+    run_backup,
+)
 from polyglot_ai.core.db_export import (
     EXPORTERS,
     Exporter,
@@ -620,3 +628,300 @@ def test_oracle_export_writes_tables_keys_and_one_insert_per_row(tmp_path):
     assert result.rows == 2
     # The read-only transaction is ended and the connection handed back as it was.
     assert driver.rollbacks == 2 and driver.autocommit is True
+
+
+# ── Cancel while the server is working ──────────────────────────────
+
+
+class _Connection:
+    """Stands in for DatabaseConnection under run_backup."""
+
+    instances: list = []
+    _pg_pool = _mysql_pool = _driver = object()
+    connect_blocks = False
+    disconnect_takes = 0.0
+
+    def __init__(self, name, db_type, connection_string, read_only=True, options=None):
+        self.disconnected = threading.Event()
+        self.tunnel_stopped = False
+        _Connection.instances.append(self)
+
+    async def connect(self):
+        if _Connection.connect_blocks:
+            await asyncio.Event().wait()
+        return True, "ok"
+
+    async def disconnect(self):
+        if _Connection.disconnect_takes:
+            await asyncio.sleep(_Connection.disconnect_takes)
+        self.disconnected.set()
+
+    def _stop_tunnel(self):
+        self.tunnel_stopped = True
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    """run_backup's built-in export with the connection and the exporter replaced."""
+    from polyglot_ai.core import db_explorer
+
+    _Connection.instances, _Connection.connect_blocks = [], False
+    _Connection.disconnect_takes = 0.0
+    monkeypatch.setattr(db_explorer, "DatabaseConnection", _Connection)
+
+    def use(exporter):
+        monkeypatch.setitem(db_export.EXPORTERS, "postgresql", lambda _connection: exporter)
+        return exporter
+
+    return use
+
+
+def _cancelled_backup(tmp_path, after=0.3, updates=None):
+    """A backup with Cancel pressed ``after`` seconds in → seconds it took past Cancel."""
+    cancel = threading.Event()
+    timer = threading.Timer(after, cancel.set)
+    timer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(BackupCancelled):
+            run_backup(
+                SOURCE,
+                tmp_path / "out.sql",
+                method="builtin",
+                cancel=cancel,
+                progress=updates.append if updates is not None else None,
+            )
+    finally:
+        timer.cancel()
+    return time.monotonic() - started - after
+
+
+class _StuckExporter(_FakeExporter):
+    """Its second table never answers: the query is waiting for a lock."""
+
+    def __init__(self, *, blocking=False, honours_interrupt=True):
+        super().__init__([_table("a"), _table("b")], {"a": [[(1, "x")]]})
+        self.BLOCKING = blocking
+        self._honours = honours_interrupt
+        self.released = threading.Event()
+        self.interrupts = 0
+        self.thread_names = set()
+
+    async def rows(self, table):
+        self.thread_names.add(threading.current_thread().name)
+        if table.label == "b":
+            if self.BLOCKING:  # pymssql, oracledb: the whole thread waits
+                self.released.wait(30)
+                raise RuntimeError("Operation cancelled by user")
+            await asyncio.Event().wait()
+        async for batch in super().rows(table):
+            yield batch
+
+    def interrupt(self):
+        self.interrupts += 1
+        if self._honours:
+            self.released.set()
+
+
+def test_a_built_in_backup_still_returns_its_result_and_its_errors(tmp_path, engine):
+    exporter = engine(_FakeExporter([_table("a")], {"a": [[(1, "x"), (2, "y")]]}))
+    result = run_backup(SOURCE, tmp_path / "out.sql", method="builtin", cancel=threading.Event())
+    assert (result.method, result.tables, result.rows) == ("builtin", 1, 2)
+    assert (tmp_path / "out.sql").read_text().rstrip().endswith("-- End of export: 1 table, 2 rows")
+    assert exporter.ended and _Connection.instances[0].disconnected.is_set()
+
+    class Broken(_FakeExporter):
+        async def tables(self):
+            raise RuntimeError("permission denied for table secrets")
+
+    engine(Broken([], {}))
+    with pytest.raises(BackupError, match="The export stopped: permission denied for table"):
+        run_backup(SOURCE, tmp_path / "other.sql", method="builtin")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.sql"]
+
+
+def test_cancel_reaches_an_export_whose_query_is_waiting_for_a_lock(tmp_path, engine):
+    """Cancel was only looked at between batches of rows: this export never came back."""
+    exporter = engine(_StuckExporter())
+    late = _cancelled_backup(tmp_path)
+
+    assert late < 2
+    assert exporter.ended and exporter.interrupts == 0  # an awaited call is simply cancelled
+    assert exporter.thread_names == {"db-backup-export"}
+    assert _Connection.instances[0].disconnected.is_set()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_blocking_driver_is_interrupted_once_it_has_had_its_moment(
+    tmp_path, engine, monkeypatch, caplog
+):
+    monkeypatch.setattr(db_backup, "EXPORT_NOTICE_SECONDS", 0.3)
+    exporter = engine(_StuckExporter(blocking=True))
+    with caplog.at_level("ERROR"):
+        late = _cancelled_backup(tmp_path)
+
+    # What the driver raised on being interrupted is the cancel, not a failure to log.
+    assert [r.getMessage() for r in caplog.records] == []
+
+    assert 0.25 < late < 2
+    assert exporter.interrupts == 1 and exporter.ended
+    assert _Connection.instances[0].disconnected.is_set()
+    assert not _Connection.instances[0].tunnel_stopped
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_blocking_driver_that_is_reading_rows_is_not_interrupted(tmp_path, engine):
+    """Cancelling across threads is for a driver stuck in a call, not one busy reading."""
+
+    class Flowing(_StuckExporter):
+        async def rows(self, table):
+            for _ in range(2000):
+                time.sleep(0.01)  # the driver, fetching a batch
+                yield [(1, "x")]
+
+    exporter = engine(Flowing(blocking=True))
+    late = _cancelled_backup(tmp_path)
+
+    assert late < 0.9  # noticed by itself, well inside its moment
+    assert exporter.interrupts == 0 and exporter.ended
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_export_that_will_not_stop_is_left_behind_and_cleans_up_later(
+    tmp_path, engine, monkeypatch
+):
+    monkeypatch.setattr(db_backup, "EXPORT_NOTICE_SECONDS", 0.1)
+    monkeypatch.setattr(db_backup, "EXPORT_STOP_SECONDS", 0.3)
+    exporter = engine(_StuckExporter(blocking=True, honours_interrupt=False))
+    updates: list = []
+    late = _cancelled_backup(tmp_path, updates=updates)
+
+    assert 0.35 < late < 2  # bounded: its moment, the wait, and no longer
+    connection = _Connection.instances[0]
+    assert exporter.interrupts == 1
+    assert connection.tunnel_stopped  # the last thing that can end the call
+    assert not connection.disconnected.is_set()
+    assert list(tmp_path.iterdir()) == []
+    reported = len(updates)
+
+    exporter.released.set()  # the server answers at last
+    assert connection.disconnected.wait(5)
+    assert exporter.ended
+    assert len(updates) == reported  # nobody is told about progress any more
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_export_left_behind_reports_no_more_progress(tmp_path, engine, monkeypatch):
+    """The dialog that was listening has moved on, perhaps to another backup."""
+    monkeypatch.setattr(db_backup, "EXPORT_NOTICE_SECONDS", 0.1)
+    monkeypatch.setattr(db_backup, "EXPORT_STOP_SECONDS", 0.3)
+
+    class StuckAtTheStart(_StuckExporter):
+        async def begin(self):
+            self.released.wait(30)  # and then carries on as if nothing had happened
+            return ["BEGIN"]
+
+    exporter = engine(StuckAtTheStart(blocking=True, honours_interrupt=False))
+    updates: list = []
+    _cancelled_backup(tmp_path, updates=updates)
+    assert [u.stage for u in updates] == ["connecting"]
+
+    exporter.released.set()
+    assert _Connection.instances[0].disconnected.wait(5)
+    assert [u.stage for u in updates] == ["connecting"]  # not "reading"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cancel_while_connecting_closes_what_was_opened(tmp_path, engine):
+    engine(_FakeExporter([], {}))
+    _Connection.connect_blocks = True
+    late = _cancelled_backup(tmp_path)
+
+    assert late < 2
+    assert _Connection.instances[0].disconnected.is_set()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cancel_during_the_closing_down_does_not_cut_it_short(tmp_path, engine):
+    """The connection (and its tunnel) is closed to the end even if Cancel lands just then."""
+
+    class Broken(_FakeExporter):
+        async def tables(self):
+            raise RuntimeError("permission denied")
+
+    engine(Broken([], {}))
+    _Connection.disconnect_takes = 0.6  # Cancel at 0.3 s arrives in the middle of it
+    _cancelled_backup(tmp_path)
+
+    assert _Connection.instances[0].disconnected.is_set()
+
+
+@pytest.mark.parametrize("exporter_type", [MssqlExporter, OracleExporter])
+def test_the_blocking_exporters_interrupt_through_their_driver(exporter_type):
+    calls = []
+
+    class Low:
+        def cancel(self):
+            calls.append("cancel")
+
+    class Raw(Low):
+        _conn = Low()  # pymssql keeps the FreeTDS connection here
+        autocommit = True
+
+        def rollback(self): ...
+
+        def cursor(self):
+            class Cursor:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def execute(self, sql): ...
+
+            return Cursor()
+
+    class Driver:
+        _conn = Raw()
+
+    class Saved:
+        _driver = Driver()
+
+    exporter = exporter_type(Saved())
+    assert exporter.BLOCKING
+    exporter.interrupt()  # before it has begun: nothing to stop
+    assert calls == []
+    asyncio.run(exporter.begin())
+    exporter.interrupt()
+    assert calls == ["cancel"]
+
+
+def test_the_awaiting_exporters_need_no_interrupt():
+    assert not PostgresExporter.BLOCKING and not MySQLExporter.BLOCKING
+
+
+def test_postgres_drops_its_connection_when_the_rollback_is_not_answered(monkeypatch):
+    monkeypatch.setattr(db_export, "END_SECONDS", 0.2)
+    seen = []
+
+    class Transaction:
+        async def rollback(self):
+            await asyncio.Event().wait()  # the cancel request never arrived
+
+    class Pg:
+        def terminate(self):
+            seen.append("terminate")
+
+    class Pool:
+        async def release(self, conn):
+            seen.append("release")
+
+    class Saved:
+        _pg_pool = Pool()
+
+    exporter = PostgresExporter(Saved())
+    exporter._pg, exporter._transaction = Pg(), Transaction()
+    started = time.monotonic()
+    asyncio.run(exporter.end())
+    assert seen == ["terminate", "release"] and time.monotonic() - started < 2

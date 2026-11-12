@@ -21,6 +21,8 @@ purpose, so nothing here competes with the panel's queries.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime as dt
 import decimal
 import math
@@ -74,6 +76,10 @@ def _number(value) -> str | None:
     return format(value, "f") if isinstance(value, decimal.Decimal) else repr(value)
 
 
+#: How long an exporter waits for the server while it is letting go.
+END_SECONDS = 10.0
+
+
 class Exporter:
     """What the backup needs from an engine. Subclasses fill it in."""
 
@@ -85,6 +91,10 @@ class Exporter:
     #: A line that ends a batch of statements (SQL Server's ``GO``).
     BATCH_SEPARATOR = ""
     ROWS_PER_INSERT = 200
+    #: True where the driver blocks its thread while the server works
+    #: (pymssql, python-oracledb). Cancel then can't reach the export by
+    #: cancelling its task; it goes through :meth:`interrupt`.
+    BLOCKING = False
 
     def __init__(self, connection) -> None:
         self._connection = connection
@@ -109,6 +119,14 @@ class Exporter:
 
     async def end(self) -> None:
         """Release whatever ``begin`` took."""
+
+    def interrupt(self) -> None:
+        """Make the call the server is working on return now.
+
+        Called from another thread, when Cancel was pressed and the
+        export didn't notice by itself — it is waiting for a lock, or for
+        a slow query. Only the blocking drivers need it.
+        """
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -258,10 +276,15 @@ class PostgresExporter(Exporter):
         return ["COMMIT"]
 
     async def end(self) -> None:
+        # After a cancel the server may not answer (the cancel request
+        # got lost on the way): don't wait for it for ever. A dropped
+        # connection ends the read-only transaction just as well.
         try:
-            await self._transaction.rollback()
-        finally:
-            await self._connection._pg_pool.release(self._pg)
+            await asyncio.wait_for(self._transaction.rollback(), END_SECONDS)
+        except Exception:
+            self._pg.terminate()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self._connection._pg_pool.release(self._pg), END_SECONDS)
 
 
 # ── MySQL / MariaDB ─────────────────────────────────────────────────
@@ -425,6 +448,7 @@ class MssqlExporter(Exporter):
     )
     RESTORE = "sqlcmd -S <server> -d <empty database> -b -I -i <this file>   (or open it in SSMS)"
     BATCH_SEPARATOR = "GO"
+    BLOCKING = True
     #: Read as ISO text rather than as Python values, which would round them.
     _AS_TEXT = frozenset({"datetime2", "time", "datetimeoffset"})
     _LINE_BREAK = re.compile(r"(\r\n|\r|\n)")
@@ -445,6 +469,13 @@ class MssqlExporter(Exporter):
     async def begin(self) -> list[str]:
         self._ms = self._connection._driver._conn
         return ["SET NOCOUNT ON", "SET XACT_ABORT ON", "SET QUOTED_IDENTIFIER ON"]
+
+    def interrupt(self) -> None:
+        conn = getattr(self, "_ms", None)
+        if conn is not None:
+            # pymssql's DB-API connection wraps the FreeTDS one, whose
+            # cancel sends the server an attention signal.
+            conn._conn.cancel()
 
     async def tables(self) -> list[TableSpec]:
         found = self._query(
@@ -651,6 +682,7 @@ class OracleExporter(Exporter):
     )
     RESTORE = "sqlplus <user>@<service> @<this file>   (or run it in SQLcl / SQL Developer)"
     ROWS_PER_INSERT = 1  # no multi-row VALUES before 23ai
+    BLOCKING = True
     #: Oracle refuses a string literal over 4000 bytes; at up to four
     #: bytes a character, a thousand characters always fits.
     _CHUNK = 1000
@@ -677,6 +709,11 @@ class OracleExporter(Exporter):
         # For SQL*Plus: "&" is not a prompt, and a blank line inside a
         # statement doesn't end it.
         return ["SET DEFINE OFF", "SET SQLBLANKLINES ON"]
+
+    def interrupt(self) -> None:
+        conn = getattr(self, "_ora", None)
+        if conn is not None:
+            conn.cancel()
 
     async def tables(self) -> list[TableSpec]:
         names = [

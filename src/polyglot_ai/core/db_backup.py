@@ -581,25 +581,100 @@ def _header(source: BackupSource, exporter) -> str:
     return "".join(f"-- {line}".rstrip() + "\n" for line in lines) + "\n"
 
 
+#: A cancelled export first gets this long to notice by itself (it looks
+#: between batches of rows) before a blocking driver is interrupted from
+#: another thread — which is only safe to rely on when the driver is
+#: stuck in a call, not while it is busy reading rows.
+EXPORT_NOTICE_SECONDS = 1.0
+#: … and then this long to let go of its connection before the backup
+#: stops waiting for it.
+EXPORT_STOP_SECONDS = 10.0
+
+
+class _ExportRun:
+    """What Cancel needs in order to reach an export running on another thread."""
+
+    def __init__(self) -> None:
+        #: Set when the export is to stop. It keeps being set, whatever
+        #: happens to the caller's own event afterwards.
+        self.stop = threading.Event()
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.task: asyncio.Task | None = None
+        self.connection = None
+        self.exporter = None
+
+    @property
+    def blocking(self) -> bool:
+        return self.exporter is not None and self.exporter.BLOCKING
+
+    def cancel_task(self) -> None:
+        """Cancel whatever the export is awaiting (an asyncpg or aiomysql call, a connect)."""
+        loop, task = self.loop, self.task
+        if loop is not None and task is not None:
+            with contextlib.suppress(RuntimeError):  # the loop has already closed
+                loop.call_soon_threadsafe(task.cancel)
+
+    def interrupt_driver(self) -> None:
+        exporter = self.exporter
+        if exporter is None:
+            return
+        try:
+            exporter.interrupt()
+        except Exception:
+            logger.debug("Export: the driver's cancel failed", exc_info=True)
+
+    def cut_off(self) -> None:
+        """Last resort: take the tunnel away, which ends a call that would not stop."""
+        connection = self.connection
+        if connection is not None:
+            with contextlib.suppress(Exception):
+                connection._stop_tunnel()
+
+
+async def _to_the_end(work) -> None:
+    """Await ``work`` to its end, even if this task is cancelled meanwhile.
+
+    For cleaning up: Cancel may arrive while the connection is being
+    closed, and a tunnel left running would be worse than a late stop.
+    """
+    task = asyncio.ensure_future(work)
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            logger.debug("Export: closing the connection failed", exc_info=True)
+            return
+
+
 async def _export(
-    source: BackupSource, part: Path, compress: bool, report: ProgressFn, cancel
+    source: BackupSource,
+    part: Path,
+    compress: bool,
+    report: ProgressFn,
+    cancel,
+    run: _ExportRun | None = None,
 ) -> BackupResult:
     from polyglot_ai.core.db_drivers import describe_error
     from polyglot_ai.core.db_explorer import DatabaseConnection
     from polyglot_ai.core.db_export import EXPORTERS
 
+    run = run or _ExportRun()
+    _cancelled(cancel)
     connection = DatabaseConnection(
         f"{source.name} (backup)",
         source.db_type,
         source.connection_string,
         options=source.options,
     )
-    report(Progress("connecting"))
-    ok, message = await connection.connect()
-    if not ok:
-        await connection.disconnect()
-        raise BackupError(f"Couldn't connect: {message}")
+    run.connection = connection
     try:
+        report(Progress("connecting"))
+        ok, message = await connection.connect()
+        if not ok:
+            raise BackupError(f"Couldn't connect: {message}")
+        _cancelled(cancel)
         direct = {
             "postgresql": connection._pg_pool,
             "mysql": connection._mysql_pool,
@@ -610,15 +685,19 @@ async def _export(
                 "so the built-in export can't read this database."
             )
         exporter = EXPORTERS[source.db_type](connection)
+        run.exporter = exporter
         try:
             return await _write_export(source, exporter, part, compress, report, cancel)
         except BackupError:
             raise
         except Exception as exc:
+            if cancel is not None and cancel.is_set():
+                # What the driver said on being interrupted, not a failure.
+                raise BackupCancelled("Cancelled.") from exc
             logger.exception("Built-in export of %s failed", source.name)
             raise BackupError(f"The export stopped: {describe_error(exc)}") from exc
     finally:
-        await connection.disconnect()
+        await _to_the_end(connection.disconnect())
 
 
 async def _write_export(source, exporter, part, compress, report, cancel) -> BackupResult:
@@ -627,6 +706,7 @@ async def _write_export(source, exporter, part, compress, report, cancel) -> Bac
     try:
         report(Progress("reading"))
         tables = await exporter.tables()
+        _cancelled(cancel)
         total_rows = 0
         with _open_binary(part, compress) as binary:
             out = io.TextIOWrapper(binary, encoding="utf-8", newline="\n")
@@ -716,17 +796,76 @@ async def _write_export(source, exporter, part, compress, report, cancel) -> Bac
 
 
 def _run_export(source, part, compress, report, cancel) -> BackupResult:
-    # A loop of this thread's own: the app's loop belongs to the GUI
-    # thread (and is Qt's), and the drivers' connections are per loop.
-    loop = asyncio.SelectorEventLoop()
-    try:
-        return loop.run_until_complete(_export(source, part, compress, report, cancel))
-    finally:
+    """Run the export on a thread of its own and watch Cancel from this one.
+
+    The export looks at Cancel between batches of rows, which is no help
+    while a query is waiting for a lock. So: tell it to stop; cancel what
+    it is awaiting, or — for a driver that blocks its thread, once it has
+    had a moment to notice by itself — interrupt the driver; and if it
+    still hasn't let go after :data:`EXPORT_STOP_SECONDS`, stop waiting.
+    The thread is a daemon and tidies up after itself when the server
+    answers; it changes nothing in the database either way.
+    """
+    run = _ExportRun()
+    outcome: dict = {}
+
+    def quiet(update: Progress) -> None:
+        if not run.stop.is_set():  # nobody is listening after a cancel
+            report(update)
+
+    def body() -> None:
+        # A loop of this thread's own: the app's loop belongs to the GUI
+        # thread (and is Qt's), and the drivers' connections are per loop.
+        loop = asyncio.SelectorEventLoop()
         try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.run_until_complete(loop.shutdown_default_executor())
+            run.task = loop.create_task(_export(source, part, compress, quiet, run.stop, run))
+            run.loop = loop
+            outcome["result"] = loop.run_until_complete(run.task)
+        except BaseException as exc:  # handed to the thread that is waiting
+            outcome["error"] = exc
         finally:
-            loop.close()
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            except Exception:
+                logger.debug("Export: closing the event loop failed", exc_info=True)
+            finally:
+                loop.close()
+
+    thread = threading.Thread(target=body, name="db-backup-export", daemon=True)
+    thread.start()
+    while True:
+        thread.join(0.1)
+        if not thread.is_alive():
+            break
+        if cancel is None or not cancel.is_set():
+            continue
+        run.stop.set()
+        if run.blocking:
+            thread.join(EXPORT_NOTICE_SECONDS)
+            if thread.is_alive():
+                run.interrupt_driver()
+        else:
+            run.cancel_task()
+        thread.join(EXPORT_STOP_SECONDS)
+        if thread.is_alive():
+            logger.warning(
+                "Export of %s: the database hadn't let go %.0f seconds after Cancel; "
+                "not waiting for it.",
+                source.name,
+                EXPORT_STOP_SECONDS,
+            )
+            run.cut_off()
+        raise BackupCancelled("Cancelled.")
+
+    if cancel is not None and cancel.is_set():
+        raise BackupCancelled("Cancelled.")
+    error = outcome.get("error")
+    if isinstance(error, asyncio.CancelledError):
+        raise BackupCancelled("Cancelled.")
+    if error is not None:
+        raise error
+    return outcome["result"]
 
 
 # ── Entry point ─────────────────────────────────────────────────────
