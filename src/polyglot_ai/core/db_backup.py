@@ -248,8 +248,11 @@ def _create_private(path: Path) -> io.BufferedWriter:
 
 
 @contextlib.contextmanager
-def _open_binary(path: Path, compress: bool):
+def _open_binary(path: Path, compress: bool, opened: list | None = None):
+    """The file to write, gzipped or not. ``opened`` is given the file underneath."""
     raw = _create_private(path)
+    if opened is not None:
+        opened.append(raw)
     try:
         if compress:
             with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as packed:
@@ -602,6 +605,8 @@ class _ExportRun:
         self.task: asyncio.Task | None = None
         self.connection = None
         self.exporter = None
+        #: The file being written, so that it can be closed from outside.
+        self.files: list = []
 
     @property
     def blocking(self) -> bool:
@@ -624,11 +629,19 @@ class _ExportRun:
             logger.debug("Export: the driver's cancel failed", exc_info=True)
 
     def cut_off(self) -> None:
-        """Last resort: take the tunnel away, which ends a call that would not stop."""
+        """Last resort, for an export that would not stop.
+
+        Its tunnel is taken away, which ends the call it is stuck in, and
+        its file is closed: on Windows a file that is still open can't be
+        deleted, and the half-written backup would be left on disk.
+        """
         connection = self.connection
         if connection is not None:
             with contextlib.suppress(Exception):
                 connection._stop_tunnel()
+        for handle in list(self.files):
+            with contextlib.suppress(Exception):
+                handle.close()
 
 
 async def _to_the_end(work) -> None:
@@ -687,7 +700,9 @@ async def _export(
         exporter = EXPORTERS[source.db_type](connection)
         run.exporter = exporter
         try:
-            return await _write_export(source, exporter, part, compress, report, cancel)
+            return await _write_export(
+                source, exporter, part, compress, report, cancel, opened=run.files
+            )
         except BackupError:
             raise
         except Exception as exc:
@@ -700,7 +715,9 @@ async def _export(
         await _to_the_end(connection.disconnect())
 
 
-async def _write_export(source, exporter, part, compress, report, cancel) -> BackupResult:
+async def _write_export(
+    source, exporter, part, compress, report, cancel, *, opened: list | None = None
+) -> BackupResult:
     separator = exporter.BATCH_SEPARATOR
     opening = await exporter.begin()
     try:
@@ -708,7 +725,7 @@ async def _write_export(source, exporter, part, compress, report, cancel) -> Bac
         tables = await exporter.tables()
         _cancelled(cancel)
         total_rows = 0
-        with _open_binary(part, compress) as binary:
+        with _open_binary(part, compress, opened) as binary:
             out = io.TextIOWrapper(binary, encoding="utf-8", newline="\n")
 
             def statement(sql: str) -> None:

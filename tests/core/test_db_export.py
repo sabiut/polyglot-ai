@@ -6,9 +6,11 @@ import asyncio
 import datetime as dt
 import decimal
 import gzip
+import os
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -696,6 +698,22 @@ def _cancelled_backup(tmp_path, after=0.3, updates=None):
     return time.monotonic() - started - after
 
 
+def _open_part_files() -> list[str]:
+    """This process's open files that are a backup being written (Linux only)."""
+    fds = Path("/proc/self/fd")
+    if not fds.is_dir():
+        return []
+    found = []
+    for entry in fds.iterdir():
+        try:
+            target = os.readlink(entry)
+        except OSError:
+            continue
+        if ".sql.part" in target:
+            found.append(target)
+    return found
+
+
 class _StuckExporter(_FakeExporter):
     """Its second table never answers: the query is waiting for a lock."""
 
@@ -802,6 +820,8 @@ def test_an_export_that_will_not_stop_is_left_behind_and_cleans_up_later(
     assert connection.tunnel_stopped  # the last thing that can end the call
     assert not connection.disconnected.is_set()
     assert list(tmp_path.iterdir()) == []
+    # Its file is closed as well, not only unlinked: Windows can't delete an open file.
+    assert _open_part_files() == []
     reported = len(updates)
 
     exporter.released.set()  # the server answers at last
