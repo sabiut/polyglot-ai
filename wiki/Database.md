@@ -312,6 +312,13 @@ Things to know:
 - A backup made from one engine is refused for another, and a built-in
   export that was cut short (it has no closing line) is refused before
   anything is run.
+- **Cancel** stops a restore even while a statement is running — one
+  that is waiting for a lock, say. PostgreSQL: nothing is changed. The
+  other engines: the statements already run stay, and the message says
+  how many. The app asks the server to stop the statement and waits up
+  to ten seconds; if the server still hasn't, the restore ends anyway
+  and tells you that statement may yet complete. (Before 0.18.24,
+  Cancel on a built-in export only took effect between statements.)
 - Try a restore into a scratch database once before you rely on a
   backup.
 

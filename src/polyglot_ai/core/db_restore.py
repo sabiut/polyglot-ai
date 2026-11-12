@@ -30,6 +30,7 @@ import contextlib
 import gzip
 import logging
 import os
+import queue
 import re
 import shutil
 import sqlite3
@@ -373,6 +374,11 @@ class RestoreResult:
     warnings: list[str] = field(default_factory=list)
 
 
+#: How long a statement that was told to stop gets to do so before the
+#: restore gives up waiting for it.
+INTERRUPT_GRACE_SECONDS = 10.0
+
+
 class _Runner:
     """Runs one statement at a time on a connected DatabaseConnection."""
 
@@ -383,6 +389,17 @@ class _Runner:
 
     async def run(self, statement: str) -> None:
         raise NotImplementedError
+
+    async def interrupt(self, work: asyncio.Future) -> bool:
+        """Make the statement running as ``work`` give up, because Cancel was pressed.
+
+        Returns once it has, or once :data:`INTERRUPT_GRACE_SECONDS` have
+        passed — never later. True if the statement stopped; False if the
+        server may still be running it.
+        """
+        work.cancel()
+        await asyncio.wait({work}, timeout=INTERRUPT_GRACE_SECONDS)
+        return work.done()
 
     async def failed(self) -> None:
         """Undo what can be undone."""
@@ -397,12 +414,33 @@ class _PostgresRunner(_Runner):
     async def run(self, statement: str) -> None:
         await self._pg.execute(statement)
 
+    async def interrupt(self, work: asyncio.Future) -> bool:
+        # Cancelling the call makes asyncpg send the server a cancel
+        # request for it. The ROLLBACK then waits for the server to have
+        # let go of the statement — but not for ever: a cancel request
+        # can get lost (a proxy in between), and then the connection is
+        # dropped instead. Either way nothing of the load can be
+        # committed any more.
+        work.cancel()
+        await asyncio.wait({work}, timeout=INTERRUPT_GRACE_SECONDS)
+        try:
+            await asyncio.wait_for(self._pg.execute("ROLLBACK"), INTERRUPT_GRACE_SECONDS)
+        except Exception:
+            logger.debug("Restore: dropping the connection after a cancel", exc_info=True)
+            self._pg.terminate()
+        return True
+
     async def failed(self) -> None:
+        if self._pg.is_closed():
+            return
         with contextlib.suppress(Exception):
-            await self._pg.execute("ROLLBACK")
+            await asyncio.wait_for(self._pg.execute("ROLLBACK"), INTERRUPT_GRACE_SECONDS)
 
     async def close(self) -> None:
-        await self._connection._pg_pool.release(self._pg)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                self._connection._pg_pool.release(self._pg), INTERRUPT_GRACE_SECONDS
+            )
 
 
 class _MySQLRunner(_Runner):
@@ -414,12 +452,179 @@ class _MySQLRunner(_Runner):
         async with self._my.cursor() as cursor:
             await cursor.execute(statement)
 
+    async def _kill(self, thread_id: int) -> None:
+        """KILL QUERY from a second login: the first is busy with the statement."""
+        from polyglot_ai.core.db_explorer import DatabaseConnection
 
-class _MssqlRunner(_Runner):
+        first = self._connection
+        other = DatabaseConnection(
+            f"{first.name} (cancel)",
+            first.db_type,
+            first._connection_string,
+            read_only=False,
+            options=first.options,
+        )
+        try:
+            ok, message = await other.connect()
+            if not ok:
+                raise BackupError(f"Couldn't connect to stop the statement: {message}")
+            async with other._mysql_pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(f"KILL QUERY {int(thread_id)}")
+        finally:
+            await other.disconnect()
+
+    async def interrupt(self, work: asyncio.Future) -> bool:
+        try:
+            await asyncio.wait_for(self._kill(self._my.thread_id()), INTERRUPT_GRACE_SECONDS)
+            await asyncio.wait({work}, timeout=INTERRUPT_GRACE_SECONDS)
+        except Exception:
+            logger.debug("Restore: KILL QUERY didn't get through", exc_info=True)
+        if work.done():
+            return True
+        # Hang up instead. The server only notices when it next writes
+        # to this connection, so the statement may still run to its end.
+        with contextlib.suppress(Exception):
+            self._my.close()
+        work.cancel()
+        await asyncio.wait({work}, timeout=1.0)
+        return False
+
+
+class _Lane:
+    """One background thread that makes a synchronous driver's calls, in order.
+
+    pymssql and python-oracledb block while the server works. On their
+    own thread that doesn't stop the restore from noticing Cancel, and
+    because the thread is a daemon, a call the server never answers
+    can't keep the application from exiting either.
+    """
+
+    def __init__(self) -> None:
+        self._jobs: queue.SimpleQueue = queue.SimpleQueue()
+        threading.Thread(target=self._work, name="db-restore-driver", daemon=True).start()
+
+    def _work(self) -> None:
+        while True:
+            job = self._jobs.get()
+            if job is None:
+                return
+            call, loop, future = job
+            result = error = None
+            try:
+                result = call()
+            except BaseException as exc:  # handed to whoever is waiting
+                error = exc
+            if future is None:
+                continue
+            with contextlib.suppress(RuntimeError):  # the loop has gone: nobody is waiting
+                loop.call_soon_threadsafe(self._settle, future, result, error)
+
+    @staticmethod
+    def _settle(future: asyncio.Future, result, error) -> None:
+        if future.done():
+            return
+        if error is None:
+            future.set_result(result)
+        else:
+            future.set_exception(error)
+
+    async def call(self, call):
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._jobs.put((call, loop, future))
+        return await future
+
+    def finish_with(self, call=None) -> None:
+        """End the thread, after ``call`` — and after whatever it is still doing."""
+        if call is not None:
+            self._jobs.put((call, None, None))
+        self._jobs.put(None)
+
+
+class _ThreadRunner(_Runner):
+    """A synchronous driver, kept off the restore's own thread."""
+
+    def __init__(self, connection) -> None:
+        super().__init__(connection)
+        self._lane: _Lane | None = None
+        self._abandoned = False
+
+    # What a driver provides, all blocking:
+    def _open(self) -> None: ...
+
+    def _run(self, statement: str) -> None:
+        raise NotImplementedError
+
+    def _break(self) -> None:
+        """Ask the server to stop the running statement. Called from another thread."""
+        raise NotImplementedError
+
+    def _undo(self) -> None: ...
+
+    def _close(self) -> None: ...
+
     async def open(self) -> None:
-        self._ms = self._connection._driver._conn
+        self._lane = _Lane()
+        try:
+            await self._lane.call(self._open)
+        except BaseException:
+            self._lane.finish_with()
+            raise
 
     async def run(self, statement: str) -> None:
+        await self._lane.call(lambda: self._run(statement))
+
+    async def interrupt(self, work: asyncio.Future) -> bool:
+        def ask() -> None:
+            try:
+                self._break()
+            except Exception:
+                logger.debug("Restore: the driver's cancel failed", exc_info=True)
+
+        # Its own thread: the driver's cancel is network traffic too, and
+        # must not be able to hold the restore up either.
+        threading.Thread(target=ask, name="db-restore-cancel", daemon=True).start()
+        await asyncio.wait({work}, timeout=INTERRUPT_GRACE_SECONDS)
+        if work.done():
+            return True
+
+        # The statement is still running and the driver's connection is
+        # inside it, so it can't be closed from here. Leave both to the
+        # lane's thread: when the server answers, it undoes what it can
+        # and closes. If there is a tunnel, stopping it (which the caller
+        # does next) cuts the statement short.
+        self._abandoned = True
+        driver, self._connection._driver = self._connection._driver, None
+
+        def give_up() -> None:
+            for step in (self._undo, self._close, getattr(driver, "close", None)):
+                if step is not None:
+                    with contextlib.suppress(Exception):
+                        step()
+
+        self._lane.finish_with(give_up)
+        return False
+
+    async def failed(self) -> None:
+        if not self._abandoned:
+            with contextlib.suppress(Exception):
+                await self._lane.call(self._undo)
+
+    async def close(self) -> None:
+        if self._lane is None or self._abandoned:
+            return
+        try:
+            await self._lane.call(self._close)
+        finally:
+            self._lane.finish_with()
+
+
+class _MssqlRunner(_ThreadRunner):
+    def _open(self) -> None:
+        self._ms = self._connection._driver._conn
+
+    def _run(self, statement: str) -> None:
         cursor = self._ms.cursor()
         try:
             cursor.execute(statement)
@@ -430,15 +635,20 @@ class _MssqlRunner(_Runner):
         finally:
             cursor.close()
 
+    def _break(self) -> None:
+        # pymssql's DB-API connection wraps the FreeTDS one, whose cancel
+        # sends the server an attention signal.
+        self._ms._conn.cancel()
 
-class _OracleRunner(_Runner):
+
+class _OracleRunner(_ThreadRunner):
     _SQLPLUS = re.compile(r"^SET\s+(DEFINE|SQLBLANKLINES)\b", re.IGNORECASE)
 
-    async def open(self) -> None:
+    def _open(self) -> None:
         self._ora = self._connection._driver._conn
         self._ora.autocommit = False
 
-    async def run(self, statement: str) -> None:
+    def _run(self, statement: str) -> None:
         if self._SQLPLUS.match(statement):
             return  # settings for SQL*Plus, not SQL
         if statement.upper() == "COMMIT":
@@ -447,11 +657,13 @@ class _OracleRunner(_Runner):
         with self._ora.cursor() as cursor:
             cursor.execute(statement)
 
-    async def failed(self) -> None:
-        with contextlib.suppress(Exception):
-            self._ora.rollback()
+    def _break(self) -> None:
+        self._ora.cancel()
 
-    async def close(self) -> None:
+    def _undo(self) -> None:
+        self._ora.rollback()
+
+    def _close(self) -> None:
         self._ora.autocommit = True
 
 
@@ -483,6 +695,48 @@ def _check_complete(file: BackupFile, cancel) -> None:
             "This export is incomplete — it doesn't end with its closing line, so the "
             "backup that made it didn't finish. Nothing was loaded."
         )
+
+
+class _Interrupted(BackupCancelled):
+    """Cancel was pressed while a statement was running."""
+
+    def __init__(self, stopped: bool, finished: bool = False) -> None:
+        super().__init__("Cancelled.")
+        #: False if the server may still be running the statement.
+        self.stopped = stopped
+        #: True if the statement got to its end just as it was being stopped.
+        self.finished = finished
+
+
+async def _until_set(cancel: threading.Event) -> None:
+    while not cancel.is_set():
+        await asyncio.sleep(0.1)
+
+
+async def _run_or_interrupt(runner, statement: str, cancelled: asyncio.Future | None) -> None:
+    """Run ``statement``; if Cancel is pressed meanwhile, stop it and raise.
+
+    Cancel used to be looked at between statements only, so one that was
+    waiting for a lock — or just large — held the restore until the
+    server was done with it.
+    """
+    if cancelled is None:
+        await runner.run(statement)
+        return
+    work = asyncio.ensure_future(runner.run(statement))
+    try:
+        await asyncio.wait({work, cancelled}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        work.cancel()
+        raise
+    if work.done():
+        work.result()  # raises what the statement raised
+        return
+    stopped = await runner.interrupt(work)
+    # What it raised on being stopped is expected, and read here so that
+    # asyncio doesn't report it as an exception nobody looked at.
+    finished = work.done() and not work.cancelled() and work.exception() is None
+    raise _Interrupted(stopped, finished)
 
 
 async def _restore_with_driver(
@@ -519,6 +773,7 @@ async def _restore_with_driver(
         runner = _RUNNERS[source.db_type](connection)
         await runner.open()
         done = 0
+        cancelled = asyncio.ensure_future(_until_set(cancel)) if cancel is not None else None
         try:
             with open(file.path, "rb") as raw:
                 stream = gzip.GzipFile(fileobj=raw) if file.compressed else raw
@@ -530,7 +785,9 @@ async def _restore_with_driver(
                 ):
                     _cancelled(cancel)
                     try:
-                        await runner.run(statement)
+                        await _run_or_interrupt(runner, statement, cancelled)
+                    except BackupCancelled:
+                        raise
                     except Exception as exc:
                         await runner.failed()
                         applied = (
@@ -547,14 +804,29 @@ async def _restore_with_driver(
                     done += 1
                     if done % 20 == 0:
                         report(Progress("loading", index=done, size=raw.tell(), total=file.size))
-        except BackupCancelled:
+        except BackupCancelled as stop:
+            if isinstance(stop, _Interrupted) and stop.finished:
+                done += 1
             await runner.failed()
-            if not plan.atomic and done:
-                raise BackupCancelled(
-                    f"Restore cancelled after {done:,} statements; those were applied."
-                ) from None
-            raise
+            if plan.atomic:
+                # The transaction was rolled back, or its connection is
+                # gone before a COMMIT was sent.
+                raise BackupCancelled("Restore cancelled. Nothing was changed.") from None
+            message = (
+                f"Restore cancelled after {done:,} statement{'' if done == 1 else 's'}; "
+                f"{'that was' if done == 1 else 'those were'} applied."
+                if done
+                else "Restore cancelled before any statement was applied."
+            )
+            if isinstance(stop, _Interrupted) and not stop.stopped:
+                message += (
+                    "  The statement that was running hadn't stopped after "
+                    f"{INTERRUPT_GRACE_SECONDS:.0f} seconds and may still complete."
+                )
+            raise BackupCancelled(message) from None
         finally:
+            if cancelled is not None:
+                cancelled.cancel()
             await runner.close()
         return RestoreResult(file.path, "driver", statements=done)
     finally:

@@ -27,7 +27,10 @@ from polyglot_ai.core.db_restore import (
     RestorePlan,
     _check_complete,
     _MssqlRunner,
+    _MySQLRunner,
     _OracleRunner,
+    _PostgresRunner,
+    _run_or_interrupt,
     inspect_file,
     plan_restore,
     restore_command,
@@ -422,6 +425,8 @@ class _RecordingRunner:
 
     made: list = []
     fail_at = 0
+    block_at = 0  # this statement never returns by itself …
+    stops = True  # … and this is what interrupting it reports
 
     def __init__(self, connection):
         self.ran, self.events = [], []
@@ -433,7 +438,15 @@ class _RecordingRunner:
     async def run(self, statement):
         if len(self.ran) + 1 == type(self).fail_at:
             raise RuntimeError("relation already exists")
+        if len(self.ran) + 1 == type(self).block_at:
+            await asyncio.Event().wait()  # a lock nobody releases
         self.ran.append(statement)
+
+    async def interrupt(self, work):
+        self.events.append("interrupt")
+        work.cancel()
+        await asyncio.wait({work})
+        return type(self).stops
 
     async def failed(self):
         self.events.append("failed")
@@ -463,6 +476,7 @@ def scripted_engine(monkeypatch):
             self.disconnected = True
 
     _RecordingRunner.made, _RecordingRunner.fail_at = [], 0
+    _RecordingRunner.block_at, _RecordingRunner.stops = 0, True
     monkeypatch.setattr(db_explorer, "DatabaseConnection", Connection)
     for db_type in ("postgresql", "mysql", "mssql", "oracle"):
         monkeypatch.setitem(db_restore._RUNNERS, db_type, _RecordingRunner)
@@ -520,7 +534,7 @@ def test_cancelling_a_driver_restore_reports_what_was_applied(tmp_path, scripted
 
     _RecordingRunner.run = run_then_cancel
     try:
-        with pytest.raises(BackupCancelled, match="after 1 statements; those were applied"):
+        with pytest.raises(BackupCancelled, match="after 1 statement; that was applied"):
             run_restore(
                 BackupSource("my", "mysql", "mysql://a:b@h:3306/d"),
                 _export(tmp_path, "MySQL / MariaDB"),
@@ -534,10 +548,456 @@ def test_cancelling_a_driver_restore_reports_what_was_applied(tmp_path, scripted
                 _export(tmp_path),
                 cancel=cancel,
             )
-        assert "applied" not in str(atomic.value)
+        assert str(atomic.value) == "Restore cancelled. Nothing was changed."
         assert _RecordingRunner.made[0].events == ["open", "failed", "close"]
     finally:
         _RecordingRunner.run = original
+
+
+# ── Cancel while a statement is running ─────────────────────────────
+
+
+def _timed(source, path, after=0.3):
+    """run_restore with Cancel pressed ``after`` seconds in → (message, seconds past Cancel)."""
+    started = time.monotonic()
+    with pytest.raises(BackupCancelled) as stopped:
+        run_restore(source, path, cancel=_cancel_after(after))
+    return str(stopped.value), time.monotonic() - started - after
+
+
+def test_cancel_reaches_a_statement_that_is_waiting_for_a_lock(tmp_path, scripted_engine):
+    """Cancel was only looked at between statements: this one held the restore for good."""
+    _RecordingRunner.block_at = 3
+    message, late = _timed(
+        BackupSource("my", "mysql", "mysql://a:b@h:3306/d"), _export(tmp_path, "MySQL / MariaDB")
+    )
+    assert message == "Restore cancelled after 2 statements; those were applied."
+    assert late < 2
+    (runner,) = _RecordingRunner.made
+    assert runner.events == ["open", "interrupt", "failed", "close"]
+    assert scripted_engine.instances[0].disconnected
+
+
+def test_cancel_of_a_running_statement_in_a_transaction_changes_nothing(tmp_path, scripted_engine):
+    _RecordingRunner.block_at = 2
+    message, late = _timed(
+        BackupSource("pg", "postgresql", "postgresql://a:b@h:5432/d"), _export(tmp_path)
+    )
+    assert message == "Restore cancelled. Nothing was changed."
+    assert late < 2
+
+
+def test_a_statement_that_would_not_stop_is_reported_as_possibly_completing(
+    tmp_path, scripted_engine
+):
+    _RecordingRunner.block_at, _RecordingRunner.stops = 1, False
+    message, _late = _timed(
+        BackupSource("ora", "oracle", "oracle://a:b@h:1521/d"), _export(tmp_path, "Oracle")
+    )
+    assert message.startswith("Restore cancelled before any statement was applied.")
+    assert "hadn't stopped after 10 seconds and may still complete." in message
+
+
+def test_a_statement_that_finishes_is_not_disturbed_by_the_watcher(tmp_path, scripted_engine):
+    result = run_restore(
+        BackupSource("pg", "postgresql", "postgresql://a:b@h:5432/d"),
+        _export(tmp_path),
+        cancel=threading.Event(),  # never pressed
+    )
+    assert result.statements == 4
+    assert _RecordingRunner.made[0].events == ["open", "close"]
+
+
+def test_a_statement_that_ends_while_being_stopped_is_counted(tmp_path, scripted_engine):
+    async def too_late(self, work):
+        await asyncio.wait({work})  # the lock was released just then
+        return True
+
+    release = []
+    original_run, original_interrupt = _RecordingRunner.run, _RecordingRunner.interrupt
+
+    async def run(self, statement):
+        if len(self.ran) == 1:
+            gate = asyncio.Event()
+            release.append(gate)
+            asyncio.get_running_loop().call_later(0.5, gate.set)
+            await gate.wait()
+        self.ran.append(statement)
+
+    _RecordingRunner.run, _RecordingRunner.interrupt = run, too_late
+    try:
+        message, _late = _timed(
+            BackupSource("my", "mysql", "mysql://a:b@h:3306/d"),
+            _export(tmp_path, "MySQL / MariaDB"),
+        )
+    finally:
+        _RecordingRunner.run, _RecordingRunner.interrupt = original_run, original_interrupt
+    assert message == "Restore cancelled after 2 statements; those were applied."
+    assert len(_RecordingRunner.made[0].ran) == 2
+
+
+class _BlockingRaw:
+    """A synchronous driver connection whose ``block_on`` statement waits for a cancel."""
+
+    def __init__(self, block_on="", honours_cancel=True):
+        self.log, self.calls = [], []
+        self.autocommit = True
+        self._block_on, self._honours = block_on, honours_cancel
+        self.released = threading.Event()
+        self.thread_names = set()
+        outer = self
+
+        class Low:  # pymssql: connection._conn.cancel()
+            def cancel(self):
+                outer.cancel()
+
+        self._conn = Low()
+
+    def cancel(self):
+        self.calls.append("cancel")
+        if self._honours:
+            self.released.set()
+
+    def cursor(self):
+        outer = self
+
+        class Cursor(_Cursor):
+            def execute(self, sql):
+                outer.thread_names.add(threading.current_thread().name)
+                if sql == outer._block_on:
+                    outer.released.wait(30)
+                    raise RuntimeError("Operation cancelled by user")
+                outer.log.append(sql)
+
+        return Cursor(self.log)
+
+    def commit(self):
+        self.calls.append("commit")
+
+    def rollback(self):
+        self.calls.append("rollback")
+
+    def close(self):
+        self.calls.append("close")
+
+
+async def _interrupt_after(runner, statement, seconds=0.2):
+    """Run ``statement`` on ``runner`` and press Cancel while it is running."""
+    cancelled = asyncio.ensure_future(asyncio.sleep(seconds))
+    started = time.monotonic()
+    with pytest.raises(BackupCancelled) as stopped:
+        await _run_or_interrupt(runner, statement, cancelled)
+    return stopped.value.stopped, time.monotonic() - started - seconds
+
+
+@pytest.mark.parametrize("runner_type", [_MssqlRunner, _OracleRunner])
+def test_a_synchronous_driver_is_told_to_cancel_from_another_thread(runner_type):
+    raw = _BlockingRaw(block_on="INSERT INTO t SELECT * FROM locked")
+    runner = runner_type(_connection_with(raw))
+
+    async def go():
+        await runner.open()
+        await runner.run("CREATE TABLE t (a int)")
+        stopped, late = await _interrupt_after(runner, "INSERT INTO t SELECT * FROM locked")
+        # The connection is still the runner's: it undoes and closes in order.
+        await runner.failed()
+        await runner.close()
+        return stopped, late
+
+    stopped, late = asyncio.run(go())
+    assert stopped is True and late < 2
+    assert raw.log == ["CREATE TABLE t (a int)"]
+    assert raw.calls[0] == "cancel"
+    # The driver was never called on the restore's own thread.
+    assert raw.thread_names == {"db-restore-driver"}
+    if runner_type is _OracleRunner:
+        assert raw.calls == ["cancel", "rollback"] and raw.autocommit is True
+
+
+def test_a_synchronous_driver_that_ignores_cancel_is_left_to_finish_by_itself(monkeypatch):
+    monkeypatch.setattr(db_restore, "INTERRUPT_GRACE_SECONDS", 0.3)
+    raw = _BlockingRaw(block_on="UPDATE big SET x = 1", honours_cancel=False)
+    connection = _connection_with(raw)
+    driver = connection._driver
+    closed = threading.Event()
+    driver.close = lambda: (raw.calls.append("driver.close"), closed.set())
+    runner = _OracleRunner(connection)
+
+    async def go():
+        await runner.open()
+        stopped, late = await _interrupt_after(runner, "UPDATE big SET x = 1")
+        # Neither of these may touch a connection that is inside a statement.
+        await runner.failed()
+        await runner.close()
+        return stopped, late
+
+    stopped, late = asyncio.run(go())
+    assert stopped is False and 0.2 < late < 2
+    # Taken away, so disconnect() doesn't close it under the running statement.
+    assert connection._driver is None
+    assert raw.calls == ["cancel"]
+
+    raw.released.set()  # the server answers at last
+    assert closed.wait(5)
+    assert raw.calls == ["cancel", "rollback", "driver.close"] and raw.autocommit is True
+
+
+def test_mysql_kills_the_query_from_a_second_login(monkeypatch):
+    from polyglot_ai.core import db_explorer
+
+    killed = asyncio.Event()
+    seen = []
+
+    class Cursor:
+        def __init__(self, blocking):
+            self._blocking = blocking
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, sql):
+            seen.append(sql)
+            if sql.startswith("KILL"):
+                killed.set()
+            elif self._blocking:
+                await killed.wait()
+                raise RuntimeError("(1317, 'Query execution was interrupted')")
+
+    class First:
+        closed = False
+
+        def thread_id(self):
+            return 77
+
+        async def ping(self, reconnect=True): ...
+
+        def cursor(self):
+            return Cursor(blocking=True)
+
+        def close(self):
+            First.closed = True
+
+    class Pool:
+        _connection = First()
+
+    class Saved:
+        name, db_type, options = "shop", "mysql", {"ssl": "require"}
+        _connection_string = "mysql://a:b@h:3306/d"
+        _mysql_pool = Pool()
+
+    class Second:
+        made: list = []
+
+        def __init__(self, name, db_type, connection_string, read_only=True, options=None):
+            self.args = (name, db_type, connection_string, read_only, options)
+            self.disconnected = False
+            Second.made.append(self)
+
+        async def connect(self):
+            return True, "ok"
+
+        async def disconnect(self):
+            self.disconnected = True
+
+        @property
+        def _mysql_pool(self):
+            class Acquire:
+                async def __aenter__(self):
+                    class Conn:
+                        def cursor(self):
+                            return Cursor(blocking=False)
+
+                    return Conn()
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            class OtherPool:
+                def acquire(self):
+                    return Acquire()
+
+            return OtherPool()
+
+    monkeypatch.setattr(db_explorer, "DatabaseConnection", Second)
+    runner = _MySQLRunner(Saved())
+
+    async def go():
+        await runner.open()
+        return await _interrupt_after(runner, "ALTER TABLE t ADD c int")
+
+    stopped, late = asyncio.run(go())
+    assert stopped is True and late < 2
+    assert seen == ["ALTER TABLE t ADD c int", "KILL QUERY 77"]
+    (second,) = Second.made
+    assert second.args == ("shop (cancel)", "mysql", "mysql://a:b@h:3306/d", False, Saved.options)
+    assert second.disconnected and First.closed is False
+
+
+def test_mysql_hangs_up_when_the_kill_cannot_be_sent(monkeypatch):
+    from polyglot_ai.core import db_explorer
+
+    class Cursor:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, sql):
+            await asyncio.Event().wait()
+
+    class First:
+        closed = False
+
+        def thread_id(self):
+            return 77
+
+        async def ping(self, reconnect=True): ...
+
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            First.closed = True
+
+    class Pool:
+        _connection = First()
+
+    class Saved:
+        name, db_type, options = "shop", "mysql", {}
+        _connection_string = "mysql://a:b@h:3306/d"
+        _mysql_pool = Pool()
+
+    class Unreachable:
+        disconnected = False
+
+        def __init__(self, *args, **kwargs): ...
+
+        async def connect(self):
+            return False, "Too many connections"
+
+        async def disconnect(self):
+            Unreachable.disconnected = True
+
+    monkeypatch.setattr(db_explorer, "DatabaseConnection", Unreachable)
+    runner = _MySQLRunner(Saved())
+
+    async def go():
+        await runner.open()
+        return await _interrupt_after(runner, "ALTER TABLE t ADD c int")
+
+    stopped, late = asyncio.run(go())
+    assert stopped is False and late < 2
+    assert First.closed and Unreachable.disconnected
+
+
+class _Pg:
+    """asyncpg's connection, as far as the runner uses it."""
+
+    def __init__(self, rollback_answers=True):
+        self.log, self.terminated = [], False
+        self._rollback_answers = rollback_answers
+
+    async def execute(self, sql):
+        self.log.append(sql)
+        if sql == "ROLLBACK" and self._rollback_answers:
+            return
+        await asyncio.Event().wait()
+
+    def terminate(self):
+        self.terminated = True
+
+    def is_closed(self):
+        return self.terminated
+
+
+def _pg_runner(pg):
+    class Pool:
+        released = []
+
+        async def acquire(self):
+            return pg
+
+        async def release(self, conn):
+            Pool.released.append(conn)
+
+    class Saved:
+        _pg_pool = Pool()
+
+    return _PostgresRunner(Saved()), Pool
+
+
+def test_postgres_cancels_the_statement_and_rolls_back():
+    pg = _Pg()
+    runner, pool = _pg_runner(pg)
+
+    async def go():
+        await runner.open()
+        result = await _interrupt_after(runner, "INSERT INTO t SELECT * FROM locked")
+        await runner.failed()
+        await runner.close()
+        return result
+
+    stopped, late = asyncio.run(go())
+    assert stopped is True and late < 2
+    assert pg.log == ["INSERT INTO t SELECT * FROM locked", "ROLLBACK", "ROLLBACK"]
+    assert not pg.terminated and pool.released == [pg]
+
+
+def test_postgres_drops_the_connection_when_the_cancel_is_not_answered(monkeypatch):
+    monkeypatch.setattr(db_restore, "INTERRUPT_GRACE_SECONDS", 0.3)
+    pg = _Pg(rollback_answers=False)
+    runner, _pool = _pg_runner(pg)
+
+    async def go():
+        await runner.open()
+        result = await _interrupt_after(runner, "INSERT INTO t SELECT * FROM locked")
+        await runner.failed()  # must not wait on a connection that is gone
+        await runner.close()
+        return result
+
+    stopped, late = asyncio.run(go())
+    # Without a COMMIT the transaction can't survive the connection.
+    assert stopped is True and pg.terminated and late < 2
+    assert pg.log.count("ROLLBACK") == 1
+
+
+def test_cancel_through_the_real_sql_server_runner(tmp_path, monkeypatch):
+    """run_restore end to end, with only the driver's connection replaced."""
+    from polyglot_ai.core import db_explorer
+
+    text = (
+        EXPORT.replace("BEGIN;\n", "SET NOCOUNT ON;\nGO\n")
+        .replace(";\nINSERT", ";\nGO\nINSERT")
+        .replace("COMMIT;\n", "GO\n")
+    )
+    raw = _BlockingRaw(block_on='INSERT INTO "t" (a) VALUES (1);')
+
+    class Connection:
+        _pg_pool = _mysql_pool = None
+        disconnected = False
+
+        def __init__(self, *args, **kwargs):
+            self._driver = _connection_with(raw)._driver
+
+        async def connect(self):
+            return True, "ok"
+
+        async def disconnect(self):
+            Connection.disconnected = True
+
+    monkeypatch.setattr(db_explorer, "DatabaseConnection", Connection)
+    message, late = _timed(
+        BackupSource("ms", "mssql", "mssql://a:b@h:1433/d"),
+        _export(tmp_path, "SQL Server", text=text),
+    )
+    assert message == "Restore cancelled after 2 statements; those were applied."
+    assert late < 2
+    assert raw.log == ["SET NOCOUNT ON;", 'CREATE TABLE "t" (a int);']
+    assert raw.calls == ["cancel"] and Connection.disconnected
 
 
 # ── SQLite ──────────────────────────────────────────────────────────
