@@ -22,6 +22,36 @@ from polyglot_ai.ui.theme import ThemeManager
 logger = logging.getLogger(__name__)
 
 
+def close_databases(loop: asyncio.AbstractEventLoop, timeout: float = 8.0) -> None:
+    """Disconnect the Database panel's connections and stop their tunnels.
+
+    An SSH or Session Manager tunnel is a separate process in its own
+    session, so quitting the app doesn't end it: without this, the
+    forwarded port and the login on the bastion stayed open after the
+    window closed. Must be called while ``loop`` is not running.
+
+    Never raises, and never holds shutdown up for long: a disconnect
+    that is stuck (a query still running, a driver that won't close) is
+    abandoned after ``timeout`` and the tunnels are stopped directly.
+    """
+    # Only if the panel was ever used — neither module is loaded otherwise.
+    explorer = sys.modules.get("polyglot_ai.core.db_explorer")
+    manager = getattr(explorer, "_global_db_manager", None)
+    if manager is not None:
+        try:
+            loop.run_until_complete(asyncio.wait_for(manager.disconnect_all(), timeout))
+        except Exception:
+            logger.exception("Error disconnecting databases at shutdown")
+    tunnels = sys.modules.get("polyglot_ai.core.db_tunnel")
+    if tunnels is not None:
+        try:
+            left = tunnels.stop_all()
+            if left:
+                logger.warning("Stopped %d database tunnel(s) left running at shutdown", left)
+        except Exception:
+            logger.exception("Error stopping database tunnels at shutdown")
+
+
 def cancel_pending_tasks(loop: asyncio.AbstractEventLoop) -> int:
     """Cancel and drain any still-pending tasks before the loop closes.
 
@@ -611,6 +641,7 @@ def main() -> None:
 
             # Cleanup while the loop is still active
             terminal.stop_terminal()
+            close_databases(loop)
             try:
                 loop.run_until_complete(mcp_client.disconnect_all())
                 loop.run_until_complete(db.close())

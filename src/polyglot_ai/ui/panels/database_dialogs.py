@@ -6,8 +6,9 @@ the connection / query / schema controller logic. Public surface:
 * :class:`InsertRowDialog` — modal form for inserting a row into the
   current table.
 * :class:`EditCellDialog` — modal editor for a single cell value.
-* :class:`AddConnectionDialog` — the new-connection form (SQLite /
-  PostgreSQL / MySQL) with read-only-by-default checkbox.
+* :class:`AddConnectionDialog` — the new-connection form (every engine
+  in ``core.db_dialects``, TLS, SSH / Session Manager tunnels, IAM
+  sign-in) with read-only-by-default checkbox.
 * :func:`prompt_text` — simple dark-themed text-input dialog (used
   for snippet naming).
 * :func:`combo_dropdown_style` — shared QComboBox stylesheet with a
@@ -19,6 +20,7 @@ the connection / query / schema controller logic. Public surface:
 from __future__ import annotations
 
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -38,6 +40,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from polyglot_ai.core.db_dialects import (
+    ENGINE_CHOICES,
+    ENGINES,
+    SSL_MODES,
+    build_url,
+    ssl_modes_for,
+)
+from polyglot_ai.core.db_tunnel import TunnelSpec
 from polyglot_ai.ui import theme_colors as tc
 
 
@@ -267,13 +277,31 @@ class EditCellDialog(QDialog):
         return self._input.toPlainText()
 
 
-class AddConnectionDialog(QDialog):
-    """Dialog to add a new database connection."""
+@dataclass
+class NewConnection:
+    """What the Add Connection dialog produced."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    name: str
+    db_type: str
+    connection_string: str  # holds the password: goes to the keyring
+    read_only: bool
+    options: dict = field(default_factory=dict)  # no secrets: saved with the name
+
+
+class AddConnectionDialog(QDialog):
+    """Dialog to add a new database connection.
+
+    Covers every engine in :mod:`polyglot_ai.core.db_dialects`, plus the
+    three things a database in a private network needs: encryption, a
+    tunnel (SSH bastion or AWS Session Manager) and, on RDS, IAM
+    authentication. ``prefill`` seeds the fields — the AWS panel uses it
+    to open the dialog for an RDS instance.
+    """
+
+    def __init__(self, parent: QWidget | None = None, prefill: dict | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Database Connection")
-        self.setFixedWidth(480)
+        self.setFixedWidth(500)
         self.setStyleSheet(
             f"QDialog {{ background: {tc.get('bg_base')}; color: {tc.get('text_primary')}; }}"
         )
@@ -300,47 +328,20 @@ class AddConnectionDialog(QDialog):
         h_layout.addWidget(header_title)
         layout.addWidget(header)
 
-        # Form area
-        form_widget = QWidget()
-        form_layout = QVBoxLayout(form_widget)
-        form_layout.setContentsMargins(20, 16, 20, 12)
-        form_layout.setSpacing(14)
-
-        input_style = (
+        self._input_style = (
             f"QLineEdit {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
             f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; "
-            f"padding: 8px 12px; font-size: {tc.FONT_MD}px; }}"
+            f"padding: 7px 10px; font-size: {tc.FONT_MD}px; }}"
             f"QLineEdit:focus {{ border-color: {tc.get('accent_primary')}; }}"
         )
-        label_style = (
+        self._label_style = (
             f"font-size: {tc.FONT_SM}px; font-weight: 600; "
             f"color: {tc.get('text_secondary')}; margin-bottom: 2px;"
         )
-
-        # Connection name
-        name_label = QLabel("Connection Name")
-        name_label.setStyleSheet(label_style)
-        form_layout.addWidget(name_label)
-        self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("e.g. production-db, local-dev")
-        self._name_input.setStyleSheet(input_style)
-        form_layout.addWidget(self._name_input)
-
-        # Database type
-        type_label = QLabel("Database Type")
-        type_label.setStyleSheet(label_style)
-        form_layout.addWidget(type_label)
-
-        self._type_combo = QComboBox()
-        self._type_combo.addItem("SQLite", "sqlite")
-        self._type_combo.addItem("PostgreSQL", "postgresql")
-        self._type_combo.addItem("MySQL", "mysql")
-        self._type_combo.setFixedHeight(36)
-        self._type_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._type_combo.setStyleSheet(
+        self._combo_style = (
             f"QComboBox {{ background: {tc.get('bg_input')}; color: {tc.get('text_primary')}; "
             f"border: 1px solid {tc.get('border_card')}; border-radius: 4px; "
-            f"padding: 8px 12px; font-size: {tc.FONT_MD}px; }}"
+            f"padding: 7px 10px; font-size: {tc.FONT_MD}px; }}"
             f"QComboBox:focus {{ border-color: {tc.get('accent_primary')}; }}"
             f"QComboBox::drop-down {{ border: none; width: 30px; }}"
             f"QComboBox::down-arrow {{ image: none; border-left: 5px solid transparent; "
@@ -351,25 +352,34 @@ class AddConnectionDialog(QDialog):
             f"selection-background-color: {tc.get('bg_active')}; "
             f"padding: 4px; font-size: {tc.FONT_MD}px; }}"
         )
-        self._type_combo.currentIndexChanged.connect(
-            lambda idx: self._on_type_changed(self._type_combo.itemData(idx))
-        )
-        form_layout.addWidget(self._type_combo)
+
+        # The form scrolls: with a tunnel and IAM both showing it is
+        # taller than a small laptop screen.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {tc.get('bg_base')}; }}")
+        form_widget = QWidget()
+        self._form_widget = form_widget
+        form_widget.setStyleSheet(f"background: {tc.get('bg_base')};")
+        form = QVBoxLayout(form_widget)
+        form.setContentsMargins(20, 14, 20, 10)
+        form.setSpacing(8)
+
+        self._name_input = self._line("e.g. production-db, local-dev")
+        self._add(form, "Connection Name", self._name_input)
+
+        self._type_combo = self._combo(ENGINE_CHOICES)
+        self._type_combo.currentIndexChanged.connect(lambda _i: self._sync_visibility())
+        self._add(form, "Database Type", self._type_combo)
 
         # ── SQLite fields ──
         self._sqlite_widget = QWidget()
         sqlite_layout = QVBoxLayout(self._sqlite_widget)
         sqlite_layout.setContentsMargins(0, 0, 0, 0)
         sqlite_layout.setSpacing(8)
-
-        sl = QLabel("Database File")
-        sl.setStyleSheet(label_style)
-        sqlite_layout.addWidget(sl)
-        self._conn_input = QLineEdit()
-        self._conn_input.setPlaceholderText("/path/to/database.db")
-        self._conn_input.setStyleSheet(input_style)
-        sqlite_layout.addWidget(self._conn_input)
-
+        self._conn_input = self._line("/path/to/database.db")
+        self._add(sqlite_layout, "Database File", self._conn_input)
         self._browse_btn = QPushButton("Browse for file...")
         self._browse_btn.setObjectName("dbBrowseBtn")
         self._browse_btn.setFixedHeight(32)
@@ -383,81 +393,92 @@ class AddConnectionDialog(QDialog):
         )
         self._browse_btn.clicked.connect(self._browse_file)
         sqlite_layout.addWidget(self._browse_btn)
-        form_layout.addWidget(self._sqlite_widget)
+        form.addWidget(self._sqlite_widget)
 
-        # ── Server fields (PostgreSQL / MySQL) ──
+        # ── Server fields (every other engine) ──
         self._server_widget = QWidget()
-        server_layout = QVBoxLayout(self._server_widget)
-        server_layout.setContentsMargins(0, 0, 0, 0)
-        server_layout.setSpacing(8)
+        server = QVBoxLayout(self._server_widget)
+        server.setContentsMargins(0, 0, 0, 0)
+        server.setSpacing(8)
 
-        # Host + Port row
-        host_row = QHBoxLayout()
-        host_row.setSpacing(8)
+        self._host_input = self._line("localhost", "localhost")
+        self._port_input = self._line("5432", "5432", width=80)
+        self._add_row(server, ("Host", self._host_input, 3), ("Port", self._port_input, 0))
 
-        host_col = QVBoxLayout()
-        hl = QLabel("Host")
-        hl.setStyleSheet(label_style)
-        host_col.addWidget(hl)
-        self._host_input = QLineEdit()
-        self._host_input.setPlaceholderText("localhost")
-        self._host_input.setText("localhost")
-        self._host_input.setStyleSheet(input_style)
-        host_col.addWidget(self._host_input)
-        host_row.addLayout(host_col, stretch=3)
+        self._user_input = self._line("postgres")
+        self._add(server, "Username", self._user_input)
 
-        port_col = QVBoxLayout()
-        pl = QLabel("Port")
-        pl.setStyleSheet(label_style)
-        port_col.addWidget(pl)
-        self._port_input = QLineEdit()
-        self._port_input.setPlaceholderText("5432")
-        self._port_input.setText("5432")
-        self._port_input.setStyleSheet(input_style)
-        self._port_input.setFixedWidth(80)
-        port_col.addWidget(self._port_input)
-        host_row.addLayout(port_col)
+        self._auth_combo = self._combo([("Password", "password"), ("AWS IAM token (RDS)", "iam")])
+        self._auth_combo.currentIndexChanged.connect(lambda _i: self._sync_visibility())
+        self._auth_block = self._add(server, "Sign in with", self._auth_combo)
 
-        server_layout.addLayout(host_row)
-
-        # Username
-        ul = QLabel("Username")
-        ul.setStyleSheet(label_style)
-        server_layout.addWidget(ul)
-        self._user_input = QLineEdit()
-        self._user_input.setPlaceholderText("postgres")
-        self._user_input.setStyleSheet(input_style)
-        server_layout.addWidget(self._user_input)
-
-        # Password
-        pwl = QLabel("Password")
-        pwl.setStyleSheet(label_style)
-        server_layout.addWidget(pwl)
-        self._pass_input = QLineEdit()
-        self._pass_input.setPlaceholderText("Enter password")
+        self._pass_input = self._line("Enter password")
         self._pass_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._pass_input.setStyleSheet(input_style)
-        server_layout.addWidget(self._pass_input)
+        self._pass_block = self._add(server, "Password", self._pass_input)
 
-        # Database name
-        dbl = QLabel("Database")
-        dbl.setStyleSheet(label_style)
-        server_layout.addWidget(dbl)
-        self._db_input = QLineEdit()
-        self._db_input.setPlaceholderText("mydb")
-        self._db_input.setStyleSheet(input_style)
-        server_layout.addWidget(self._db_input)
+        self._db_input = self._line("mydb")
+        self._db_label = QLabel("Database")
+        self._add(server, self._db_label, self._db_input)
 
-        self._server_widget.setVisible(False)
-        form_layout.addWidget(self._server_widget)
+        self._ssl_combo = self._combo(SSL_MODES)
+        self._ssl_combo.currentIndexChanged.connect(lambda _i: self._sync_visibility())
+        self._add(server, "Encryption (TLS)", self._ssl_combo)
+        self._ca_input = self._line("CA bundle, e.g. ~/global-bundle.pem (blank: system CAs)")
+        self._ca_block = self._add(server, "Certificate authority file", self._ca_input)
 
-        # Help text
-        self._help_label = QLabel("Select a SQLite database file (.db, .sqlite)")
+        self._route_combo = self._combo(
+            [
+                ("Directly", "direct"),
+                ("SSH tunnel through a bastion host", "ssh"),
+                ("AWS Session Manager through an EC2 instance", "ssm"),
+            ]
+        )
+        self._route_combo.currentIndexChanged.connect(lambda _i: self._sync_visibility())
+        self._add(server, "Connect", self._route_combo)
+
+        self._ssh_widget = QWidget()
+        ssh = QVBoxLayout(self._ssh_widget)
+        ssh.setContentsMargins(0, 0, 0, 0)
+        ssh.setSpacing(8)
+        self._ssh_host = self._line("bastion.example.com")
+        self._ssh_port = self._line("22", "22", width=80)
+        self._add_row(ssh, ("Bastion host", self._ssh_host, 3), ("Port", self._ssh_port, 0))
+        self._ssh_user = self._line("ec2-user")
+        self._ssh_key = self._line("Key file (blank: your SSH agent / ~/.ssh/config)")
+        self._add_row(ssh, ("SSH user", self._ssh_user, 1), ("Key file", self._ssh_key, 2))
+        server.addWidget(self._ssh_widget)
+
+        self._ssm_widget = QWidget()
+        ssm = QVBoxLayout(self._ssm_widget)
+        ssm.setContentsMargins(0, 0, 0, 0)
+        ssm.setSpacing(8)
+        self._ssm_target = QComboBox()
+        self._ssm_target.setEditable(True)
+        self._ssm_target.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._ssm_target.setFixedHeight(34)
+        self._ssm_target.setStyleSheet(self._combo_style)
+        self._ssm_target.lineEdit().setPlaceholderText("i-0123456789abcdef0")
+        self._add(ssm, "EC2 instance in the database's network", self._ssm_target)
+        server.addWidget(self._ssm_widget)
+
+        # Shared by Session Manager and IAM sign-in.
+        self._aws_widget = QWidget()
+        aws = QVBoxLayout(self._aws_widget)
+        aws.setContentsMargins(0, 0, 0, 0)
+        aws.setSpacing(8)
+        self._aws_profile = self._line("default")
+        self._aws_region = self._line("us-east-1")
+        self._add_row(aws, ("AWS profile", self._aws_profile, 1), ("Region", self._aws_region, 1))
+        server.addWidget(self._aws_widget)
+
+        form.addWidget(self._server_widget)
+
+        self._help_label = QLabel("")
         self._help_label.setStyleSheet(
             f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; padding-top: 2px;"
         )
         self._help_label.setWordWrap(True)
-        form_layout.addWidget(self._help_label)
+        form.addWidget(self._help_label)
 
         # Read-only checkbox (defaults to checked for safety)
         self._read_only_cb = QCheckBox("Read-only (recommended)")
@@ -470,10 +491,19 @@ class AddConnectionDialog(QDialog):
             "When checked, write statements (INSERT, UPDATE, DELETE, DDL) are blocked. "
             "Uncheck only for connections where you intentionally need write access."
         )
-        form_layout.addWidget(self._read_only_cb)
+        form.addWidget(self._read_only_cb)
 
-        layout.addWidget(form_widget)
-        layout.addStretch()
+        self._error_label = QLabel("")
+        self._error_label.setWordWrap(True)
+        self._error_label.setStyleSheet(
+            f"color: {tc.get('accent_error')}; font-size: {tc.FONT_SM}px;"
+        )
+        self._error_label.setVisible(False)
+        form.addWidget(self._error_label)
+        form.addStretch()
+
+        scroll.setWidget(form_widget)
+        layout.addWidget(scroll, stretch=1)
 
         # Footer with buttons
         footer = QWidget()
@@ -516,27 +546,177 @@ class AddConnectionDialog(QDialog):
 
         layout.addWidget(footer)
 
-    def _on_type_changed(self, db_type: str) -> None:
-        if db_type == "sqlite":
-            self._sqlite_widget.setVisible(True)
-            self._server_widget.setVisible(False)
+        self._last_type = ""
+        self._sync_visibility()
+        if prefill:
+            self.prefill(prefill)
+        # Tall enough to show the whole form when it fits on screen (the
+        # scroll area alone would ask for very little); it scrolls past that.
+        chrome = header.height() + footer.height() + 8
+        self.resize(500, min(760, self._form_widget.sizeHint().height() + chrome))
+
+    # ── small builders ──
+
+    def _line(self, placeholder: str, text: str = "", width: int = 0) -> QLineEdit:
+        edit = QLineEdit()
+        edit.setPlaceholderText(placeholder)
+        edit.setText(text)
+        edit.setStyleSheet(self._input_style)
+        if width:
+            edit.setFixedWidth(width)
+        return edit
+
+    def _combo(self, choices: list[tuple[str, str]]) -> QComboBox:
+        combo = QComboBox()
+        for label, data in choices:
+            combo.addItem(label, data)
+        combo.setFixedHeight(34)
+        combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        combo.setStyleSheet(self._combo_style)
+        return combo
+
+    def _add(self, layout, label, widget: QWidget) -> QWidget:
+        """Label above widget, in a block that can be hidden as one."""
+        block = QWidget()
+        column = QVBoxLayout(block)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(3)
+        if isinstance(label, str):
+            label = QLabel(label)
+        label.setStyleSheet(self._label_style)
+        column.addWidget(label)
+        column.addWidget(widget)
+        layout.addWidget(block)
+        return block
+
+    def _add_row(self, layout, *fields: tuple[str, QWidget, int]) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for label, widget, stretch in fields:
+            holder = QVBoxLayout()
+            holder.setSpacing(3)
+            caption = QLabel(label)
+            caption.setStyleSheet(self._label_style)
+            holder.addWidget(caption)
+            holder.addWidget(widget)
+            row.addLayout(holder, stretch)
+        layout.addLayout(row)
+
+    # ── behaviour ──
+
+    def _db_type(self) -> str:
+        return self._type_combo.currentData() or "sqlite"
+
+    def _sync_visibility(self) -> None:
+        db_type = self._db_type()
+        is_sqlite = db_type == "sqlite"
+        self._sqlite_widget.setVisible(is_sqlite)
+        self._server_widget.setVisible(not is_sqlite)
+        if is_sqlite:
             self._help_label.setText("Select a SQLite database file (.db, .sqlite)")
-        elif db_type == "postgresql":
-            self._sqlite_widget.setVisible(False)
-            self._server_widget.setVisible(True)
-            self._port_input.setText("5432")
-            self._user_input.setPlaceholderText("postgres")
-            self._help_label.setText(
-                "Connects directly via asyncpg. Works with local, Docker, or remote databases."
-            )
-        elif db_type == "mysql":
-            self._sqlite_widget.setVisible(False)
-            self._server_widget.setVisible(True)
-            self._port_input.setText("3306")
-            self._user_input.setPlaceholderText("root")
-            self._help_label.setText(
-                "Connects directly via aiomysql. Works with local, Docker, or remote databases."
-            )
+            self._last_type = db_type
+            return
+
+        engine = ENGINES[db_type]
+        if db_type != self._last_type:
+            # Engine changed: move the defaults along, but only where the
+            # field still holds the previous engine's default.
+            previous = ENGINES.get(self._last_type)
+            if not self._port_input.text() or (
+                previous and self._port_input.text() == str(previous.default_port)
+            ):
+                self._port_input.setText(str(engine.default_port))
+            self._port_input.setPlaceholderText(str(engine.default_port))
+            self._user_input.setPlaceholderText(engine.default_user)
+            self._db_label.setText(engine.database_label)
+            self._db_input.setPlaceholderText(engine.default_database or "mydb")
+            self._offer_ssl_modes(db_type)
+            self._last_type = db_type
+
+        # IAM tokens exist for RDS PostgreSQL and MySQL/MariaDB/Aurora only.
+        iam_possible = db_type in ("postgresql", "mysql")
+        if not iam_possible:
+            self._auth_combo.setCurrentIndex(0)
+        self._auth_block.setVisible(iam_possible)
+        iam = iam_possible and self._auth_combo.currentData() == "iam"
+        self._pass_block.setVisible(not iam)
+
+        self._ca_block.setVisible(self._ssl_combo.currentData() == "verify")
+        route = self._route_combo.currentData()
+        self._ssh_widget.setVisible(route == "ssh")
+        self._ssm_widget.setVisible(route == "ssm")
+        self._aws_widget.setVisible(iam or route == "ssm")
+
+        notes = {
+            "postgresql": "Connects with asyncpg.",
+            "mysql": "Connects with aiomysql. Also used for MariaDB and Aurora MySQL.",
+            "mssql": "Connects with pymssql. The certificate can't be verified for "
+            "SQL Server; “Required” still encrypts the connection.",
+            "oracle": "Connects with python-oracledb (no Oracle client needed). "
+            "With encryption on, use the TLS listener's port (2484 on RDS).",
+        }
+        text = notes[db_type]
+        if route == "ssh":
+            text += " The tunnel uses your SSH agent or the key file; it can't ask for a password."
+        elif route == "ssm":
+            text += " Session Manager needs the AWS CLI and its session-manager-plugin."
+        if iam:
+            text += " IAM sign-in needs the rds-db:connect permission and a database user set up for it."
+        self._help_label.setText(text)
+
+    def _offer_ssl_modes(self, db_type: str) -> None:
+        """List only the encryption modes this engine's driver can honour."""
+        self._select_ssl_mode(self._ssl_combo.currentData(), db_type)
+
+    def _select_ssl_mode(self, mode: str | None, db_type: str) -> None:
+        choices = ssl_modes_for(db_type)
+        offered = [data for _label, data in choices]
+        if mode not in offered:
+            # "Verify" on an engine that can't: the nearest honest choice
+            # is encryption without the check, never no encryption.
+            mode = "require" if mode == "verify" else offered[0]
+        self._ssl_combo.blockSignals(True)
+        self._ssl_combo.clear()
+        for label, data in choices:
+            self._ssl_combo.addItem(label, data)
+        self._ssl_combo.setCurrentIndex(offered.index(mode))
+        self._ssl_combo.blockSignals(False)
+
+    def prefill(self, values: dict) -> None:
+        """Seed the form. Keys: name, db_type, engine_label, host, port, user,
+        database, ssl, route ("ssh"/"ssm"), profile, region, read_only,
+        bastions ([(label, instance_id)] offered for Session Manager)."""
+        label = values.get("engine_label")
+        index = self._type_combo.findText(label) if label else -1
+        if index < 0 and values.get("db_type"):
+            index = self._type_combo.findData(values["db_type"])
+        if index >= 0:
+            self._type_combo.setCurrentIndex(index)
+        for key, edit in (
+            ("name", self._name_input),
+            ("host", self._host_input),
+            ("port", self._port_input),
+            ("user", self._user_input),
+            ("database", self._db_input),
+            ("profile", self._aws_profile),
+            ("region", self._aws_region),
+        ):
+            if values.get(key) not in (None, ""):
+                edit.setText(str(values[key]))
+        if values.get("ssl"):
+            self._select_ssl_mode(values["ssl"], self._db_type())
+        index = self._route_combo.findData(values.get("route"))
+        if index >= 0:
+            self._route_combo.setCurrentIndex(index)
+        for text, instance_id in values.get("bastions") or []:
+            self._ssm_target.addItem(text, instance_id)
+        self._ssm_target.setCurrentIndex(-1)
+        self._ssm_target.setEditText("")
+        if "read_only" in values:
+            self._read_only_cb.setChecked(bool(values["read_only"]))
+        self._sync_visibility()
+        if values.get("note"):
+            self._help_label.setText(f"{values['note']} {self._help_label.text()}")
 
     def _browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -547,36 +727,89 @@ class AddConnectionDialog(QDialog):
             if not self._name_input.text():
                 self._name_input.setText(Path(path).stem)
 
-    def get_values(self) -> tuple[str, str, str, bool]:
-        db_type = self._type_combo.currentData() or "sqlite"
+    def _ssm_instance(self) -> str:
+        """The instance ID: a picked suggestion's ID, or whatever was typed."""
+        text = self._ssm_target.currentText().strip()
+        index = self._ssm_target.findText(text)
+        if index >= 0 and self._ssm_target.itemData(index):
+            return str(self._ssm_target.itemData(index))
+        return text.split()[0] if text else ""
+
+    def _problem(self) -> str:
+        """Why the form can't be saved yet, or ''."""
+        value = self.get_values()
+        if not value.name:
+            return "Give the connection a name."
+        if value.db_type == "sqlite":
+            return "" if value.connection_string else "Choose a database file."
+        if not self._host_input.text().strip():
+            return "Enter the database host."
+        port = self._port_input.text().strip()
+        if port and not (port.isdigit() and 0 < int(port) < 65536):
+            return "The port must be a number between 1 and 65535."
+        tunnel = value.options.get("tunnel") or {}
+        if tunnel.get("kind") == "ssh" and not tunnel.get("host"):
+            return "Enter the bastion host for the SSH tunnel."
+        if tunnel.get("kind") == "ssm" and not tunnel.get("target"):
+            return "Choose or enter the EC2 instance for Session Manager."
+        if value.options.get("iam") is not None and not self._user_input.text().strip():
+            return "IAM sign-in needs the database user name."
+        return ""
+
+    def accept(self) -> None:
+        problem = self._problem()
+        if problem:
+            self._error_label.setText(problem)
+            self._error_label.setVisible(True)
+            return
+        super().accept()
+
+    def get_values(self) -> NewConnection:
+        db_type = self._db_type()
         name = self._name_input.text().strip()
         read_only = self._read_only_cb.isChecked()
 
         if db_type == "sqlite":
-            conn_str = self._conn_input.text().strip()
-        else:
-            # Build connection string from fields
-            host = self._host_input.text().strip() or "localhost"
-            port = self._port_input.text().strip() or (
-                "5432" if db_type == "postgresql" else "3306"
-            )
-            user = self._user_input.text().strip()
-            password = self._pass_input.text()
-            database = self._db_input.text().strip()
-            scheme = "postgresql" if db_type == "postgresql" else "mysql"
+            return NewConnection(name, db_type, self._conn_input.text().strip(), read_only)
 
-            if user and password:
-                conn_str = f"{scheme}://{user}:{password}@{host}:{port}/{database}"
-            elif user:
-                conn_str = f"{scheme}://{user}@{host}:{port}/{database}"
-            else:
-                conn_str = f"{scheme}://{host}:{port}/{database}"
+        engine = ENGINES[db_type]
+        host = self._host_input.text().strip() or "localhost"
+        port = self._port_input.text().strip() or str(engine.default_port)
+        user = self._user_input.text().strip()
+        database = self._db_input.text().strip()
+        iam = db_type in ("postgresql", "mysql") and self._auth_combo.currentData() == "iam"
+        profile = self._aws_profile.text().strip()
+        region = self._aws_region.text().strip()
 
-            # Auto-fill name from database if empty
-            if not name and database:
-                name = database
+        # ``url_encoded`` marks the URL as built by build_url(), so its
+        # parts are decoded when read back.
+        options: dict = {"url_encoded": True, "ssl": self._ssl_combo.currentData()}
+        ca_file = self._ca_input.text().strip()
+        if options["ssl"] == "verify" and ca_file:
+            options["ca_file"] = ca_file
+        if iam:
+            options["iam"] = {"profile": profile, "region": region}
+        route = self._route_combo.currentData()
+        if route == "ssh":
+            ssh_port = self._ssh_port.text().strip()
+            options["tunnel"] = TunnelSpec(
+                kind="ssh",
+                host=self._ssh_host.text().strip(),
+                user=self._ssh_user.text().strip(),
+                port=int(ssh_port) if ssh_port.isdigit() else 22,
+                identity_file=self._ssh_key.text().strip(),
+            ).to_dict()
+        elif route == "ssm":
+            options["tunnel"] = TunnelSpec(
+                kind="ssm", target=self._ssm_instance(), profile=profile, region=region
+            ).to_dict()
 
-        return (name, db_type, conn_str, read_only)
+        password = "" if iam else self._pass_input.text()
+        conn_str = build_url(db_type, host, port, user, password, database)
+        # Auto-fill name from database if empty
+        if not name and database:
+            name = database
+        return NewConnection(name, db_type, conn_str, read_only, options)
 
 
 #: Cached path to a painted chevron PNG used for dropdown arrows.

@@ -21,7 +21,7 @@ def _sanitize_db_error(err: Exception) -> str:
     msg = str(err)
     # Strip anything that looks like a connection URI
     msg = re.sub(
-        r"(mysql|postgres|postgresql|sqlite|mssql|mongodb)(\+\w+)?://[^\s'\"]+",
+        r"(mysql|postgres|postgresql|sqlite|mssql|oracle|mongodb)(\+\w+)?://[^\s'\"]+",
         r"\1://***",
         msg,
         flags=re.IGNORECASE,
@@ -72,6 +72,13 @@ _WRITE_KEYWORDS = (
     "RESET",
     "LOAD",
     "UNLOAD",
+    # ``SELECT … INTO new_table`` creates a table (SQL Server, PostgreSQL);
+    # ``SELECT … INTO OUTFILE`` writes a file on the server (MySQL).
+    "INTO",
+    # SQL Server: read files on the server or query another server.
+    "OPENROWSET",
+    "OPENDATASOURCE",
+    "OPENQUERY",
 )
 
 _WRITE_KEYWORD_RE = re.compile(

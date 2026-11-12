@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
 )
 
 from polyglot_ai.core.async_utils import safe_task
+from polyglot_ai.core.db_dialects import parse_url, preview_query, quote_identifier, quote_table
 from polyglot_ai.core.db_explorer import QueryResult, get_global_db_manager
 from polyglot_ai.core.db_notebook import get_notebook_store
 from polyglot_ai.ui import theme
@@ -264,21 +265,39 @@ class DatabasePanel(QWidget):
 
     # ── Connection Management ───────────────────────────────────────
 
-    def _show_add_dialog(self) -> None:
-        dialog = AddConnectionDialog(self)
+    def new_connection_from(self, prefill: dict) -> None:
+        """Open the Add Connection dialog with fields filled in.
+
+        Used by the AWS panel's "Connect in Database panel" on an RDS
+        instance: endpoint, port, engine and user are known, the password
+        is not.
+        """
+        self._show_add_dialog(prefill)
+
+    def _show_add_dialog(self, prefill: dict | None = None) -> None:
+        dialog = AddConnectionDialog(self, prefill=prefill or None)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            name, db_type, conn_str, read_only = dialog.get_values()
-            if name and conn_str:
-                self._db_manager.add_connection_sync(
-                    name,
-                    db_type,
-                    conn_str,
-                    mcp_client=self._mcp_client,
-                    read_only=read_only,
-                )
-                self._conn_combo.addItem(f"{name} ({db_type})")
-                self._conn_combo.setCurrentIndex(self._conn_combo.count() - 1)
-                self._save_connections()
+            self._add_connection(dialog.get_values())
+
+    def _add_connection(self, new) -> None:
+        if not (new.name and new.connection_string):
+            return
+        replacing = new.name in self._db_manager.connection_names
+        self._db_manager.add_connection_sync(
+            new.name,
+            new.db_type,
+            new.connection_string,
+            mcp_client=self._mcp_client,
+            read_only=new.read_only,
+            options=new.options,
+        )
+        label = f"{new.name} ({new.db_type})"
+        index = self._conn_combo.findText(label) if replacing else -1
+        if index < 0:
+            self._conn_combo.addItem(label)
+            index = self._conn_combo.count() - 1
+        self._conn_combo.setCurrentIndex(index)
+        self._save_connections()
 
     def _save_connections(self) -> None:
         """Persist connections to disk. Connection strings stored in keyring."""
@@ -290,13 +309,16 @@ class DatabasePanel(QWidget):
         for name, conn in self._db_manager.connections.items():
             # Store connection string in keyring (may contain passwords)
             keyring.set_password("polyglot-ai-db", name, conn._connection_string)
-            data.append(
-                {
-                    "name": name,
-                    "db_type": conn.db_type,
-                    "read_only": conn.read_only,
-                }
-            )
+            entry = {
+                "name": name,
+                "db_type": conn.db_type,
+                "read_only": conn.read_only,
+            }
+            if conn.options:
+                # Encryption, tunnel and IAM settings. No secrets in here:
+                # the password stays inside the keyring entry above.
+                entry["options"] = conn.options
+            data.append(entry)
 
         from polyglot_ai.core.security import secure_write
 
@@ -324,6 +346,7 @@ class DatabasePanel(QWidget):
                         conn_str,
                         mcp_client=self._mcp_client,
                         read_only=read_only,
+                        options=entry.get("options") or None,
                     )
                     self._conn_combo.addItem(f"{name} ({db_type})")
             if self._conn_combo.count() > 0:
@@ -353,16 +376,36 @@ class DatabasePanel(QWidget):
         if not conn:
             return
 
+        # A tunnel can take several seconds to come up; say so meanwhile.
+        route = conn.route
+        self._status_label.setText(
+            f"Connecting to {conn.name}" + (f" ({route})…" if route else "…")
+        )
+        self._status_label.setToolTip("")
+
         async def do_connect():
             ok, msg = await conn.connect()
             if ok:
                 self._status_label.setText(f"Connected: {conn.name}")
+                self._status_label.setToolTip(msg)
                 tables = await conn.get_schema()
                 QTimer.singleShot(0, lambda: self._populate_schema(tables))
             else:
-                self._status_label.setText(f"Error: {msg[:60]}")
+                # The bar is one short line; the whole reason (which for a
+                # tunnel says what to do about it) goes in the tooltip and
+                # in the schema area.
+                self._status_label.setText(f"Error: {msg[:70]}")
+                self._status_label.setToolTip(msg)
+                QTimer.singleShot(0, lambda: self._show_connect_error(msg))
 
         safe_task(do_connect(), name="db_connect")
+
+    def _show_connect_error(self, message: str) -> None:
+        self._schema_tree.clear()
+        item = QTreeWidgetItem(self._schema_tree)
+        item.setText(0, f"Couldn't connect: {message}")
+        item.setToolTip(0, message)
+        item.setFirstColumnSpanned(True)
 
     def _disconnect_selected(self) -> None:
         if not self._active_connection:
@@ -400,7 +443,9 @@ class DatabasePanel(QWidget):
     def _on_schema_double_click(self, item: QTreeWidgetItem, column: int) -> None:
         if item.parent() is None:
             table_name = item.text(0)
-            self._open_full_window(initial_query=f'SELECT * FROM "{table_name}" LIMIT 100')
+            conn = self._db_manager.get_connection(self._active_connection or "")
+            db_type = conn.db_type if conn else "sqlite"
+            self._open_full_window(initial_query=preview_query(db_type, table_name))
 
     # ── Full Window ─────────────────────────────────────────────────
 
@@ -451,13 +496,14 @@ class _DatabaseWindow(QWidget):
         conn_str = self._conn._connection_string
         if self._conn.db_type == "sqlite":
             return Path(conn_str).stem
-        # PostgreSQL/MySQL: postgresql://user:pass@host:port/dbname
+        # Server engines: scheme://user:pass@host:port/dbname
         try:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(conn_str)
-            db = parsed.path.lstrip("/") if parsed.path else ""
-            return db or self._conn.name
+            target = parse_url(
+                conn_str,
+                self._conn.db_type,
+                encoded=bool(self._conn.options.get("url_encoded")),
+            )
+            return target.database or self._conn.name
         except Exception:
             return self._conn.name
 
@@ -796,7 +842,8 @@ class _DatabaseWindow(QWidget):
 
     def _query_table(self, table_name: str) -> None:
         self._current_table_name = table_name
-        sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+        # Each engine has its own quoting and its own "first 100 rows".
+        sql = preview_query(self._conn.db_type, table_name)
         self._sql_editor.setPlainText(sql)
         self._execute_query()
 
@@ -1070,13 +1117,14 @@ class _DatabaseWindow(QWidget):
             return
 
         # Handle NULL
+        column = quote_identifier(self._conn.db_type, col_name)
         if new_val.upper() == "NULL" or new_val == "":
-            set_clause = f'"{col_name}" = NULL'
+            set_clause = f"{column} = NULL"
         else:
             escaped = new_val.replace("'", "''")
-            set_clause = f"\"{col_name}\" = '{escaped}'"
+            set_clause = f"{column} = '{escaped}'"
 
-        sql = f'UPDATE "{self._current_table_name}" SET {set_clause} WHERE {where}'
+        sql = f"UPDATE {self._table_sql()} SET {set_clause} WHERE {where}"
         self._execute_write(sql, f"Updated {col_name}")
 
     def _delete_row(self, row: int) -> None:
@@ -1096,7 +1144,7 @@ class _DatabaseWindow(QWidget):
             self._results_status.setText("Error: Cannot identify row for delete")
             return
 
-        sql = f'DELETE FROM "{self._current_table_name}" WHERE {where}'
+        sql = f"DELETE FROM {self._table_sql()} WHERE {where}"
         self._execute_write(sql, "Row deleted")
 
     def _insert_row(self) -> None:
@@ -1114,15 +1162,19 @@ class _DatabaseWindow(QWidget):
         dialog = InsertRowDialog(self._current_table_name, columns, self)
         if dialog.exec() == _QDialog.DialogCode.Accepted:
             values = dialog.get_values()
-            cols_str = ", ".join(f'"{c}"' for c in values.keys())
+            cols_str = ", ".join(quote_identifier(self._conn.db_type, c) for c in values.keys())
             vals_str = ", ".join(
                 "NULL"
                 if v.upper() == "NULL" or v == ""
                 else f"'{v.replace(chr(39), chr(39) + chr(39))}'"
                 for v in values.values()
             )
-            sql = f'INSERT INTO "{self._current_table_name}" ({cols_str}) VALUES ({vals_str})'
+            sql = f"INSERT INTO {self._table_sql()} ({cols_str}) VALUES ({vals_str})"
             self._execute_write(sql, "Row inserted")
+
+    def _table_sql(self) -> str:
+        """The current table, quoted for this connection's engine."""
+        return quote_table(self._conn.db_type, self._current_table_name)
 
     def _build_where_clause(self, row: int) -> str:
         """Build a WHERE clause to identify a specific row using all column values."""
@@ -1132,13 +1184,13 @@ class _DatabaseWindow(QWidget):
             item = self._results_table.item(row, c)
             if not header or not item:
                 continue
-            col_name = header.text()
+            column = quote_identifier(self._conn.db_type, header.text())
             val = item.text()
             if val == "NULL":
-                conditions.append(f'"{col_name}" IS NULL')
+                conditions.append(f"{column} IS NULL")
             else:
                 escaped = val.replace("'", "''")
-                conditions.append(f"\"{col_name}\" = '{escaped}'")
+                conditions.append(f"{column} = '{escaped}'")
         return " AND ".join(conditions) if conditions else ""
 
     def _execute_write(self, sql: str, success_msg: str) -> None:

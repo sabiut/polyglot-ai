@@ -1,4 +1,11 @@
-"""Database explorer — unified connection layer for PostgreSQL, SQLite, MySQL."""
+"""Database explorer — one connection layer over every supported engine.
+
+SQLite, PostgreSQL and MySQL/MariaDB (async drivers), SQL Server and
+Oracle (synchronous drivers in :mod:`polyglot_ai.core.db_drivers`, run on
+a worker thread). Engine differences live in
+:mod:`polyglot_ai.core.db_dialects`; tunnels and IAM authentication for
+private RDS instances in :mod:`polyglot_ai.core.db_tunnel`.
+"""
 
 from __future__ import annotations
 
@@ -81,15 +88,28 @@ class DatabaseConnection:
         mcp_client=None,
         *,
         read_only: bool = True,
+        options: dict | None = None,
     ) -> None:
         self.name = name
-        self.db_type = db_type  # "sqlite" | "postgresql" | "mysql"
+        self.db_type = db_type  # "sqlite" | "postgresql" | "mysql" | "mssql" | "oracle"
         self._connection_string = connection_string
         self._mcp_client = mcp_client
         self.read_only = read_only
+        #: Everything about a connection that isn't in its URL, none of it
+        #: secret (it is saved next to the name, not in the keyring):
+        #:   url_encoded  the URL's parts are percent-encoded (new connections)
+        #:   ssl          "prefer" | "require" | "verify" | "disable"
+        #:   ca_file      CA bundle for "verify"
+        #:   tunnel       TunnelSpec.to_dict() — SSH bastion or Session Manager
+        #:   iam          {"profile", "region"} — IAM token instead of a password
+        #: Empty for connections saved before these existed; they behave as
+        #: they always did.
+        self.options: dict = dict(options or {})
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._pg_pool = None  # asyncpg connection pool
-        self._mysql_pool = None  # aiomysql connection pool
+        self._mysql_pool = None  # db_mysql.MySQLSession (one connection, not a pool)
+        self._driver = None  # db_drivers.MssqlDriver / OracleDriver
+        self._tunnel = None  # db_tunnel.Tunnel while a port forward is up
         self._lock = asyncio.Lock()  # Prevent concurrent connect/disconnect/query
 
     @property
@@ -101,7 +121,17 @@ class DatabaseConnection:
             return self._pg_pool is not None
         if self.db_type == "mysql":
             return self._mysql_pool is not None
+        if self.db_type in ("mssql", "oracle"):
+            return self._driver is not None
         return False
+
+    @property
+    def route(self) -> str:
+        """How this connection reaches its server, for display ("" = directly)."""
+        from polyglot_ai.core.db_tunnel import TunnelSpec
+
+        spec = TunnelSpec.from_dict(self.options.get("tunnel"))
+        return spec.label if spec else ""
 
     async def ensure_connected(self) -> tuple[bool, str]:
         """Connect if not already connected. Returns (success, message).
@@ -115,17 +145,109 @@ class DatabaseConnection:
 
     async def connect(self) -> tuple[bool, str]:
         """Test and establish connection. Returns (success, message)."""
+        from polyglot_ai.core.db_dialects import ENGINES
+
         async with self._lock:
             if self.db_type == "sqlite":
                 return await self._connect_sqlite()
-            elif self.db_type == "postgresql":
-                return await self._connect_postgresql()
-            elif self.db_type == "mysql":
-                return await self._connect_mysql()
-            return False, f"Unknown database type: {self.db_type}"
+            if self.db_type not in ENGINES:
+                return False, f"Unknown database type: {self.db_type}"
+            return await self._connect_server()
+
+    # ── Server engines: route, credentials, then the driver ─────────
+
+    def _ssl_mode(self) -> str | None:
+        """The chosen encryption mode; None for connections saved before the choice existed."""
+        mode = self.options.get("ssl")
+        if self.options.get("iam") and mode in (None, "disable", "prefer"):
+            return "require"  # an IAM token is only accepted over TLS
+        return mode
+
+    def _prepare_target(self):
+        """Blocking: open the tunnel and fetch an IAM token if configured.
+
+        Returns the :class:`DbTarget` the driver should dial — the real
+        endpoint, or 127.0.0.1 and the tunnel's local port.
+        """
+        from polyglot_ai.core.db_dialects import parse_url
+        from polyglot_ai.core.db_tunnel import Tunnel, TunnelSpec, iam_auth_token
+
+        target = parse_url(
+            self._connection_string,
+            self.db_type,
+            encoded=bool(self.options.get("url_encoded")),
+        )
+        iam = self.options.get("iam")
+        if iam:
+            # Signed for the real endpoint, so before the tunnel rewrites it.
+            target.password = iam_auth_token(
+                target.host, target.port, target.user, iam.get("profile", ""), iam.get("region", "")
+            )
+        spec = TunnelSpec.from_dict(self.options.get("tunnel"))
+        if spec is not None:
+            self._stop_tunnel()
+            tunnel = Tunnel(spec, target.host, target.port)
+            target.port = tunnel.start()
+            target.host = "127.0.0.1"
+            self._tunnel = tunnel
+        return target
+
+    def _stop_tunnel(self) -> None:
+        tunnel, self._tunnel = self._tunnel, None
+        if tunnel is not None:
+            tunnel.stop()
+
+    async def _connect_server(self) -> tuple[bool, str]:
+        from polyglot_ai.core.async_utils import run_blocking
+        from polyglot_ai.core.db_tunnel import ConnectionSetupError
+
+        try:
+            target = await run_blocking(self._prepare_target)
+        except ConnectionSetupError as exc:
+            await run_blocking(self._stop_tunnel)
+            return False, str(exc)
+
+        if self.db_type == "postgresql":
+            ok, message = await self._connect_postgresql(target)
+        elif self.db_type == "mysql":
+            ok, message = await self._connect_mysql(target)
+        else:
+            ok, message = await self._connect_driver(target)
+
+        if not ok:
+            await run_blocking(self._stop_tunnel)
+        elif self._tunnel is not None:
+            message = f"{message} — {self._tunnel.spec.label}"
+        return ok, message
+
+    async def _connect_driver(self, target) -> tuple[bool, str]:
+        """SQL Server / Oracle: a synchronous driver on a worker thread."""
+        from polyglot_ai.core.async_utils import run_blocking
+        from polyglot_ai.core.db_drivers import DRIVERS, describe_error
+
+        driver = DRIVERS[self.db_type](
+            target,
+            ssl_mode=self._ssl_mode() or "prefer",
+            ca_file=self.options.get("ca_file", ""),
+            tunnelled=self._tunnel is not None,
+        )
+        try:
+            message = await run_blocking(driver.connect)
+        except Exception as exc:
+            return False, describe_error(exc)
+        self._driver = driver
+        return True, message
 
     async def disconnect(self) -> None:
         async with self._lock:
+            if self._driver is not None:
+                driver, self._driver = self._driver, None
+                try:
+                    from polyglot_ai.core.async_utils import run_blocking
+
+                    await run_blocking(driver.close)
+                except Exception:
+                    logger.debug("Driver close failed for %s", self.name, exc_info=True)
             # Cleanup paths: failures here are non-recoverable (we're
             # disconnecting anyway), but log at debug so a leaked pool
             # or corrupted connection state is traceable.
@@ -160,11 +282,41 @@ class DatabaseConnection:
                         exc_info=True,
                     )
                 self._mysql_pool = None
+            # Last: the drivers above say goodbye through the tunnel.
+            # Off the GUI thread: stopping waits for the process to exit,
+            # up to three seconds per signal.
+            if self._tunnel is not None:
+                from polyglot_ai.core.async_utils import run_blocking
+
+                try:
+                    await run_blocking(self._stop_tunnel)
+                except Exception:
+                    logger.debug("Tunnel stop failed for %s", self.name, exc_info=True)
+
+    async def _driver_schema(self) -> list[TableInfo]:
+        from polyglot_ai.core.async_utils import run_blocking
+
+        try:
+            return await run_blocking(self._driver.schema)
+        except Exception:
+            logger.exception("Failed to get %s schema", self.db_type)
+            return []
+
+    async def _driver_execute(self, sql: str, max_rows: int) -> QueryResult:
+        from polyglot_ai.core.async_utils import run_blocking
+        from polyglot_ai.core.db_drivers import describe_error
+
+        try:
+            return await run_blocking(self._driver.execute, sql, max_rows)
+        except Exception as exc:
+            return QueryResult.from_error(describe_error(exc))
 
     async def get_schema(self) -> list[TableInfo]:
         async with self._lock:
             if self.db_type == "sqlite":
                 return await self._schema_sqlite()
+            elif self._driver is not None:
+                return await self._driver_schema()
             elif self.db_type == "postgresql" and self._pg_pool:
                 return await self._schema_postgresql()
             elif self.db_type == "mysql" and self._mysql_pool:
@@ -186,6 +338,10 @@ class DatabaseConnection:
         async with self._lock:
             if self.db_type == "sqlite":
                 return await self._execute_sqlite(sql, max_rows)
+            elif self._driver is not None:
+                return await self._driver_execute(sql, max_rows)
+            elif self.db_type in ("mssql", "oracle"):
+                return QueryResult.from_error("Not connected")
             elif self.db_type == "postgresql" and self._pg_pool:
                 return await self._execute_postgresql(sql, max_rows)
             elif self.db_type == "mysql" and self._mysql_pool:
@@ -294,13 +450,43 @@ class DatabaseConnection:
 
     # ── PostgreSQL (direct via asyncpg) ───────────────────────────────
 
-    async def _connect_postgresql(self) -> tuple[bool, str]:
+    async def _connect_postgresql(self, target) -> tuple[bool, str]:
         try:
             import asyncpg
 
-            self._pg_pool = await asyncpg.create_pool(
-                self._connection_string, min_size=1, max_size=3, timeout=10
-            )
+            if not self.options:
+                # Saved before options existed: hand the stored DSN over
+                # untouched, query parameters (?sslmode=…) and all.
+                self._pg_pool = await asyncpg.create_pool(
+                    self._connection_string, min_size=1, max_size=3, timeout=10
+                )
+            else:
+                from polyglot_ai.core.db_dialects import make_ssl_context
+
+                mode = self._ssl_mode() or "prefer"
+                ssl_arg: object = {"disable": False, "require": "require"}.get(mode, "prefer")
+                if mode == "verify":
+                    ssl_arg = make_ssl_context(
+                        "verify",
+                        self.options.get("ca_file", ""),
+                        check_hostname=self._tunnel is None,
+                    )
+                password: object = target.password
+                if self.options.get("iam"):
+                    # IAM tokens last 15 minutes; the pool opens connections
+                    # later than that, so each one gets a fresh token.
+                    password = self._fresh_iam_token
+                self._pg_pool = await asyncpg.create_pool(
+                    host=target.host,
+                    port=target.port,
+                    user=target.user or None,
+                    password=password or None,
+                    database=target.database or None,
+                    ssl=ssl_arg,
+                    min_size=1,
+                    max_size=3,
+                    timeout=10,
+                )
             async with self._pg_pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
             return True, "Connected (direct)"
@@ -313,6 +499,22 @@ class DatabaseConnection:
                 if mcp_result[0]:
                     return True, f"Direct connection failed ({e}); connected via MCP instead"
             return False, str(e)
+
+    async def _fresh_iam_token(self) -> str:
+        from polyglot_ai.core.async_utils import run_blocking
+        from polyglot_ai.core.db_dialects import parse_url
+        from polyglot_ai.core.db_tunnel import iam_auth_token
+
+        real = parse_url(self._connection_string, self.db_type, encoded=True)
+        iam = self.options.get("iam") or {}
+        return await run_blocking(
+            iam_auth_token,
+            real.host,
+            real.port,
+            real.user,
+            iam.get("profile", ""),
+            iam.get("region", ""),
+        )
 
     async def _schema_postgresql(self) -> list[TableInfo]:
         if not self._pg_pool:
@@ -413,22 +615,47 @@ class DatabaseConnection:
 
     # ── MySQL (direct via aiomysql) ─────────────────────────────────
 
-    async def _connect_mysql(self) -> tuple[bool, str]:
+    async def _connect_mysql(self, target) -> tuple[bool, str]:
         try:
-            import aiomysql
-            from urllib.parse import urlparse
+            from polyglot_ai.core.db_dialects import make_ssl_context
+            from polyglot_ai.core.db_mysql import open_session  # ImportError: no aiomysql
 
-            parsed = urlparse(self._connection_string)
-            self._mysql_pool = await aiomysql.create_pool(
-                host=parsed.hostname or "localhost",
-                port=parsed.port or 3306,
-                user=parsed.username or "root",
-                password=parsed.password or "",
-                db=parsed.path.lstrip("/") if parsed.path else "",
-                minsize=1,
-                maxsize=3,
-                connect_timeout=10,
-            )
+            mode = self._ssl_mode()  # None: saved before TLS was offered → plain, as before
+            ca_file = self.options.get("ca_file", "")
+            direct = self._tunnel is None
+            # (SSL context, must the server offer TLS?). aiomysql on its own
+            # logs in unencrypted when the server's greeting doesn't offer
+            # TLS, whatever context it was given — fine for "use if
+            # available", a silent downgrade for the two that require it.
+            if mode == "verify":
+                attempts = [(make_ssl_context("verify", ca_file, check_hostname=direct), True)]
+            elif mode == "require":
+                attempts = [(make_ssl_context("require"), True)]
+            elif mode == "prefer":
+                # TLS when offered; plain when it isn't, or when the
+                # server offers it and then can't complete the handshake.
+                attempts = [(make_ssl_context("require"), False), (None, False)]
+            else:
+                attempts = [(None, False)]
+            for index, (ssl_context, must_encrypt) in enumerate(attempts):
+                try:
+                    self._mysql_pool = await open_session(
+                        host=target.host,
+                        port=target.port or 3306,
+                        user=target.user or "root",
+                        password=target.password,
+                        database=target.database,
+                        ssl_context=ssl_context,
+                        require_tls=must_encrypt,
+                        # An IAM token is only good for fifteen minutes:
+                        # every later login gets a new one.
+                        password_factory=self._fresh_iam_token if self.options.get("iam") else None,
+                    )
+                    break
+                except Exception as exc:
+                    last = index == len(attempts) - 1
+                    if last or "ssl" not in str(exc).lower():
+                        raise
             async with self._mysql_pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT 1")
@@ -748,6 +975,7 @@ class DatabaseManager:
         mcp_client=None,
         *,
         read_only: bool = True,
+        options: dict | None = None,
     ) -> DatabaseConnection:
         # Disconnect existing connection with same name if present.
         # Replacement is best-effort: if the old connection can't be
@@ -762,7 +990,9 @@ class DatabaseManager:
                     name,
                     exc_info=True,
                 )
-        conn = DatabaseConnection(name, db_type, connection_string, mcp_client, read_only=read_only)
+        conn = DatabaseConnection(
+            name, db_type, connection_string, mcp_client, read_only=read_only, options=options
+        )
         self._connections[name] = conn
         return conn
 
@@ -774,9 +1004,12 @@ class DatabaseManager:
         mcp_client=None,
         *,
         read_only: bool = True,
+        options: dict | None = None,
     ) -> DatabaseConnection:
         """Synchronous add — for use during config loading (no active connections)."""
-        conn = DatabaseConnection(name, db_type, connection_string, mcp_client, read_only=read_only)
+        conn = DatabaseConnection(
+            name, db_type, connection_string, mcp_client, read_only=read_only, options=options
+        )
         self._connections[name] = conn
         return conn
 
@@ -797,11 +1030,18 @@ class DatabaseManager:
         return dict(self._connections)
 
     async def disconnect_all(self) -> None:
-        for conn in self._connections.values():
-            try:
-                await conn.disconnect()
-            except Exception:
-                logger.exception("Error disconnecting %s", conn.name)
+        """Disconnect every connection (and stop its tunnel), together.
+
+        Called at app shutdown. One connection failing, or being slow,
+        doesn't hold up or skip the others.
+        """
+        connections = list(self._connections.values())
+        results = await asyncio.gather(
+            *(conn.disconnect() for conn in connections), return_exceptions=True
+        )
+        for conn, result in zip(connections, results):
+            if isinstance(result, Exception):
+                logger.error("Error disconnecting %s", conn.name, exc_info=result)
 
 
 # ── Global DatabaseManager singleton ────────────────────────────────

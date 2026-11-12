@@ -191,6 +191,10 @@ Every resource has **Open in AWS Console**, **Copy ID / ARN / URL** and
   `aws eks update-kubeconfig`, after asking, so the Kubernetes panel can
   browse the cluster)
 - **S3** — *List top-level objects*, *Copy s3:// URI*
+- **RDS** — *Describe*, *Connect in Database panel…* (opens the
+  [Database panel](Database#connecting-to-an-rds-database-from-the-aws-panel)'s
+  connection dialog with the endpoint, engine and user filled in, and a
+  Session Manager route if the database is private)
 
 **Send details to AI** puts the details pane into the chat with a prompt
 to explain it and suggest next steps — the fastest route from "this

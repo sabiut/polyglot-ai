@@ -482,6 +482,7 @@ def _fetch_rds(call: Call) -> list[dict]:
     rows = []
     for db in (data or {}).get("DBInstances", []):
         ident = db.get("DBInstanceIdentifier", "")
+        endpoint = db.get("Endpoint") or {}
         rows.append(
             {
                 "id": ident,
@@ -489,6 +490,15 @@ def _fetch_rds(call: Call) -> list[dict]:
                 "label": ident,
                 "status": db.get("DBInstanceStatus", ""),
                 "info": f"{db.get('Engine', '')} {db.get('DBInstanceClass', '')}".strip(),
+                # What "Connect in Database panel" needs. The endpoint is
+                # missing while an instance is still being created.
+                "engine": db.get("Engine", ""),
+                "endpoint": endpoint.get("Address", ""),
+                "port": endpoint.get("Port") or 0,
+                "master_user": db.get("MasterUsername", ""),
+                "db_name": db.get("DBName") or "",
+                "public": bool(db.get("PubliclyAccessible")),
+                "iam_auth": bool(db.get("IAMDatabaseAuthenticationEnabled")),
             }
         )
     return rows

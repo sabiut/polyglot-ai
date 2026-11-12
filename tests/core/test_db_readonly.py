@@ -7,6 +7,8 @@ write) only cost an extra approval click. These tests pin both
 directions so neither slips during refactors.
 """
 
+import pytest
+
 from polyglot_ai.core.ai.tools.db_tools import is_readonly_query
 
 
@@ -84,3 +86,33 @@ class TestPragma:
 
     def test_pragma_assignment_with_spaces_is_write(self):
         assert is_readonly_query("PRAGMA journal_mode = DELETE") is False
+
+
+class TestStatementsThatOnlyLookLikeReads:
+    """Found when adding SQL Server: each starts with SELECT, none is a read."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * INTO backup_users FROM users",  # creates a table (SQL Server, PostgreSQL)
+            "SELECT * FROM users INTO OUTFILE '/tmp/users.csv'",  # writes a server file (MySQL)
+            "SELECT * FROM OPENROWSET(BULK 'C:\\secrets.txt', SINGLE_CLOB) AS x",
+            "SELECT * FROM OPENQUERY(other_server, 'DELETE FROM t')",
+            "SELECT * FROM OPENDATASOURCE('SQLNCLI', 'Data Source=x').db.dbo.t",
+        ],
+    )
+    def test_not_read_only(self, sql):
+        assert not is_readonly_query(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT TOP 5 * FROM [dbo].[Orders] WHERE note = 'put it into the box'",
+            "SELECT name FROM sys.tables",
+            "SELECT * FROM v$session",
+            "SELECT 1 FROM dual",
+            'SELECT * FROM "USERS" FETCH FIRST 100 ROWS ONLY',
+        ],
+    )
+    def test_ordinary_sql_server_and_oracle_reads(self, sql):
+        assert is_readonly_query(sql)

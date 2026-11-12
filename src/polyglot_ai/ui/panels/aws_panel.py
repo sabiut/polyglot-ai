@@ -858,6 +858,74 @@ class AwsPanel(QWidget):
         if runner is not None:
             runner(self.ssm_command_for(instance_id))
 
+    # ── Connect to databases (Database panel) ───────────────────────
+
+    #: RDS engines that have their own entry in the dialog's type list.
+    _ENGINE_LABELS = {
+        "mariadb": "MariaDB",
+        "aurora-postgresql": "Amazon Aurora (PostgreSQL)",
+        "aurora-mysql": "Amazon Aurora (MySQL)",
+    }
+
+    @staticmethod
+    def _database_unsupported_reason(db: dict) -> str:
+        if not db.get("endpoint"):
+            return "This instance has no endpoint yet (it may still be creating)."
+        return f"The Database panel has no driver for the “{db.get('engine', '?')}” engine."
+
+    def database_prefill_for(self, db: dict) -> dict | None:
+        """Fields for the Database panel's connection dialog, from an RDS row.
+
+        None when the engine isn't one the panel can talk to (Db2) or the
+        instance has no endpoint. The password is never known here.
+        """
+        from polyglot_ai.core.db_dialects import db_type_for_rds_engine
+
+        db_type = db_type_for_rds_engine(db.get("engine", ""))
+        if db_type is None or not db.get("endpoint"):
+            return None
+        prefill = {
+            "name": db.get("id", ""),
+            "db_type": db_type,
+            "engine_label": self._ENGINE_LABELS.get(db.get("engine", "").lower()),
+            "host": db["endpoint"],
+            "port": db.get("port") or "",
+            "user": db.get("master_user", ""),
+            "database": db.get("db_name", ""),
+            # RDS supports TLS on every engine; several require it.
+            "ssl": "require",
+            "profile": self._profile,
+            "region": self._region,
+        }
+        if not db.get("public"):
+            # Only machines inside the VPC can reach it. Offer Session
+            # Manager through one of the running instances listed here.
+            prefill["route"] = "ssm"
+            prefill["bastions"] = [
+                (f"{row['id']}  {row.get('name', '')}".strip(), row["id"])
+                for row in self._overview.get("ec2", [])
+                if row.get("state") == "running"
+            ]
+            prefill["note"] = (
+                "This instance isn't publicly accessible, so it is reached through "
+                "a machine in its network."
+            )
+        return prefill
+
+    def _connect_database(self, db: dict) -> None:
+        prefill = self.database_prefill_for(db)
+        if prefill is None:
+            self._status_label.setText(f"  {self._database_unsupported_reason(db)}")
+            return
+        window = self.window()
+        panel = getattr(window, "database_panel", None)
+        if panel is None or not hasattr(panel, "new_connection_from"):
+            return
+        switch = getattr(window, "_on_activity_changed", None)
+        if switch is not None:
+            switch("database")
+        panel.new_connection_from(prefill)
+
     # ── Context menu ────────────────────────────────────────────────
 
     def _show_context_menu(self, pos) -> None:
@@ -960,6 +1028,13 @@ class AwsPanel(QWidget):
             menu.addAction("Add to kubeconfig…").triggered.connect(
                 lambda: self._eks_update_kubeconfig(cluster)
             )
+        elif kind == "rds":
+            menu.addAction("Describe").triggered.connect(lambda: self._on_item_selected(item, None))
+            connect = menu.addAction("Connect in Database panel…")
+            if self.database_prefill_for(data) is None:
+                connect.setEnabled(False)
+                connect.setToolTip(self._database_unsupported_reason(data))
+            connect.triggered.connect(lambda: self._connect_database(data))
         elif kind == "s3":
             bucket = data["name"]
             menu.addAction("List top-level objects").triggered.connect(
