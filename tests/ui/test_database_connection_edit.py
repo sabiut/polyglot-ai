@@ -551,3 +551,144 @@ def test_the_wording_of_the_question():
     assert notes_label(0, 2) == "Also delete its saved snippets (2)"
     assert delete_explanation(False, False).count("\n\n") == 0
     assert delete_explanation(True, True).count("\n\n") == 2
+
+
+# ── when the list can't be saved ────────────────────────────────────
+
+
+def _warnings(monkeypatch) -> list[str]:
+    shown: list[str] = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _p, _title, text: shown.append(text))
+    return shown
+
+
+def _disk_full(monkeypatch) -> None:
+    from polyglot_ai.core import security
+
+    def refuse(_path, _content, **_kw):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(security, "secure_write", refuse)
+
+
+async def test_a_delete_that_cannot_be_saved_changes_nothing(env, tmp_path, monkeypatch):
+    """It used to leave the connection open, off the list and impossible to close."""
+    panel, keyring, config = env
+    first, second = _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    panel._connect_selected()
+    await _settle(lambda: _tables(panel) == ["apples"])
+    panel._open_full_window()
+    window = panel._full_window
+    db_notebook.get_notebook_store().add_history("local", "SELECT 1")
+    saved = config.read_text()
+    _answer(monkeypatch, panel, with_notes=True)
+    shown = _warnings(monkeypatch)
+    _disk_full(monkeypatch)
+
+    try:
+        panel._delete_selected()
+        await asyncio.sleep(0.05)
+        QApplication.processEvents()
+
+        assert len(shown) == 1
+        assert "“local” wasn't deleted" in shown[0] and "No space left on device" in shown[0]
+        assert shown[0].endswith("Nothing was changed.")
+        assert panel._db_manager.connection_names == ["local", "other"]
+        assert panel._db_manager.get_connection("local") is conn and conn.is_connected
+        assert _labels(panel) == ["local (sqlite)", "other (sqlite)"]
+        assert panel._active_connection == "local" and _tables(panel) == ["apples"]
+        assert keyring.entries == {"local": first, "other": second}
+        assert config.read_text() == saved
+        assert panel._full_window is window and window.isVisible()
+        assert db_notebook.get_notebook_store().counts("local") == (1, 0)
+        assert panel._status_label.text() == "Not deleted: local"
+    finally:
+        window.close()
+        await conn.disconnect()
+
+
+async def test_a_delete_refused_by_the_keyring_changes_nothing(env, tmp_path, monkeypatch):
+    import keyring as real_keyring
+
+    panel, keyring, config = env
+    first, second = _two_connections(panel, tmp_path)
+    saved = config.read_text()
+    _answer(monkeypatch, panel)
+    shown = _warnings(monkeypatch)
+
+    def locked(_service, _name, _value):
+        raise RuntimeError("The keyring is locked")
+
+    monkeypatch.setattr(real_keyring, "set_password", locked)
+    panel._delete_selected()
+    await asyncio.sleep(0)
+
+    assert len(shown) == 1 and "The keyring is locked" in shown[0]
+    assert panel._db_manager.connection_names == ["local", "other"]
+    assert keyring.entries == {"local": first, "other": second}
+    assert config.read_text() == saved
+
+
+async def test_a_deleted_connection_is_closed_even_if_tidying_up_fails(env, tmp_path, monkeypatch):
+    panel, _keyring, config = env
+    _two_connections(panel, tmp_path)
+    conn = panel._db_manager.get_connection("local")
+    assert (await conn.connect())[0]
+    _answer(monkeypatch, panel, with_notes=True)
+
+    def broken(_name):
+        raise RuntimeError("notebook is gone")
+
+    monkeypatch.setattr(db_notebook.get_notebook_store(), "forget_connection", broken)
+    with pytest.raises(RuntimeError, match="notebook is gone"):
+        panel._delete_selected()
+    await _settle(lambda: not conn.is_connected)
+
+    assert panel._db_manager.connection_names == ["other"]
+    assert [e["name"] for e in json.loads(config.read_text())] == ["other"]
+
+
+async def test_an_edit_that_cannot_be_saved_still_closes_what_it_replaced(
+    env, tmp_path, monkeypatch
+):
+    panel, keyring, config = env
+    first, second = _two_connections(panel, tmp_path)
+    old = panel._db_manager.get_connection("local")
+    panel._connect_selected()
+    await _settle(lambda: _tables(panel) == ["apples"])
+    db_notebook.get_notebook_store().add_history("local", "SELECT 1")
+    saved = config.read_text()
+    shown = _warnings(monkeypatch)
+    _disk_full(monkeypatch)
+
+    panel._apply_edit("local", NewConnection("fruit", "sqlite", second, True))
+    new = panel._db_manager.get_connection("fruit")
+
+    try:
+        await _settle(lambda: not old.is_connected and _tables(panel) == ["bananas"])
+        assert len(shown) == 1
+        assert (
+            "The change to “fruit” was made, but the connection list couldn't be saved"
+            in (shown[0])
+        )
+        assert panel._status_label.text().startswith(("Not saved: fruit", "Connect"))
+        assert _labels(panel) == ["fruit (sqlite)", "other (sqlite)"]
+        # What the next start will read is as it was, password and notes included.
+        assert config.read_text() == saved
+        assert keyring.entries["local"] == first
+        assert db_notebook.get_notebook_store().counts("local") == (1, 0)
+    finally:
+        await new.disconnect()
+
+
+async def test_an_add_that_cannot_be_saved_says_so(env, tmp_path, monkeypatch):
+    panel, _keyring, config = env
+    shown = _warnings(monkeypatch)
+    _disk_full(monkeypatch)
+
+    panel._add_connection(NewConnection("local", "sqlite", str(tmp_path / "a.db"), True))
+
+    assert len(shown) == 1 and "“local” was added, but" in shown[0]
+    assert _labels(panel) == ["local (sqlite)"]
+    assert not config.exists()

@@ -128,6 +128,9 @@ pencil. You are asked first, and **Cancel** is the default.
   delete its query history and saved snippets**. Kept ones come back if
   you later add a connection with the same name.
 
+- If the connection list can't be saved — the keyring is locked, the
+  disk is full — nothing is deleted and the connection stays as it was.
+
 The red **✕** only disconnects; it never removes a saved connection.
 Deleting a connection is available from 0.18.23.
 

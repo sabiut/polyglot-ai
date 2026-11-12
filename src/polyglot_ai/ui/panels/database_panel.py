@@ -412,7 +412,7 @@ class DatabasePanel(QWidget):
         )
         self._conn_combo.addItem(f"{new.name} ({new.db_type})")
         self._conn_combo.setCurrentIndex(self._conn_combo.count() - 1)
-        self._save_connections()
+        self._save_or_warn(f"“{new.name}” was added")
 
     def _edit_selected(self) -> None:
         """Reopen the selected connection in the dialog, to change its details."""
@@ -469,21 +469,27 @@ class DatabasePanel(QWidget):
         self._conn_combo.setCurrentIndex(index)
         self._active_connection = current.name
 
-        if current.name != old_name:
+        # Whether or not it could be saved, the edit is what the panel now
+        # holds: the rest — the editor window, closing the connection it
+        # replaced — has to happen either way.
+        saved = self._save_or_warn(f"The change to “{current.name}” was made")
+        if saved and current.name != old_name:
+            # Only once the list on disk has the new name: until then the
+            # old name is what the next start will look up.
             self._forget_saved_name(old_name)
             # Query history and snippets are filed under the name.
             get_notebook_store().rename_connection(old_name, current.name)
-        self._save_connections()
+        status = f"Saved: {current.name}" if saved else f"Not saved: {current.name}"
 
         window = self._full_window
         if window is not None and window._conn in (old, current):
             window.set_connection(current)
         if retired is None:
-            self._status_label.setText(f"Saved: {current.name}")
+            self._status_label.setText(status)
             return
 
         self._schema_tree.clear()
-        self._status_label.setText(f"Saved: {current.name}")
+        self._status_label.setText(status)
         self._status_label.setToolTip("")
 
         async def swap() -> None:
@@ -527,38 +533,57 @@ class DatabasePanel(QWidget):
         if not go_ahead:
             return
 
+        # The list on disk first, and without touching anything else: if
+        # it can't be written (keyring locked, disk full) the connection
+        # is still listed, still open and still has its password.
+        try:
+            self._save_connections(without=name)
+        except Exception as exc:
+            logger.exception("Could not save the connection list without %s", name)
+            QMessageBox.warning(
+                self,
+                "Delete connection",
+                f"“{name}” wasn't deleted, because the connection list couldn't "
+                f"be saved:\n{exc}\n\nNothing was changed.",
+            )
+            self._status_label.setText(f"Not deleted: {name}")
+            return
+
         self._db_manager.drop_connection_sync(name)
-        self._forget_saved_name(name)
-        if with_notes:
-            get_notebook_store().forget_connection(name)
-        self._save_connections()
+        try:
+            self._forget_saved_name(name)
+            if with_notes:
+                get_notebook_store().forget_connection(name)
 
-        window = self._full_window
-        if window is not None and window._conn is conn:
-            # Its editor has nothing left to run against.
-            self._full_window = None
-            window.close()
+            window = self._full_window
+            if window is not None and window._conn is conn:
+                # Its editor has nothing left to run against.
+                self._full_window = None
+                window.close()
 
-        self._schema_tree.clear()
-        index = self._conn_combo.findText(f"{name} ({conn.db_type})")
-        if index >= 0:
-            # Selects a neighbour, or leaves the list empty.
-            self._conn_combo.removeItem(index)
-        if self._conn_combo.count() == 0:
-            self._active_connection = None
-        self._status_label.setText(f"Deleted: {name}")
-        self._status_label.setToolTip("")
+            self._schema_tree.clear()
+            index = self._conn_combo.findText(f"{name} ({conn.db_type})")
+            if index >= 0:
+                # Selects a neighbour, or leaves the list empty.
+                self._conn_combo.removeItem(index)
+            if self._conn_combo.count() == 0:
+                self._active_connection = None
+            self._status_label.setText(f"Deleted: {name}")
+            self._status_label.setToolTip("")
+        finally:
+            # Off the list, so nothing else can close it: whatever went
+            # wrong above, its pool and its tunnel are shut down.
+            safe_task(self._close_deleted(conn), name="db_delete_connection")
 
-        async def finish() -> None:
-            try:
-                await conn.disconnect()
-            except Exception:
-                logger.debug("Closing the deleted connection %s failed", name, exc_info=True)
-            shown = self._db_manager.get_connection(self._active_connection or "")
-            if shown is not None and shown.is_connected:
-                await self._show_schema_of(shown)
-
-        safe_task(finish(), name="db_delete_connection")
+    async def _close_deleted(self, conn) -> None:
+        """Shut a deleted connection down, then show what is selected now."""
+        try:
+            await conn.disconnect()
+        except Exception:
+            logger.debug("Closing the deleted connection %s failed", conn.name, exc_info=True)
+        shown = self._db_manager.get_connection(self._active_connection or "")
+        if shown is not None and shown.is_connected:
+            await self._show_schema_of(shown)
 
     def _forget_saved_name(self, name: str) -> None:
         """Drop the keyring entry of a connection that no longer has this name."""
@@ -569,14 +594,38 @@ class DatabasePanel(QWidget):
         except Exception:
             logger.debug("No keyring entry to remove for %s", name, exc_info=True)
 
-    def _save_connections(self) -> None:
-        """Persist connections to disk. Connection strings stored in keyring."""
+    def _save_or_warn(self, what: str) -> bool:
+        """Save the list; if that fails, say so and carry on. Returns whether it saved."""
+        try:
+            self._save_connections()
+            return True
+        except Exception as exc:
+            logger.exception("Could not save database connections")
+            QMessageBox.warning(
+                self,
+                "Database connections",
+                f"{what}, but the connection list couldn't be saved:\n{exc}\n\n"
+                "It stays as it is until Polyglot AI closes, and will be as it "
+                "was before when it next starts.",
+            )
+            return False
+
+    def _save_connections(self, without: str | None = None) -> None:
+        """Persist connections to disk. Connection strings stored in keyring.
+
+        ``without`` leaves one connection out of what is written, for a
+        delete that must reach the disk before anything else is undone.
+        Raises if the keyring or the file can't be written; the file is
+        swapped in whole, so a failure leaves the previous list in place.
+        """
         import json
         import keyring
 
         self._CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         data = []
         for name, conn in self._db_manager.connections.items():
+            if name == without:
+                continue
             # Store connection string in keyring (may contain passwords)
             keyring.set_password("polyglot-ai-db", name, conn._connection_string)
             entry = {
