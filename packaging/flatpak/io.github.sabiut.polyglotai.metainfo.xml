@@ -23,6 +23,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.22" date="2026-11-12">
+      <description>
+        <p>The Database panel can back up a database to a file and restore
+        it: with the engine's own tools for PostgreSQL, MySQL, MariaDB and
+        SQLite, or with a built-in SQL export that also covers SQL Server
+        and Oracle. A restore says what it will do before it changes
+        anything, and Cancel stops it. After connecting, the panel lists
+        the server's databases and the tables in each. Saved connections
+        can be edited, and the SQL editor highlights what you type. In the
+        AWS panel, right-click an RDS database to list its snapshots or
+        create one. SQL Server errors now read as a plain sentence.</p>
+      </description>
+    </release>
     <release version="0.18.21" date="2026-11-12">
       <description>
         <p>The Database panel now connects to SQL Server and Oracle as well
