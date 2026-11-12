@@ -23,6 +23,21 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.21" date="2026-11-12">
+      <description>
+        <p>The Database panel now connects to SQL Server and Oracle as well
+        as PostgreSQL, MySQL, MariaDB and SQLite, which covers every Amazon
+        RDS engine except Db2. Connections can require encryption and check
+        the server's certificate, go through an SSH bastion or AWS Session
+        Manager to reach a database in a private network, and sign in with
+        an AWS IAM token instead of a password. In the AWS panel,
+        right-click an RDS database and choose "Connect in Database panel"
+        to open the connection dialog already filled in. Passwords
+        containing @, /, : or # now work. The .deb also asks for the system
+        libraries Qt needs, so it starts on a minimal Debian or Ubuntu
+        install.</p>
+      </description>
+    </release>
     <release version="0.18.20" date="2026-11-12">
       <description>
         <p>The Fedora and RHEL package starts again: in 0.18.16 to 0.18.19
