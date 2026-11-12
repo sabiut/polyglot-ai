@@ -137,12 +137,12 @@ profile's configured one). One refresh lists, in parallel:
 | Compute | **EC2** instances | Name, state (coloured), type, IP |
 | | **Lambda** functions | runtime, last modified |
 | | **ECS services** | cluster / service, running/desired tasks |
-| | **EKS clusters** | name |
-| Data | **S3 buckets** | creation date (global, not per region) |
+| | **EKS clusters** | status, Kubernetes version |
+| Data | **S3 buckets** | the bucket's region, creation date (all regions are listed) |
 | | **RDS databases** | status (coloured), engine and class |
-| | **DynamoDB tables** | name |
-| Messaging | **SQS queues** | name |
-| | **SNS topics** | name |
+| | **DynamoDB tables** | status, item count |
+| Messaging | **SQS queues** | messages waiting and in flight |
+| | **SNS topics** | confirmed subscribers |
 | Operations | **CloudFormation stacks** | status (failures and rollbacks in red), last update |
 | | **CloudWatch alarms** | state — firing alarms listed first |
 
@@ -151,14 +151,22 @@ list only shows what you have. Click a section's ▾ / ▸ header to collapse
 or expand it; collapsed sections stay collapsed across refreshes. Type in
 **Filter resources…** to narrow every section at once.
 
+The status and count for EKS, DynamoDB, SQS and SNS take one extra
+request per row, so they are filled in for the first twelve rows of each
+section. A section that was cut short says so — *EC2 (200+)*.
+
 The account ID and caller identity appear under the selectors. Each
 section fails independently: if a profile lacks permission for one
-service you see a hint under that section and the rest still loads.
+service you see a hint under that section, naming the action that was
+refused, and the rest still loads. Switching profile or region clears
+the list and the details at once, so nothing on screen belongs to the
+previous account.
 
 **Click a resource to see its details** in the pane below: a readable
 summary first (for example an instance's state, IPs, VPC and security
 groups; a database's engine, endpoint, storage and backups; an alarm's
-state and why), then the full CLI output under *Full output*. Lambda
+state and why; a bucket's region, public-access block, encryption and
+versioning), then the full CLI output under *Full output*. Lambda
 summaries list environment variable *names* only. The header buttons
 open the resource in the **AWS Console** in your browser, send the
 details to the AI, or open them in a larger window. There is no
@@ -193,13 +201,28 @@ they're sent.
 
 Two tools are available to the assistant when you chat:
 
-- `aws_cli` — runs any AWS CLI command with your profile. **Read-only
-  calls** (`describe-*`, `list-*`, `get-*`, `s3 ls`, `logs tail`, …)
-  run immediately. Anything that changes state shows an approval card
-  with the exact command first; destructive verbs (`terminate`,
-  `delete`, `s3 rm`, bucket-policy changes, …) get an amber warning.
+- `aws_cli` — runs any AWS CLI command. **Read-only calls**
+  (`describe-*`, `list-*`, `get-*`, `s3 ls`, `logs tail`, …) run
+  immediately. Anything that changes state shows an approval card with
+  the exact command first; destructive verbs (`terminate`, `delete`,
+  `s3 rm`, bucket-policy changes, …) get an amber warning.
 - `aws_logs_tail` — fetches recent CloudWatch Logs from a log group,
   optionally filtered (e.g. `ERROR`).
+
+Both use the **profile and region selected in the AWS panel** unless you
+name others in your message, and the approval card shows them — so you
+can see which account a command is about to run against. What runs is
+what the card showed, even if you change the selection while it waits.
+
+Some calls that look like reads still ask first, because of what they
+return or touch:
+
+- stored data — `query`, `scan`, `select` and fetching an item, record
+  or result;
+- credentials and secrets — tokens, passwords, API keys, pre-signed
+  links, instance user data;
+- anything with a `file://` or `fileb://` argument, or that writes its
+  result to a local file.
 
 So you can ask things like *"which of my EC2 instances have been running
 for more than a month?"* or *"why is api-handler throwing errors — check

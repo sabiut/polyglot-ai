@@ -5,7 +5,9 @@ first time, configuring an AI provider, and opening your first project.
 
 ## Requirements
 
-- **Python 3.11+**
+- **Python 3.11+** — the `.deb` is built for Python 3.11–3.14 and the
+  `.rpm` for 3.11–3.15, which covers Debian 12 and 13, Ubuntu 24.04 and
+  26.04, Fedora 43–45 and RHEL/AlmaLinux 10
 - **Qt 6** (installed automatically via PyQt6)
 - A terminal (bash, zsh, or fish) — only needed so the integrated terminal can use your preferred shell
 - An API key for at least one AI provider — OpenAI, Anthropic, or Google
@@ -39,8 +41,24 @@ fails on modern distros because of PEP 668's
 ### From a release download
 
 Grab a `.deb`, `.rpm`, `.AppImage`, or `.whl` from the
-[Releases page](https://github.com/sabiut/polyglot-ai/releases) —
-the AppImage runs on any Linux with no install at all:
+[Releases page](https://github.com/sabiut/polyglot-ai/releases).
+
+```bash
+sudo apt install ./polyglot-ai_*.deb      # Debian / Ubuntu
+sudo dnf install ./polyglot-ai-*.rpm      # Fedora / RHEL
+```
+
+Use `apt` and `dnf` rather than `dpkg -i` or `rpm -i`: they also install
+the system libraries the app needs, and Fedora 45's `rpm` refuses a
+downloaded package ("does not verify: no signature").
+
+Both packages carry their own Python dependencies, at the exact versions
+each release is tested with, so installing needs no internet access —
+only the system libraries come from your distribution's repositories.
+If your Python version isn't one the package was built for, the
+installer says so and downloads the dependencies from PyPI instead.
+
+The AppImage runs on any Linux with no install at all:
 
 ```bash
 chmod +x Polyglot_AI-*.AppImage && ./Polyglot_AI-*.AppImage

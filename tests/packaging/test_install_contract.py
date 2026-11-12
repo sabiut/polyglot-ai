@@ -127,6 +127,37 @@ def test_debian_recommends_includes_core_runtime_tools():
 # ── RPM Recommends contract ────────────────────────────────────────
 
 
+def test_debian_depends_on_glib():
+    """PyQt6's bundled Qt links libglib-2.0.so.0, and nothing else in
+    Depends pulls it in: on a minimal install the app died at import
+    with "libglib-2.0.so.0: cannot open shared object file". Debian 13
+    and Ubuntu 24.04 renamed the package (64-bit time_t), so both names
+    are needed.
+    """
+    depends = [d.strip() for d in _extract_field(_load_debian_control(), "Depends").split(",")]
+    assert "libglib2.0-0t64 | libglib2.0-0" in depends
+
+
+def test_debian_depends_on_what_qt_display_plugins_link():
+    """``ldd`` on the bundled Qt in a bare Debian 12/13 and Ubuntu
+    24.04/26.04 install showed these missing: three for the X11 plugin
+    (without them: "Could not load the Qt platform plugin xcb") and one
+    for the Wayland plugin. A desktop usually has them; nothing in
+    Depends guaranteed it.
+    """
+    depends = {d.strip() for d in _extract_field(_load_debian_control(), "Depends").split(",")}
+    assert {"libxcb-icccm4", "libxcb-keysyms1", "libxcb-shape0", "libwayland-cursor0"} <= depends
+
+
+def test_readme_installs_packages_with_the_package_manager():
+    """``rpm -i`` is refused by Fedora 45 for an unsigned download, and
+    neither it nor ``dpkg -i`` installs the system libraries."""
+    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text()
+    assert "sudo dnf install ./polyglot-ai-*.rpm" in readme
+    assert "sudo apt install ./polyglot-ai_*.deb" in readme
+    assert "sudo rpm -i" not in readme and "sudo dpkg -i" not in readme
+
+
 def test_rpm_recommends_includes_core_runtime_tools():
     """Same contract as Debian, in the rpm spec syntax. The rpm
     spec uses one ``Recommends:`` line per entry — we just grep

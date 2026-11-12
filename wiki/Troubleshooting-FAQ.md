@@ -36,9 +36,45 @@ on the new machine.
 
 ### The app doesn't launch
 
-- Run from a terminal to see the error: `.venv/bin/polyglot-ai`.
+- Run from a terminal to see the error: `polyglot-ai` for a package
+  install, `.venv/bin/polyglot-ai` for a source checkout.
 - Check Python version: must be 3.11+.
-- Check PyQt6 installed: `pip show PyQt6`.
+- Check PyQt6 installed: `pip show PyQt6` (source checkout), or
+  `/opt/polyglot-ai/venv/bin/pip show PyQt6` (package install).
+
+### Fedora: `polyglot-ai: No such file or directory` (or "bad interpreter")
+
+Versions 0.18.16 to 0.18.19 of the `.rpm` installed a launcher that
+pointed at a folder which no longer existed once installation finished.
+Upgrade to 0.18.20 or later:
+
+```bash
+sudo dnf upgrade polyglot-ai
+```
+
+### Fedora: `rpm -i` says "does not verify: no signature"
+
+Fedora 45's `rpm` refuses a package file that isn't signed. Install the
+downloaded file with `dnf`, which also brings in the system libraries:
+
+```bash
+sudo dnf install ./polyglot-ai-*.rpm
+```
+
+Installing from the [package repository](Getting-Started#install) avoids
+this altogether — the repository is signed.
+
+### Debian / Ubuntu: `libglib-2.0.so.0: cannot open shared object file`
+
+Qt needs GLib, and packages up to 0.18.20 didn't ask for it. Every
+desktop has it; a minimal server or container install may not:
+
+```bash
+sudo apt install libglib2.0-0
+```
+
+Later packages pull it in themselves when installed with
+`sudo apt install ./polyglot-ai_*.deb`.
 
 ### The app is slow to start
 

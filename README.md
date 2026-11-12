@@ -89,10 +89,16 @@ Download the latest release from [Releases](https://github.com/sabiut/polyglot-a
 
 | Format | Platform | Install |
 |--------|----------|---------|
-| `.deb` | Ubuntu/Debian | `sudo dpkg -i polyglot-ai_*.deb` |
-| `.rpm` | Fedora/RHEL | `sudo rpm -i polyglot-ai-*.rpm` |
+| `.deb` | Ubuntu/Debian | `sudo apt install ./polyglot-ai_*.deb` |
+| `.rpm` | Fedora/RHEL | `sudo dnf install ./polyglot-ai-*.rpm` |
 | `.AppImage` | Any Linux | `chmod +x Polyglot_AI-*.AppImage && ./Polyglot_AI-*.AppImage` |
 | `.whl` | pip (pipx recommended) | `pipx install polyglot_ai-*.whl` |
+
+> **Use `apt` and `dnf`, not `dpkg -i` / `rpm -i`:** they also install the
+> system libraries the app needs, and Fedora 45's `rpm` refuses a
+> downloaded package outright ("does not verify: no signature"). Both
+> packages carry their Python dependencies, so the install itself needs no
+> internet access.
 
 > **Note on the wheel install:** modern distros (Ubuntu 23.04+, Fedora 38+,
 > Debian 12+) ship Python with PEP 668's `externally-managed-environment`
