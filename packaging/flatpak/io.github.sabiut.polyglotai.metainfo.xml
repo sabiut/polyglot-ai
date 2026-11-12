@@ -23,6 +23,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.24" date="2026-11-12">
+      <description>
+        <p>Cancel now stops a database restore while a statement is
+        running, for example one that is waiting for a lock. Before, a
+        restore of a built-in export could only be cancelled between
+        statements. The message says what was changed: nothing on
+        PostgreSQL, and how many statements were applied on MySQL,
+        MariaDB, SQL Server and Oracle.</p>
+      </description>
+    </release>
     <release version="0.18.23" date="2026-11-12">
       <description>
         <p>A saved database connection can be deleted: select it and click
