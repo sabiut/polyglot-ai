@@ -9,12 +9,19 @@
 #
 # To move a dependency forward: bump it here, let CI run, and keep the
 # upper bounds in pyproject.toml in step.
+#
+# Python 3.15 (Fedora 45) has its own pins for three packages whose
+# tested versions have no 3.15 wheels on PyPI. CI runs on 3.11, so those
+# lines are not covered by the test suite; they are the versions a 3.15
+# install was already getting from PyPI, now fixed instead of floating.
+# Drop the split once the main pin moves to a version with 3.15 wheels.
 aiomysql==0.3.2
 aiosqlite==0.22.1
 annotated-types==0.8.0
 anthropic==1.11.0
 anyio==4.15.1
-asyncpg==0.31.0
+asyncpg==0.31.0 ; python_version < "3.15"
+asyncpg==0.32.0 ; python_version >= "3.15"
 attrs==26.1.0
 backports.tarfile==1.2.0
 certifi==2026.7.22
@@ -52,17 +59,21 @@ mpremote==1.29.0
 oauthlib==4.0.0
 openai==3.24.0
 opentelemetry-api==1.45.0
+oracledb==26.1.0
 packaging==26.3
 platformdirs==4.12.3
 pluggy==1.6.0
 pyasn1==0.6.4
 pyasn1-modules==0.4.2
 pycparser==3.0
-pydantic==2.13.5
-pydantic-core==2.46.5
+pydantic==2.13.5 ; python_version < "3.15"
+pydantic==2.14.3 ; python_version >= "3.15"
+pydantic-core==2.46.5 ; python_version < "3.15"
+pydantic-core==2.50.4 ; python_version >= "3.15"
 pygments==2.21.0
 pyjwt==2.15.1
 PyMySQL==1.2.3
+pymssql==2.4.6
 pyparsing==3.3.3
 pyqt6==6.11.0
 pyqt6-charts==6.11.0

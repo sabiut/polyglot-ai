@@ -76,10 +76,12 @@ for sz in 16 32 48 128 256 512; do
 done
 mkdir -p %{buildroot}/usr/share/icons/hicolor/scalable/apps
 cp %{_sourcedir}/*.whl %{buildroot}/opt/polyglot-ai/
-# Bundled dependency wheels — see build_rpm.sh.
+# Bundled dependency wheels and the pins they were chosen by — see
+# build_rpm.sh.
 if [ -d %{_sourcedir}/wheels ] && [ -n "$(ls -A %{_sourcedir}/wheels 2>/dev/null)" ]; then
     cp %{_sourcedir}/wheels/* %{buildroot}/opt/polyglot-ai/wheels/
 fi
+cp %{_sourcedir}/constraints.txt %{buildroot}/opt/polyglot-ai/constraints.txt
 cp %{_sourcedir}/polyglot-ai.desktop %{buildroot}/usr/share/applications/
 # Every PNG size build_rpm.sh staged.
 for sz in 16 32 48 128 256 512; do
@@ -103,26 +105,42 @@ fi
 INSTALL_DIR="/opt/polyglot-ai"
 VENV_DIR="$INSTALL_DIR/venv"
 WHEELS_DIR="$INSTALL_DIR/wheels"
+PINS="$INSTALL_DIR/constraints.txt"
 NEW_VENV="$VENV_DIR.new"
 # Build next to the live venv and swap only on success, so a failed
 # rebuild (no network, broken wheel) leaves the previous install working.
 rm -rf "$NEW_VENV"
 BUILD_OK=0
 if python3 -m venv "$NEW_VENV"; then
-    # Install offline from bundled wheels first; fall back to PyPI if
-    # the bundle is empty or pip refuses (incompatible platform tags
-    # on a non-x86_64 box, etc.).
-    if [ -d "$WHEELS_DIR" ] && [ -n "$(ls -A "$WHEELS_DIR" 2>/dev/null)" ] && \
-       "$NEW_VENV/bin/pip" install --no-index --find-links "$WHEELS_DIR" "$INSTALL_DIR"/*.whl; then
+    # Three attempts, most trustworthy first:
+    #   1. offline, from the bundled wheels, at the tested versions;
+    #   2. online for whatever the bundle lacks for this Python, still
+    #      at the tested versions (wheels only: no compiler needed);
+    #   3. online with whatever versions resolve — the old behaviour,
+    #      for a Python the pins have no wheels for yet.
+    if "$NEW_VENV/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
+           --constraint "$PINS" "$INSTALL_DIR"/*.whl; then
+        echo "Polyglot AI: installed from the bundled wheels (offline, tested versions)."
+        BUILD_OK=1
+    elif "$NEW_VENV/bin/pip" install --find-links "$WHEELS_DIR" --only-binary :all: \
+           --constraint "$PINS" "$INSTALL_DIR"/*.whl; then
+        echo "Polyglot AI: bundle incomplete for this Python; fetched the rest from PyPI (tested versions)."
         BUILD_OK=1
     elif "$NEW_VENV/bin/pip" install --upgrade pip && \
-         "$NEW_VENV/bin/pip" install "$INSTALL_DIR"/*.whl; then
+         "$NEW_VENV/bin/pip" install --find-links "$WHEELS_DIR" "$INSTALL_DIR"/*.whl; then
+        echo "Polyglot AI: installed from PyPI with the newest compatible versions (not the tested set)."
         BUILD_OK=1
     fi
 fi
 if [ "$BUILD_OK" -eq 1 ]; then
     rm -rf "$VENV_DIR"
     mv "$NEW_VENV" "$VENV_DIR"
+    # pip wrote the build-time path into every script's ``#!`` line, and
+    # the directory has just been renamed: without this the launcher
+    # fails with "No such file or directory" (0.18.16–0.18.19 shipped
+    # like that). ``-I`` leaves real binaries such as ruff alone.
+    grep -rIl "$NEW_VENV" "$VENV_DIR/bin" "$VENV_DIR/pyvenv.cfg" 2>/dev/null | \
+        xargs -r sed -i "s|$NEW_VENV|$VENV_DIR|g"
     ln -sf "$VENV_DIR/bin/polyglot-ai" /usr/local/bin/polyglot-ai
     echo "Polyglot AI installed successfully."
     echo "Run 'polyglot-ai' to start, or find it in your application menu."
@@ -168,6 +186,7 @@ fi
 
 %files
 /opt/polyglot-ai/*.whl
+/opt/polyglot-ai/constraints.txt
 /opt/polyglot-ai/wheels
 /usr/share/applications/polyglot-ai.desktop
 /usr/share/icons/hicolor/16x16/apps/polyglot-ai.png

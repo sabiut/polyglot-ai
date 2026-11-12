@@ -4,28 +4,35 @@ set -e
 INSTALL_DIR="/opt/polyglot-ai"
 VENV_DIR="$INSTALL_DIR/venv"
 WHEELS_DIR="$INSTALL_DIR/wheels"
+PINS="$INSTALL_DIR/constraints.txt"
 
 # Create virtual environment
 python3 -m venv "$VENV_DIR"
 
-# Install from bundled wheels first so the package works offline
-# (corporate proxy, fresh-from-iso install, flight Wi-Fi, etc.).
-# ``--no-index`` forbids contacting PyPI and ``--find-links`` makes
-# the resolver use the bundled wheels exclusively. Falls back to a
-# regular online install if the bundle is missing or incomplete —
-# that way a misconfigured CI can never produce an unusable .deb.
-if [ -d "$WHEELS_DIR" ] && [ -n "$(ls -A "$WHEELS_DIR" 2>/dev/null)" ]; then
-    echo "Installing Polyglot AI from bundled wheels (offline)…"
-    "$VENV_DIR/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
-        "$INSTALL_DIR"/*.whl || {
-        echo "Offline install failed; retrying with online resolver…"
-        "$VENV_DIR/bin/pip" install --upgrade pip
-        "$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
-    }
+# Three attempts, most trustworthy first:
+#   1. offline, from the bundled wheels, at the tested versions — works
+#      behind a corporate proxy, on a fresh install, on a flight.
+#      ``--no-index`` forbids contacting PyPI; ``--find-links`` makes
+#      the resolver use the bundle; the constraints are the versions
+#      the test suite ran against;
+#   2. online for whatever the bundle lacks for this Python, still at
+#      the tested versions (wheels only, so no compiler is needed);
+#   3. online with whatever versions resolve — for a Python the pins
+#      have no wheels for yet. A bundle problem can never leave the
+#      package unusable, but it is said out loud which path was taken.
+echo "Installing Polyglot AI from bundled wheels (offline)…"
+if "$VENV_DIR/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
+        --constraint "$PINS" "$INSTALL_DIR"/*.whl; then
+    echo "Installed from the bundled wheels (offline, tested versions)."
+elif echo "Bundle incomplete for this Python; fetching the rest from PyPI…" && \
+     "$VENV_DIR/bin/pip" install --find-links "$WHEELS_DIR" --only-binary :all: \
+        --constraint "$PINS" "$INSTALL_DIR"/*.whl; then
+    echo "Installed with the tested versions (part of it from PyPI)."
 else
-    echo "No bundled wheels found; falling back to online install (needs network)…"
+    echo "Tested versions unavailable for this Python; installing the newest compatible ones…"
     "$VENV_DIR/bin/pip" install --upgrade pip
-    "$VENV_DIR/bin/pip" install "$INSTALL_DIR"/*.whl
+    "$VENV_DIR/bin/pip" install --find-links "$WHEELS_DIR" "$INSTALL_DIR"/*.whl
+    echo "Installed from PyPI with the newest compatible versions (not the tested set)."
 fi
 
 # Create symlink

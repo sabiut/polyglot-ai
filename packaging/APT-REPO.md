@@ -58,7 +58,7 @@ regardless of install method.
 ## Why Cloudsmith and not GitHub Pages?
 
 A static repo on GitHub Pages is the usual zero-cost approach, but
-Pages enforces a 100 MB per-file limit and our `.deb` is ~225 MB
-(bundled offline wheels for three Python versions). Cloudsmith's
+Pages enforces a 100 MB per-file limit and our `.deb` is ~255 MB
+(bundled offline wheels for four Python versions). Cloudsmith's
 OSS tier hosts and GPG-signs the repo for free and keeps the signing
 key out of our CI entirely.

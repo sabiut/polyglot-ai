@@ -1,9 +1,11 @@
 # Installing Polyglot AI
 
 Pick the format that matches your system. Each one bundles all
-Python dependencies (~150 MB of wheels for PyQt6, openai, anthropic,
+Python dependencies (~260 MB of wheels for PyQt6, openai, anthropic,
 google-genai, etc.) so a network connection is **not** required at
-install time.
+install time. The `.deb` carries them for Python 3.11–3.14 and the
+`.rpm` for 3.11–3.15, at the exact versions the test suite ran
+against; on any other Python the installer downloads from PyPI.
 
 ## Recommended: the APT / RPM repository (automatic updates)
 

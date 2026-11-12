@@ -16,7 +16,7 @@ echo "Building RPM for polyglot-ai v${VERSION}..."
 
 # Build wheel
 cd "$PROJECT_DIR"
-python3 -m pip install build
+python3 -m pip install build uv
 python3 -m build --wheel
 
 # Set up rpmbuild structure
@@ -45,31 +45,22 @@ if [ -f "$SCRIPT_DIR/assets/polyglot-ai.svg" ]; then
 fi
 cp "$SCRIPT_DIR/rpm/polyglot-ai.spec" "$RPMBUILD/SPECS/"
 
-# Pre-download dependency wheels so %post can install offline (no
+# Pre-download dependency wheels so %posttrans can install offline (no
 # PyPI round-trip needed at install time). See build_deb.sh for the
 # rationale; same trade-off applies here.
-mkdir -p "$RPMBUILD/SOURCES/wheels"
+#
+# 3.11–3.14 are required (RHEL 10 ships 3.12, openSUSE 3.13, Fedora
+# 43/44 3.14). The build container's own Python comes after ``--try``:
+# the newest Fedora's Python is usually ahead of the wheels on PyPI, so
+# bundle_wheels.sh builds what is missing right here and only warns if
+# it can't. That keeps the newest Fedora covered without failing the
+# release when a new Python lands in ``fedora:latest``.
 echo "Pre-downloading dependency wheels for offline install..."
-WHEELS_OK=1
-for PYVER in 3.11 3.12 3.13; do
-    python3 -m pip download \
-        --constraint "$PROJECT_DIR/constraints.txt" \
-        --dest "$RPMBUILD/SOURCES/wheels" \
-        --only-binary=:all: \
-        --python-version "$PYVER" \
-        --platform manylinux2014_x86_64 \
-        --platform manylinux_2_17_x86_64 \
-        --platform manylinux_2_28_x86_64 \
-        --platform any \
-        "$PROJECT_DIR/dist/"*.whl \
-        || WHEELS_OK=0
-done
-if [ "$WHEELS_OK" -ne 1 ]; then
-    python3 -m pip download \
-        --constraint "$PROJECT_DIR/constraints.txt" \
-        --dest "$RPMBUILD/SOURCES/wheels" \
-        "$PROJECT_DIR/dist/"*.whl
-fi
+HOST_PY=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+"$SCRIPT_DIR/bundle_wheels.sh" "$RPMBUILD/SOURCES/wheels" 3.11 3.12 3.13 3.14 --try "$HOST_PY"
+# The tested versions, for %posttrans: it installs with these pins even
+# when it has to reach PyPI.
+cp "$PROJECT_DIR/constraints.txt" "$RPMBUILD/SOURCES/constraints.txt"
 
 # Build RPM
 rpmbuild --define "_topdir $RPMBUILD" \

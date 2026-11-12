@@ -20,7 +20,7 @@ echo "Building $DEB_NAME..."
 
 # Build the wheel
 cd "$PROJECT_DIR"
-python3 -m pip install build
+python3 -m pip install build uv
 python3 -m build --wheel
 
 # Create staging directory
@@ -54,39 +54,19 @@ cp "$PROJECT_DIR/dist/"*.whl "$STAGING/opt/polyglot-ai/"
 # at install time to fetch PyQt6 + provider SDKs from PyPI — fails
 # silently for users behind a corporate proxy, on a flight, or on
 # a fresh distro before networking comes up.
-mkdir -p "$STAGING/opt/polyglot-ai/wheels"
 echo "Pre-downloading dependency wheels for offline install..."
-# One pass per Python minor version the target distros ship: the
-# postinst venv uses the SYSTEM python3 (Debian 12 → 3.11, Debian 13
-# → 3.13, Ubuntu 24.04 → 3.12), so compiled cpXY wheels bundled for
-# only the CI runner's Python are useless on newer distros — the
-# offline install then dies on the first compiled dep (asyncpg) and
-# falls back to PyPI, defeating the bundling. Pure-Python wheels
-# dedupe across passes; only compiled ones are stored per version.
-WHEELS_OK=1
-for PYVER in 3.11 3.12 3.13; do
-    python3 -m pip download \
-        --constraint "$PROJECT_DIR/constraints.txt" \
-        --dest "$STAGING/opt/polyglot-ai/wheels" \
-        --only-binary=:all: \
-        --python-version "$PYVER" \
-        --platform manylinux2014_x86_64 \
-        --platform manylinux_2_17_x86_64 \
-        --platform manylinux_2_28_x86_64 \
-        --platform any \
-        "$PROJECT_DIR/dist/"*.whl \
-        || WHEELS_OK=0
-done
-if [ "$WHEELS_OK" -ne 1 ]; then
-    # Fall back to the host's resolver if the strict platform
-    # filter rejects something — better a slightly bigger .deb
-    # than no .deb at all.
-    echo "Strict platform download failed; retrying with host resolver…"
-    python3 -m pip download \
-        --constraint "$PROJECT_DIR/constraints.txt" \
-        --dest "$STAGING/opt/polyglot-ai/wheels" \
-        "$PROJECT_DIR/dist/"*.whl
-fi
+# One set per Python minor version the target distros ship: the
+# postinst venv uses the SYSTEM python3 (Debian 12 → 3.11, Ubuntu
+# 24.04 → 3.12, Debian 13 → 3.13, Ubuntu 26.04 → 3.14), and compiled
+# cpXY wheels for any other version are useless to it. Pure-Python
+# wheels are shared between versions; only compiled ones are stored
+# per version. All four are required: bundle_wheels.sh fails the
+# build if one is incomplete (see its header for why nothing falls
+# back any more).
+"$SCRIPT_DIR/bundle_wheels.sh" "$STAGING/opt/polyglot-ai/wheels" 3.11 3.12 3.13 3.14
+# The tested versions, for the postinst: it installs with these pins
+# even when it has to reach PyPI.
+cp "$PROJECT_DIR/constraints.txt" "$STAGING/opt/polyglot-ai/constraints.txt"
 
 # Copy desktop file
 cp "$SCRIPT_DIR/debian/polyglot-ai.desktop" "$STAGING/usr/share/applications/"
