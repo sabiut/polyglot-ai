@@ -23,6 +23,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.20" date="2026-11-12">
+      <description>
+        <p>The Fedora and RHEL package starts again: in 0.18.16 to 0.18.19
+        its launcher pointed at a folder that no longer existed after
+        installation, so the polyglot-ai command failed with "No such file
+        or directory". Both the .deb and the .rpm now really install with
+        no network connection, using the exact dependency versions each
+        release is tested with, on Python 3.11 to 3.14 (and 3.15 for the
+        .rpm). Before this release the bundled packages only matched the
+        Python of the build machine, and every other system quietly
+        downloaded newer, untested versions instead.</p>
+      </description>
+    </release>
     <release version="0.18.19" date="2026-11-12">
       <description>
         <p>The AI's AWS tools now use the profile and region selected in the
