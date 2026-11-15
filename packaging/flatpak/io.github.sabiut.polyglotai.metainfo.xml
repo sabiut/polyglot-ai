@@ -23,6 +23,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.28" date="2026-11-16">
+      <description>
+        <p>The AWS panel now shows networking: VPCs, subnets (public or
+        private), load balancers, target groups with the health of their
+        targets, and security groups with what they leave open to the
+        internet. Selecting one shows its routes, listeners, rules and
+        what uses it.</p>
+      </description>
+    </release>
     <release version="0.18.27" date="2026-11-16">
       <description>
         <p>A SQL Server connection that fails now says why and what to
