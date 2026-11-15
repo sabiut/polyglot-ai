@@ -23,6 +23,17 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.27" date="2026-11-16">
+      <description>
+        <p>A SQL Server connection that fails now says why and what to
+        check — a database that can't be reached, a wrong user name or
+        password, or a database the login can't open — instead of only
+        an error number, and the message is shown in full.</p>
+        <p>Choosing AWS Session Manager in the connection dialog now
+        lists the running EC2 instances to connect through. A new
+        connection also gets the right default port for its engine.</p>
+      </description>
+    </release>
     <release version="0.18.26" date="2026-11-13">
       <description>
         <p>On Windows, a cancelled database backup that had to be given up
