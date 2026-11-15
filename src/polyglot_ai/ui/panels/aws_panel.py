@@ -71,8 +71,7 @@ def fetch_overview(profile: str, region: str) -> dict:
 
     Each section fails independently (one missing permission must not
     blank the panel); errors come back per section. The lists run in
-    parallel — there are eleven of them now, and each is a separate CLI
-    process that takes about a second.
+    parallel — each is a separate CLI process that takes about a second.
     """
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -117,7 +116,7 @@ def fetch_overview(profile: str, region: str) -> dict:
 
     ident = make_call("identity")(["sts", "get-caller-identity"], global_call=True)
     if not ident:
-        # Without an identity nothing else will work — don't make eleven
+        # Without an identity nothing else will work — don't make a dozen
         # more calls that produce the same credentials error.
         return result
     result["identity"] = ident
@@ -727,7 +726,7 @@ class AwsPanel(QWidget):
         (re-fetched on refresh). ``keep_text`` leaves the current text up
         while reloading. ``after`` runs once the command has succeeded.
         ``facts(run)`` makes further calls for the summary; it runs
-        alongside ``argv`` and its rows come first.
+        alongside ``argv`` and its rows follow the summary's.
         """
         self._details_title.setText(title)
         if not keep_text:
@@ -767,7 +766,7 @@ class AwsPanel(QWidget):
             text = _pretty(output) if code == 0 else output
             if code == 0 and summarize is not None:
                 try:
-                    pairs = [*pairs, *summarize(json.loads(output))]
+                    pairs = [*summarize(json.loads(output)), *pairs]
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
             # The facts stand on their own calls, so they show even when
@@ -810,7 +809,8 @@ class AwsPanel(QWidget):
         self._details_row = data
         self._console_btn.setEnabled(rt.console_url is not None)
         self._show_in_details(
-            f"{rt.title.split()[0].upper()} — {data.get('name') or data.get('id', '')}",
+            f"{rt.heading or rt.title.split()[0].upper()} — "
+            f"{data.get('name') or data.get('id', '')}",
             rt.describe(data),
             json_output=not rt.describe_is_text,
             summarize=rt.summarize,
@@ -1046,6 +1046,12 @@ class AwsPanel(QWidget):
             menu.addSeparator()
             menu.addAction("Snapshots").triggered.connect(lambda: self._rds_snapshots(data))
             menu.addAction("Create snapshot…").triggered.connect(lambda: self._rds_snapshot(data))
+        elif kind == "elb":
+            menu.addAction("Describe").triggered.connect(lambda: self._on_item_selected(item, None))
+            if data.get("dns"):
+                menu.addAction("Copy DNS name").triggered.connect(
+                    lambda: self._copy_text(data["dns"])
+                )
         elif kind == "s3":
             bucket = data["name"]
             menu.addAction("List top-level objects").triggered.connect(

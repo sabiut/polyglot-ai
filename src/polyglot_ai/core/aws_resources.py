@@ -51,10 +51,14 @@ class ResourceType:
     describe_is_text: bool = False
     #: More facts for the summary that need calls of their own:
     #: ``facts(row, run) -> [(field, value), ...]``. Runs off-thread
-    #: alongside ``describe``.
+    #: alongside ``describe``; shown after ``summarize``'s — what it is,
+    #: then what is in it.
     facts: Callable[[dict, Run], list[tuple[str, str]]] | None = None
     #: Heading over the describe output when a summary sits above it.
     output_label: str = "Full output"
+    #: The word before the name in the details heading, when the first
+    #: word of ``title`` won't do ("LOAD — web").
+    heading: str = ""
 
 
 def _console(region: str, service_path: str) -> str:
@@ -718,6 +722,763 @@ def _summarize_dynamodb(d: dict) -> list[tuple[str, str]]:
     )
 
 
+# ── Networking ───────────────────────────────────────────────────────
+
+#: The extra lines of a list in the details summary (subnets, rules,
+#: listeners): past this many, the rest are counted, not shown.
+_LIST_MAX = 20
+
+
+def _name_tag(resource: dict) -> str:
+    return next(
+        (t.get("Value") or "" for t in resource.get("Tags") or [] if t.get("Key") == "Name"), ""
+    )
+
+
+def _listed(label: str, lines: list[str], none: str = "none") -> list[tuple[str, str]]:
+    """``lines`` under one label: the first beside it, the rest below."""
+    if not lines:
+        return [(label, none)]
+    shown = lines[:_LIST_MAX]
+    if len(lines) > _LIST_MAX:
+        shown.append(f"… and {len(lines) - _LIST_MAX} more")
+    return [(label, shown[0]), *(("", line) for line in shown[1:])]
+
+
+def _read(run: Run, argv: list[str]) -> tuple[dict | None, str]:
+    """One more call for a summary: ``(answer, '')`` or ``(None, why not)``."""
+    output, code = run(argv)
+    if code != 0:
+        return None, _unknown(output)
+    try:
+        data = json.loads(output or "{}")
+    except ValueError:
+        return None, "unknown — unexpected output"
+    return (data, "") if isinstance(data, dict) else (None, "unknown — unexpected output")
+
+
+def _read_all(run: Run, lookups: dict[str, list[str]]) -> dict[str, tuple[dict | None, str]]:
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        answers = pool.map(lambda argv: _read(run, argv), lookups.values())
+        return dict(zip(lookups, answers))
+
+
+def _fetch_vpcs(call: Call) -> list[dict]:
+    data = call(["ec2", "describe-vpcs", "--max-items", "200"])
+    rows = []
+    for vpc in (data or {}).get("Vpcs", []):
+        vid, name = vpc.get("VpcId", ""), _name_tag(vpc)
+        default = bool(vpc.get("IsDefault"))
+        rows.append(
+            {
+                "id": vid,
+                "name": name,
+                "label": f"{name}  ({vid})" if name else vid,
+                "status": vpc.get("State", ""),
+                "info": f"{vpc.get('CidrBlock', '')}  {'default VPC' if default else ''}".strip(),
+                "default": default,
+            }
+        )
+    # The ones somebody made, before the one every region comes with.
+    rows.sort(key=lambda r: (r["default"], r["label"].lower()))
+    return rows
+
+
+def _summarize_vpc(d: dict) -> list[tuple[str, str]]:
+    try:
+        vpc = d["Vpcs"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    v4 = [a.get("CidrBlock", "") for a in vpc.get("CidrBlockAssociationSet") or []]
+    v6 = [a.get("Ipv6CidrBlock", "") for a in vpc.get("Ipv6CidrBlockAssociationSet") or []]
+    return _kv(
+        [
+            ("Name", _name_tag(vpc)),
+            ("VPC ID", vpc.get("VpcId")),
+            ("State", vpc.get("State")),
+            ("IPv4 range", ", ".join(filter(None, v4)) or vpc.get("CidrBlock")),
+            ("IPv6 range", ", ".join(filter(None, v6))),
+            ("Default VPC", bool(vpc.get("IsDefault"))),
+            ("Tenancy", vpc.get("InstanceTenancy")),
+            ("DHCP options", vpc.get("DhcpOptionsId")),
+            ("Owner", vpc.get("OwnerId")),
+        ]
+    )
+
+
+def _to_internet(table: dict) -> bool:
+    return any(
+        str(route.get("GatewayId") or "").startswith("igw-")
+        and route.get("State", "active") == "active"
+        for route in table.get("Routes") or []
+    )
+
+
+def _public_subnets(route_tables: list[dict]) -> Callable[[dict], bool]:
+    """``is_public(subnet)``: its route table sends traffic to an internet gateway.
+
+    A subnet uses the table it is associated with, or its VPC's main
+    table when it has none of its own. (AWS's "auto-assign public IP"
+    switch is not this: a subnet with it on and no such route still
+    can't be reached.)
+    """
+    own: dict[str, bool] = {}
+    main: dict[str, bool] = {}
+    for table in route_tables:
+        for association in table.get("Associations") or []:
+            if association.get("SubnetId"):
+                own[association["SubnetId"]] = _to_internet(table)
+            elif association.get("Main"):
+                main[table.get("VpcId", "")] = _to_internet(table)
+    return lambda subnet: own.get(
+        subnet.get("SubnetId", ""), main.get(subnet.get("VpcId", ""), False)
+    )
+
+
+def _vpc_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """What is in a VPC: its subnets (public or private) and its ways out."""
+    in_vpc = f"Name=vpc-id,Values={row['id']}"
+    found = _read_all(
+        run,
+        {
+            "subnets": ["ec2", "describe-subnets", "--filters", in_vpc],
+            "routes": ["ec2", "describe-route-tables", "--filters", in_vpc],
+            "igw": [
+                "ec2",
+                "describe-internet-gateways",
+                "--filters",
+                f"Name=attachment.vpc-id,Values={row['id']}",
+            ],
+            # This one command spells it --filter.
+            "nat": ["ec2", "describe-nat-gateways", "--filter", in_vpc],
+        },
+    )
+    pairs: list[tuple[str, str]] = []
+
+    data, problem = found["igw"]
+    gateways = [g.get("InternetGatewayId", "") for g in (data or {}).get("InternetGateways", [])]
+    pairs.append(("Internet gateway", problem or ", ".join(filter(None, gateways)) or "none"))
+
+    data, problem = found["nat"]
+    nats = []
+    for nat in (data or {}).get("NatGateways", []):
+        if nat.get("State") in ("deleted", "deleting", "failed"):
+            continue
+        ip = next((a.get("PublicIp") for a in nat.get("NatGatewayAddresses") or []), "")
+        nats.append(
+            f"{nat.get('NatGatewayId', '')} ({', '.join(filter(None, [nat.get('State'), ip]))})"
+        )
+    pairs.append(("NAT gateways", problem or ", ".join(nats) or "none"))
+
+    data, problem = found["subnets"]
+    if data is None:
+        return [*pairs, ("Subnets", problem)]
+    tables, _why = found["routes"]
+    is_public = _public_subnets(tables.get("RouteTables", [])) if tables is not None else None
+    subnets = sorted(
+        data.get("Subnets", []),
+        key=lambda s: (s.get("AvailabilityZone", ""), s.get("CidrBlock", "")),
+    )
+    lines, public = [], 0
+    for subnet in subnets:
+        sid = subnet.get("SubnetId", "")
+        reach = ""
+        if is_public is not None:
+            reach = "public" if is_public(subnet) else "private"
+            public += reach == "public"
+        lines.append(
+            "  ".join(
+                filter(
+                    None,
+                    [
+                        sid,
+                        subnet.get("CidrBlock"),
+                        subnet.get("AvailabilityZone"),
+                        reach,
+                        _name_tag(subnet),
+                    ],
+                )
+            )
+        )
+    count = str(len(subnets))
+    if subnets and is_public is not None:
+        count += f" — {public} public, {len(subnets) - public} private"
+    return [*pairs, ("Subnets", count), *(pair for pair in _listed("", lines) if lines)]
+
+
+def _fetch_subnets(call: Call) -> list[dict]:
+    data = call(["ec2", "describe-subnets", "--max-items", "200"])
+    subnets = (data or {}).get("Subnets", [])
+    # Public or private is in the route tables, not on the subnet. Best
+    # effort: without them the column shows the subnet's state instead.
+    tables = getattr(call, "quiet", call)(["ec2", "describe-route-tables"]) if subnets else None
+    is_public = _public_subnets(tables.get("RouteTables", [])) if tables is not None else None
+    rows = []
+    for subnet in subnets:
+        sid, name = subnet.get("SubnetId", ""), _name_tag(subnet)
+        state = subnet.get("State", "")
+        reach = ""
+        if is_public is not None and state == "available":
+            reach = "public" if is_public(subnet) else "private"
+        rows.append(
+            {
+                "id": sid,
+                "name": name,
+                "label": f"{name}  ({sid})" if name else sid,
+                "status": reach or state,
+                "info": "  ".join(
+                    filter(
+                        None,
+                        [
+                            subnet.get("CidrBlock"),
+                            subnet.get("AvailabilityZone"),
+                            subnet.get("VpcId"),
+                        ],
+                    )
+                ),
+                "vpc": subnet.get("VpcId", ""),
+                "zone": subnet.get("AvailabilityZone", ""),
+            }
+        )
+    rows.sort(key=lambda r: (r["vpc"], r["zone"], r["label"].lower()))
+    return rows
+
+
+def _summarize_subnet(d: dict) -> list[tuple[str, str]]:
+    try:
+        subnet = d["Subnets"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    return _kv(
+        [
+            ("Name", _name_tag(subnet)),
+            ("Subnet ID", subnet.get("SubnetId")),
+            ("State", subnet.get("State")),
+            ("VPC", subnet.get("VpcId")),
+            ("Availability zone", subnet.get("AvailabilityZone")),
+            ("IPv4 range", subnet.get("CidrBlock")),
+            ("Free addresses", subnet.get("AvailableIpAddressCount")),
+            ("Auto-assign public IP", bool(subnet.get("MapPublicIpOnLaunch"))),
+            ("Default for its zone", bool(subnet.get("DefaultForAz"))),
+        ]
+    )
+
+
+#: Where a route can send traffic, in the order worth showing.
+_ROUTE_TARGETS = (
+    "GatewayId",
+    "NatGatewayId",
+    "TransitGatewayId",
+    "VpcPeeringConnectionId",
+    "EgressOnlyInternetGatewayId",
+    "NetworkInterfaceId",
+    "InstanceId",
+    "LocalGatewayId",
+    "CarrierGatewayId",
+    "CoreNetworkArn",
+)
+
+
+def _route_line(route: dict) -> str:
+    """``0.0.0.0/0 → igw-0abc`` — one line of a route table."""
+    to = (
+        route.get("DestinationCidrBlock")
+        or route.get("DestinationIpv6CidrBlock")
+        or route.get("DestinationPrefixListId")
+        or "?"
+    )
+    via = next((route[key] for key in _ROUTE_TARGETS if route.get(key)), "?")
+    dead = "  (blackhole: the target is gone)" if route.get("State") == "blackhole" else ""
+    return f"{to} → {via}{dead}"
+
+
+def _subnet_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """Where a subnet's traffic can go: its route table, and what that makes it."""
+    data, problem = _read(
+        run,
+        [
+            "ec2",
+            "describe-route-tables",
+            "--filters",
+            f"Name=association.subnet-id,Values={row['id']}",
+        ],
+    )
+    if data is not None and not data.get("RouteTables") and row.get("vpc"):
+        # No table of its own: it follows the VPC's main one.
+        data, problem = _read(
+            run,
+            [
+                "ec2",
+                "describe-route-tables",
+                "--filters",
+                f"Name=vpc-id,Values={row['vpc']}",
+                "Name=association.main,Values=true",
+            ],
+        )
+    if data is None:
+        return [("Routes", problem)]
+    tables = data.get("RouteTables") or []
+    if not tables:
+        return [("Routes", "no route table found")]
+    table = tables[0]
+    routes = [r for r in table.get("Routes") or [] if isinstance(r, dict)]
+    live = [r for r in routes if r.get("State", "active") == "active"]
+    if _to_internet(table):
+        reach = "public — it routes to an internet gateway"
+    elif any(r.get("NatGatewayId") for r in live):
+        reach = "private — it reaches the internet out through a NAT gateway only"
+    else:
+        reach = "private — no route to the internet"
+    return [
+        ("Reach", reach),
+        ("Route table", table.get("RouteTableId", "")),
+        *_listed("Routes", [_route_line(r) for r in routes]),
+    ]
+
+
+_LB_STATE = {
+    "active": "accent_success_muted",
+    "provisioning": "accent_warning",
+    "active_impaired": "accent_warning",
+    "failed": "accent_error",
+}
+
+#: Target groups whose health is looked up for one load balancer's details.
+_LB_MAX_GROUPS = 8
+
+
+def _fetch_load_balancers(call: Call) -> list[dict]:
+    """Application, network and gateway load balancers (not Classic ones)."""
+    data = call(["elbv2", "describe-load-balancers", "--max-items", "200"])
+    rows = []
+    for lb in (data or {}).get("LoadBalancers", []):
+        name = lb.get("LoadBalancerName", "")
+        rows.append(
+            {
+                "id": name,
+                "name": name,
+                "arn": lb.get("LoadBalancerArn", ""),
+                "label": name,
+                "status": (lb.get("State") or {}).get("Code", ""),
+                "info": f"{lb.get('Type', '')}  {lb.get('Scheme', '')}".strip(),
+                "dns": lb.get("DNSName", ""),
+            }
+        )
+    rows.sort(key=lambda r: r["name"].lower())
+    return rows
+
+
+def _summarize_load_balancer(d: dict) -> list[tuple[str, str]]:
+    try:
+        lb = d["LoadBalancers"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    state = lb.get("State") or {}
+    zones = [
+        f"{z.get('ZoneName', '')} ({z.get('SubnetId', '')})"
+        for z in lb.get("AvailabilityZones") or []
+    ]
+    return _kv(
+        [
+            ("Name", lb.get("LoadBalancerName")),
+            ("Type", lb.get("Type")),
+            ("Scheme", lb.get("Scheme")),
+            ("State", " — ".join(filter(None, [state.get("Code"), state.get("Reason")]))),
+            ("DNS name", lb.get("DNSName")),
+            ("VPC", lb.get("VpcId")),
+            ("Availability zones", ", ".join(sorted(zones))),
+            ("Security groups", ", ".join(lb.get("SecurityGroups") or [])),
+            ("IP address type", lb.get("IpAddressType")),
+            ("Created", _ts(lb.get("CreatedTime"))),
+        ]
+    )
+
+
+def _group_name(arn: str) -> str:
+    """``…:targetgroup/web/73e2d6bc24d8a067`` → ``web``."""
+    parts = str(arn or "").split("/")
+    return parts[-2] if len(parts) >= 3 else str(arn or "")
+
+
+def _listener_line(listener: dict) -> str:
+    """``HTTPS:443 → web`` — where a listener sends what it receives."""
+    front = f"{listener.get('Protocol', '')}:{listener.get('Port', '')}"
+    actions = sorted(listener.get("DefaultActions") or [], key=lambda a: int(a.get("Order") or 0))
+    if not actions:
+        return front
+    # Any authentication steps come first; the last is where it ends up.
+    action = actions[-1]
+    kind = action.get("Type", "")
+    if kind == "forward":
+        groups = [
+            g.get("TargetGroupArn", "")
+            for g in (action.get("ForwardConfig") or {}).get("TargetGroups") or []
+        ] or [action.get("TargetGroupArn", "")]
+        does = ", ".join(_group_name(arn) for arn in groups if arn) or "forward"
+    elif kind == "redirect":
+        to = action.get("RedirectConfig") or {}
+        does = f"redirect to {to.get('Protocol', '')}:{to.get('Port', '')}"
+    elif kind == "fixed-response":
+        code = (action.get("FixedResponseConfig") or {}).get("StatusCode", "")
+        does = f"fixed response {code}".strip()
+    else:
+        does = kind
+    return f"{front} → {does}"
+
+
+def _health_line(group: dict, health: dict | None, problem: str) -> str:
+    """``web  HTTP:8080  2 healthy, 1 unhealthy — i-0abc: Health checks failed``."""
+    where = f"{group.get('Protocol', '')}:{group.get('Port', '')}".strip(":")
+    line = "  ".join(filter(None, [group.get("TargetGroupName", ""), where]))
+    if health is None:
+        return f"{line}  health {problem}"
+    targets = health.get("TargetHealthDescriptions") or []
+    if not targets:
+        return f"{line}  no targets registered"
+    states: dict[str, int] = {}
+    unwell = []
+    for target in targets:
+        said = target.get("TargetHealth") or {}
+        state = said.get("State", "unknown")
+        states[state] = states.get(state, 0) + 1
+        if state == "unhealthy":
+            who = (target.get("Target") or {}).get("Id", "")
+            why = said.get("Description") or said.get("Reason") or ""
+            unwell.append(f"{who}: {why}" if why else who)
+    # Healthy first, unhealthy next, then whatever else (draining, initial…).
+    order = sorted(states, key=lambda s: ({"healthy": 0, "unhealthy": 1}.get(s, 2), s))
+    line += "  " + ", ".join(f"{states[s]} {s}" for s in order)
+    if unwell:
+        more = f" (+{len(unwell) - 3} more)" if len(unwell) > 3 else ""
+        line += " — " + "; ".join(unwell[:3]) + more
+    return line
+
+
+def _load_balancer_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """What a load balancer listens on, and whether what's behind it is healthy."""
+    of_this = ["--load-balancer-arn", row["arn"]]
+    found = _read_all(
+        run,
+        {
+            "listeners": ["elbv2", "describe-listeners", *of_this],
+            "groups": ["elbv2", "describe-target-groups", *of_this],
+        },
+    )
+    data, problem = found["listeners"]
+    if data is None:
+        pairs = [("Listeners", problem)]
+    else:
+        listeners = sorted(data.get("Listeners", []), key=lambda li: int(li.get("Port") or 0))
+        pairs = _listed("Listeners", [_listener_line(li) for li in listeners])
+
+    data, problem = found["groups"]
+    if data is None:
+        return [*pairs, ("Targets", problem)]
+    groups = sorted(data.get("TargetGroups", []), key=lambda g: g.get("TargetGroupName", ""))
+    looked_at = groups[:_LB_MAX_GROUPS]
+    health = _read_all(
+        run,
+        {
+            g.get("TargetGroupArn", ""): [
+                "elbv2",
+                "describe-target-health",
+                "--target-group-arn",
+                g.get("TargetGroupArn", ""),
+            ]
+            for g in looked_at
+        },
+    )
+    lines = [_health_line(g, *health[g.get("TargetGroupArn", "")]) for g in looked_at]
+    if len(groups) > len(looked_at):
+        lines.append(f"… and {len(groups) - len(looked_at)} more target groups")
+    return [*pairs, *_listed("Targets", lines, none="no target groups")]
+
+
+def _balancer_name(arn: str) -> str:
+    """``…:loadbalancer/app/web/50dc6c495c0c9188`` → ``web``."""
+    parts = str(arn or "").split("/")
+    return parts[-2] if len(parts) >= 3 else str(arn or "")
+
+
+def _count_health(row: dict, data: dict) -> None:
+    targets = data.get("TargetHealthDescriptions") or []
+    healthy = sum(1 for t in targets if (t.get("TargetHealth") or {}).get("State") == "healthy")
+    row["targets"], row["healthy"] = len(targets), healthy
+    row["status"] = f"{healthy}/{len(targets)} healthy" if targets else "no targets"
+
+
+def _fetch_target_groups(call: Call) -> list[dict]:
+    data = call(["elbv2", "describe-target-groups", "--max-items", "200"])
+    rows = []
+    for group in (data or {}).get("TargetGroups", []):
+        name = group.get("TargetGroupName", "")
+        where = f"{group.get('Protocol', '')}:{group.get('Port', '')}".strip(":")
+        balancers = ", ".join(_balancer_name(a) for a in group.get("LoadBalancerArns") or [])
+        rows.append(
+            {
+                "id": name,
+                "name": name,
+                "arn": group.get("TargetGroupArn", ""),
+                "label": name,
+                "status": "",
+                "info": "  ".join(
+                    filter(
+                        None,
+                        [where, group.get("TargetType"), f"← {balancers}" if balancers else ""],
+                    )
+                ),
+            }
+        )
+    rows.sort(key=lambda r: r["name"].lower())
+    _enrich(
+        call,
+        rows,
+        lambda r: ["elbv2", "describe-target-health", "--target-group-arn", r["arn"]],
+        _count_health,
+    )
+    return rows
+
+
+def _target_group_colour(row: dict) -> str | None:
+    targets, healthy = row.get("targets"), row.get("healthy")
+    if targets is None:
+        return None
+    if not targets:
+        return "text_muted"
+    if healthy == targets:
+        return "accent_success_muted"
+    return "accent_warning" if healthy else "accent_error"
+
+
+def _summarize_target_group(d: dict) -> list[tuple[str, str]]:
+    try:
+        group = d["TargetGroups"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    port = group.get("HealthCheckPort")
+    matcher = group.get("Matcher") or {}
+    expects = matcher.get("HttpCode") or matcher.get("GrpcCode")
+    healthy, unhealthy = group.get("HealthyThresholdCount"), group.get("UnhealthyThresholdCount")
+    check = ", ".join(
+        filter(
+            None,
+            [
+                " ".join(
+                    filter(
+                        None,
+                        [
+                            str(group.get("HealthCheckProtocol") or ""),
+                            str(group.get("HealthCheckPath") or ""),
+                            # "traffic-port": the port the targets are sent traffic on.
+                            ("on the traffic port" if port == "traffic-port" else f"on port {port}")
+                            if port
+                            else "",
+                        ],
+                    )
+                ),
+                f"every {group['HealthCheckIntervalSeconds']}s"
+                if group.get("HealthCheckIntervalSeconds")
+                else "",
+                f"expects {expects}" if expects else "",
+            ],
+        )
+    )
+    if group.get("HealthCheckEnabled") is False:
+        check = "off"
+    return _kv(
+        [
+            ("Name", group.get("TargetGroupName")),
+            ("Sends to", f"{group.get('Protocol', '')}:{group.get('Port', '')}".strip(":")),
+            ("Target type", group.get("TargetType")),
+            ("VPC", group.get("VpcId")),
+            (
+                "Load balancer",
+                ", ".join(_balancer_name(a) for a in group.get("LoadBalancerArns") or [])
+                or "none — nothing sends traffic to this group",
+            ),
+            ("Health check", check),
+            (
+                "Thresholds",
+                f"healthy after {healthy} checks, unhealthy after {unhealthy}"
+                if healthy and unhealthy
+                else "",
+            ),
+        ]
+    )
+
+
+def _target_group_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """Each target and its health, unhealthy ones first with the reason."""
+    data, problem = _read(
+        run, ["elbv2", "describe-target-health", "--target-group-arn", row["arn"]]
+    )
+    if data is None:
+        return [("Targets", problem)]
+    lines = []
+    for target in data.get("TargetHealthDescriptions") or []:
+        who = target.get("Target") or {}
+        said = target.get("TargetHealth") or {}
+        state = said.get("State", "unknown")
+        name = f"{who.get('Id', '')}:{who['Port']}" if who.get("Port") else who.get("Id", "")
+        why = said.get("Description") or said.get("Reason") or ""
+        line = "  ".join(filter(None, [name, who.get("AvailabilityZone"), state]))
+        lines.append((state == "healthy", f"{line} — {why}" if why else line))
+    lines.sort()
+    return _listed("Targets", [line for _well, line in lines], none="none registered")
+
+
+_ANYWHERE = ("0.0.0.0/0", "::/0")
+#: Ports a web server is expected to have open to everyone.
+_WEB_PORTS = frozenset({80, 443})
+_ALL_PORTS = range(0, 65536)
+
+
+def _ports(permission: dict) -> str:
+    """``tcp 443``, ``tcp 8000-8100``, ``tcp all ports``, ``all traffic``, ``icmp``."""
+    protocol = str(permission.get("IpProtocol", ""))
+    if protocol == "-1":
+        return "all traffic"
+    low, high = permission.get("FromPort"), permission.get("ToPort")
+    if protocol not in ("tcp", "udp") or low is None or high is None:
+        return protocol
+    if low == high:
+        return f"{protocol} {low}"
+    if (low, high) == (_ALL_PORTS.start, _ALL_PORTS.stop - 1):
+        return f"{protocol} all ports"
+    return f"{protocol} {low}-{high}"
+
+
+def _rule_lines(permissions: list[dict], word: str) -> list[str]:
+    """One line per port range and peer: ``tcp 443  from 0.0.0.0/0  — https``."""
+    lines = []
+    for permission in permissions or []:
+        ports = _ports(permission)
+        peers = [
+            *(
+                (r.get("CidrIp", ""), r.get("Description"))
+                for r in permission.get("IpRanges") or []
+            ),
+            *(
+                (r.get("CidrIpv6", ""), r.get("Description"))
+                for r in permission.get("Ipv6Ranges") or []
+            ),
+            *(
+                (r.get("GroupId", ""), r.get("Description"))
+                for r in permission.get("UserIdGroupPairs") or []
+            ),
+            *(
+                (r.get("PrefixListId", ""), r.get("Description"))
+                for r in permission.get("PrefixListIds") or []
+            ),
+        ]
+        for peer, description in peers:
+            line = f"{ports}  {word} {peer}"
+            lines.append(f"{line}  — {description}" if description else line)
+    return lines
+
+
+def _open_to_anyone(group: dict) -> tuple[str, bool]:
+    """What a group lets in from the whole internet: ``("open: 22, 443", risky)``.
+
+    ``risky`` is anything beyond a web server's 80 and 443 — an SSH or
+    database port the world can knock on is the thing worth a colour.
+    """
+    ports: set[str] = set()
+    risky = everything = False
+    for permission in group.get("IpPermissions") or []:
+        from_anyone = any(
+            r.get("CidrIp") in _ANYWHERE for r in permission.get("IpRanges") or []
+        ) or any(r.get("CidrIpv6") in _ANYWHERE for r in permission.get("Ipv6Ranges") or [])
+        if not from_anyone:
+            continue
+        what = _ports(permission)
+        low, high = permission.get("FromPort"), permission.get("ToPort")
+        if what == "all traffic" or what.endswith("all ports"):
+            everything = True
+        elif permission.get("IpProtocol") in ("tcp", "udp") and low is not None:
+            ports.add(str(low) if low == high else f"{low}-{high}")
+            risky = risky or not (low == high and low in _WEB_PORTS)
+        else:
+            ports.add(what)  # icmp and the like: reachable, not a way in
+    if everything:
+        return "open: everything", True
+    if not ports:
+        return "", False
+    ordered = sorted(
+        ports, key=lambda p: (not p[0].isdigit(), int(p.split("-")[0]) if p[0].isdigit() else 0, p)
+    )
+    return "open: " + ", ".join(ordered), risky
+
+
+def _fetch_security_groups(call: Call) -> list[dict]:
+    data = call(["ec2", "describe-security-groups", "--max-items", "200"])
+    rows = []
+    for group in (data or {}).get("SecurityGroups", []):
+        gid, name = group.get("GroupId", ""), group.get("GroupName", "")
+        status, risky = _open_to_anyone(group)
+        rules_in = len(_rule_lines(group.get("IpPermissions"), "from"))
+        rules_out = len(_rule_lines(group.get("IpPermissionsEgress"), "to"))
+        rows.append(
+            {
+                "id": gid,
+                "name": name,
+                "label": f"{name}  ({gid})" if name else gid,
+                "status": status,
+                "info": f"{rules_in} in, {rules_out} out  {group.get('VpcId', '')}".strip(),
+                "risky": risky,
+            }
+        )
+    rows.sort(key=lambda r: r["label"].lower())
+    return rows
+
+
+def _summarize_security_group(d: dict) -> list[tuple[str, str]]:
+    try:
+        group = d["SecurityGroups"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    status, _risky = _open_to_anyone(group)
+    return [
+        *_kv(
+            [
+                ("Name", group.get("GroupName")),
+                ("Group ID", group.get("GroupId")),
+                ("Description", group.get("Description")),
+                ("VPC", group.get("VpcId")),
+                ("From anywhere", status.removeprefix("open: ") or "nothing"),
+            ]
+        ),
+        *_listed("Inbound", _rule_lines(group.get("IpPermissions"), "from"), none="nothing"),
+        *_listed("Outbound", _rule_lines(group.get("IpPermissionsEgress"), "to"), none="nothing"),
+    ]
+
+
+def _security_group_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """What a group is attached to, through the network interfaces that use it."""
+    data, problem = _read(
+        run,
+        [
+            "ec2",
+            "describe-network-interfaces",
+            "--filters",
+            f"Name=group-id,Values={row['id']}",
+        ],
+    )
+    if data is None:
+        return [("Used by", problem)]
+    users: list[str] = []
+    for interface in data.get("NetworkInterfaces", []):
+        # An instance by its ID; anything else (a load balancer, a
+        # database, an endpoint) by what AWS wrote on the interface.
+        user = (interface.get("Attachment") or {}).get("InstanceId") or (
+            interface.get("Description") or interface.get("NetworkInterfaceId", "")
+        )
+        if user and user not in users:
+            users.append(user)
+    shown = ", ".join(users[:8]) + (f" (+{len(users) - 8} more)" if len(users) > 8 else "")
+    return [("Used by", shown or "nothing — no network interface uses it")]
+
+
 # ── Messaging ────────────────────────────────────────────────────────
 
 
@@ -1011,6 +1772,89 @@ RESOURCE_TYPES: list[ResourceType] = [
             reg, f"dynamodbv2/home?region={reg}#table?name={quote(r['name'])}"
         ),
         status_colour=_active_colour,
+    ),
+    ResourceType(
+        key="vpc",
+        title="VPCs",
+        group="Networking",
+        heading="VPC",
+        fetch=_fetch_vpcs,
+        describe=lambda r: ["ec2", "describe-vpcs", "--vpc-ids", r["id"]],
+        summarize=_summarize_vpc,
+        facts=_vpc_facts,
+        console_url=lambda r, reg: _console(
+            reg, f"vpcconsole/home?region={reg}#VpcDetails:VpcId={r['id']}"
+        ),
+        status_colour=lambda r: {
+            "available": "accent_success_muted",
+            "pending": "accent_warning",
+        }.get(r.get("status", "")),
+    ),
+    ResourceType(
+        key="subnets",
+        title="Subnets",
+        group="Networking",
+        heading="SUBNET",
+        fetch=_fetch_subnets,
+        describe=lambda r: ["ec2", "describe-subnets", "--subnet-ids", r["id"]],
+        summarize=_summarize_subnet,
+        facts=_subnet_facts,
+        console_url=lambda r, reg: _console(
+            reg, f"vpcconsole/home?region={reg}#SubnetDetails:subnetId={r['id']}"
+        ),
+    ),
+    ResourceType(
+        key="elb",
+        title="Load balancers",
+        group="Networking",
+        heading="LOAD BALANCER",
+        fetch=_fetch_load_balancers,
+        describe=lambda r: [
+            "elbv2",
+            "describe-load-balancers",
+            "--load-balancer-arns",
+            r["arn"],
+        ],
+        summarize=_summarize_load_balancer,
+        facts=_load_balancer_facts,
+        console_url=lambda r, reg: _console(
+            reg, f"ec2/home?region={reg}#LoadBalancer:loadBalancerArn={r['arn']}"
+        ),
+        status_colour=lambda r: _LB_STATE.get(r.get("status", "")),
+    ),
+    ResourceType(
+        key="target_groups",
+        title="Target groups",
+        group="Networking",
+        heading="TARGET GROUP",
+        fetch=_fetch_target_groups,
+        describe=lambda r: [
+            "elbv2",
+            "describe-target-groups",
+            "--target-group-arns",
+            r["arn"],
+        ],
+        summarize=_summarize_target_group,
+        facts=_target_group_facts,
+        console_url=lambda r, reg: _console(
+            reg, f"ec2/home?region={reg}#TargetGroup:targetGroupArn={r['arn']}"
+        ),
+        status_colour=_target_group_colour,
+    ),
+    ResourceType(
+        key="security_groups",
+        title="Security groups",
+        group="Networking",
+        heading="SECURITY GROUP",
+        fetch=_fetch_security_groups,
+        describe=lambda r: ["ec2", "describe-security-groups", "--group-ids", r["id"]],
+        summarize=_summarize_security_group,
+        facts=_security_group_facts,
+        console_url=lambda r, reg: _console(
+            reg, f"ec2/home?region={reg}#SecurityGroup:groupId={r['id']}"
+        ),
+        # Only what goes beyond a web server's ports is worth the colour.
+        status_colour=lambda r: "accent_warning" if r.get("risky") else None,
     ),
     ResourceType(
         key="sqs",

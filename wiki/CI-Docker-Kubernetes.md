@@ -141,6 +141,11 @@ profile's configured one). One refresh lists, in parallel:
 | Data | **S3 buckets** | the bucket's region, creation date (all regions are listed) |
 | | **RDS databases** | status (coloured), engine and class |
 | | **DynamoDB tables** | status, item count |
+| Networking | **VPCs** | state, IP range (the default VPC is marked and listed last) |
+| | **Subnets** | **public** or **private**, IP range, availability zone, VPC |
+| | **Load balancers** | state (coloured), type, internet-facing or internal |
+| | **Target groups** | healthy targets out of the total (coloured), protocol and port, the load balancer in front |
+| | **Security groups** | what is open to the whole internet, rule counts, VPC |
 | Messaging | **SQS queues** | messages waiting and in flight |
 | | **SNS topics** | confirmed subscribers |
 | Operations | **CloudFormation stacks** | status (failures and rollbacks in red), last update |
@@ -151,9 +156,9 @@ list only shows what you have. Click a section's ▾ / ▸ header to collapse
 or expand it; collapsed sections stay collapsed across refreshes. Type in
 **Filter resources…** to narrow every section at once.
 
-The status and count for EKS, DynamoDB, SQS and SNS take one extra
-request per row, so they are filled in for the first twelve rows of each
-section. A section that was cut short says so — *EC2 (200+)*.
+The status and count for EKS, DynamoDB, SQS, SNS and target groups take
+one extra request per row, so they are filled in for the first twelve
+rows of each section. A section that was cut short says so — *EC2 (200+)*.
 
 The account ID and caller identity appear under the selectors. Each
 section fails independently: if a profile lacks permission for one
@@ -172,6 +177,39 @@ open the resource in the **AWS Console** in your browser, send the
 details to the AI, or open them in a larger window. There is no
 auto-refresh — every call is a real API request — so use the refresh
 button when you want fresh data.
+
+#### Networking *(from 0.18.28)*
+
+The five Networking sections only read — `ec2 describe-…` and
+`elbv2 describe-…` calls — and their details answer the questions you
+would otherwise click through several console pages for:
+
+- **VPC** — its IP ranges, internet gateway and NAT gateways, then every
+  subnet with its range, zone and whether it is public or private.
+- **Subnet** — free addresses, the route table it uses and each route in
+  it, and what that makes it: *public* (it routes to an internet
+  gateway), *private, out through a NAT gateway only*, or *private with
+  no route to the internet*. A route whose target has been deleted is
+  marked as a blackhole. Public or private comes from the route table —
+  not from the "auto-assign public IP" switch, which is shown separately.
+- **Load balancer** — DNS name, zones and security groups, then each
+  listener and where it sends traffic (`HTTPS:443 → api`,
+  `HTTP:80 → redirect to HTTPS:443`), and each target group behind it
+  with its health. Application, network and gateway load balancers are
+  listed; Classic ones are not. Right-click for *Copy DNS name*.
+- **Target group** — protocol and port, the health check (path, port,
+  interval, expected codes, thresholds), then every target with its
+  state, unhealthy ones first with AWS's reason
+  (*Health checks failed with these codes: [502]*).
+- **Security group** — what it lets in *from anywhere*, every inbound and
+  outbound rule on a line of its own (`tcp 1433  from sg-0abc  — from the
+  bastion`), and what uses it (instance IDs, or what AWS wrote on the
+  network interface, such as `RDSNetworkInterface`).
+
+In the list, a security group's status shows the ports open to
+`0.0.0.0/0` or `::/0` — `open: 80, 443`, or `open: everything`. It is
+coloured when that goes beyond a web server's ports 80 and 443, so an
+SSH or database port the whole internet can reach stands out.
 
 ### Actions (right-click)
 
