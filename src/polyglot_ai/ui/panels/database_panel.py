@@ -734,11 +734,7 @@ class DatabasePanel(QWidget):
             QTimer.singleShot(0, lambda: window.show_schema(tables, databases))
 
     def _show_connect_error(self, message: str) -> None:
-        self._schema_tree.clear()
-        item = QTreeWidgetItem(self._schema_tree)
-        item.setText(0, f"Couldn't connect: {message}")
-        item.setToolTip(0, message)
-        item.setFirstColumnSpanned(True)
+        self._schema_tree.show_message(f"Couldn't connect: {message}")
 
     def _disconnect_selected(self) -> None:
         if not self._active_connection:

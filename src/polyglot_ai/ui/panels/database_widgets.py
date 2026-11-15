@@ -154,8 +154,39 @@ class SchemaTree(QTreeWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.itemExpanded.connect(self._on_expanded)
+        self._message: tuple[QTreeWidgetItem, QLabel] | None = None
 
     # ── filling ──
+
+    def clear(self) -> None:
+        self._message = None
+        super().clear()
+
+    def show_message(self, text: str) -> None:
+        """Show ``text`` in place of the tables, wrapped to the pane and selectable.
+
+        For why a connection failed. A tree row shows one line and cuts
+        the rest off, which left "Couldn't connect: SQL Server error …"
+        on screen and what to do about it in a tooltip nobody opened.
+        """
+        self.clear()
+        item = QTreeWidgetItem(self)
+        item.setFirstColumnSpanned(True)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setToolTip(0, text)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        label.setContentsMargins(4, 4, 8, 6)
+        label.setStyleSheet("background: transparent;")
+        self.setItemWidget(item, 0, label)
+        self._message = (item, label)
+        self._fit_message()
+
+    def message(self) -> str:
+        """The text :meth:`show_message` is showing, or ''."""
+        return self._message[1].text() if self._message else ""
 
     def set_tables(self, tables) -> None:
         """Tables at the top level, with no database above them."""
@@ -307,6 +338,23 @@ class SchemaTree(QTreeWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt override
         super().resizeEvent(event)
         self._fit_columns()
+        self._fit_message()
+
+    def _fit_message(self) -> None:
+        """Give the message row the height its text needs at this width."""
+        if self._message is None:
+            return
+        item, label = self._message
+        width = max(self.viewport().width() - self.indentation(), 80)
+        # The view gives a row the taller of the item's hint and its widget's
+        # own, and a wrapping label's own hint is for a width it guessed — so
+        # the height is fixed on the label too. Released first: a label never
+        # reports needing less than its minimum.
+        label.setMinimumHeight(0)
+        height = label.heightForWidth(width)
+        label.setFixedHeight(height)
+        item.setSizeHint(0, QSize(width, height))
+        self.scheduleDelayedItemsLayout()
 
     def _fit_columns(self) -> None:
         available = self.viewport().width()

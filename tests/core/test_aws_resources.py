@@ -256,3 +256,93 @@ class TestFilledColumns:
         data = fetch_overview("default", "us-east-1")
         assert [(r["name"], r["status"]) for r in data["dynamodb"]] == [("sessions", "")]
         assert "dynamodb" not in data["errors"]
+
+
+# ── running instances, for the connection dialog ────────────────────
+
+EC2_ANSWER = {
+    "Reservations": [
+        {
+            "Instances": [
+                {
+                    "InstanceId": "i-0bbb",
+                    "State": {"Name": "running"},
+                    "Tags": [{"Key": "Name", "Value": "bastion"}],
+                },
+                {"InstanceId": "i-0aaa", "State": {"Name": "running"}},
+            ]
+        },
+        {
+            "Instances": [
+                {
+                    "InstanceId": "i-0ccc",
+                    "State": {"Name": "running"},
+                    "Tags": [{"Key": "Name", "Value": "app"}],
+                },
+                {"InstanceId": "i-0ddd", "State": {"Name": "stopped"}},
+            ]
+        },
+    ]
+}
+
+
+def _scripted_cli(monkeypatch, answers):
+    """``aws_cli.run`` answering by service; returns the calls it was given."""
+    calls = []
+
+    def run(args, *, profile="", region="", **_kw):
+        calls.append((list(args), profile, region))
+        answer = answers[args[0]]
+        return answer if isinstance(answer, tuple) else (json.dumps(answer), 0)
+
+    monkeypatch.setattr(aws_cli, "aws_available", lambda: True)
+    monkeypatch.setattr(aws_cli, "run", run)
+    return calls
+
+
+def test_running_instances_lists_the_ones_session_manager_can_reach_first(
+    monkeypatch, real_running_instances
+):
+    calls = _scripted_cli(monkeypatch, {"ec2": EC2_ANSWER, "ssm": ["i-0ccc", "i-0aaa"]})
+
+    choices, problem = real_running_instances("work", "ap-southeast-2")
+
+    assert problem == ""
+    assert choices == [
+        ("i-0aaa", "i-0aaa"),
+        ("i-0ccc  app", "i-0ccc"),
+        ("i-0bbb  bastion  — not connected to Session Manager", "i-0bbb"),
+    ]
+    (ec2, ec2_profile, ec2_region), (ssm, ssm_profile, _) = calls
+    assert ec2[:2] == ["ec2", "describe-instances"]
+    assert "Name=instance-state-name,Values=running" in ec2
+    assert (ec2_profile, ec2_region, ssm_profile) == ("work", "ap-southeast-2", "work")
+    assert ssm[:2] == ["ssm", "describe-instance-information"]
+    # Reading only: nothing here starts, stops or changes anything.
+    assert all(aws_cli.classify(args) == "read" for args, _p, _r in calls)
+
+
+def test_running_instances_without_the_ssm_permission_lists_them_unmarked(
+    monkeypatch, real_running_instances
+):
+    denied = ("An error occurred (AccessDeniedException) when calling the X operation", 254)
+    _scripted_cli(monkeypatch, {"ec2": EC2_ANSWER, "ssm": denied})
+    choices, problem = real_running_instances()
+    assert problem == ""
+    assert [label for label, _id in choices] == ["i-0aaa", "i-0bbb  bastion", "i-0ccc  app"]
+
+
+def test_running_instances_says_why_the_list_could_not_be_read(monkeypatch, real_running_instances):
+    expired = ("Error: The SSO session associated with this profile has expired", 255)
+    calls = _scripted_cli(monkeypatch, {"ec2": expired})
+    choices, problem = real_running_instances("work", "")
+    assert choices == [] and problem.startswith("Your AWS session has expired")
+    assert len(calls) == 1  # no point asking Session Manager as well
+
+    monkeypatch.setattr(aws_cli, "aws_available", lambda: False)
+    assert real_running_instances() == ([], "The AWS CLI (aws) isn't installed on this machine.")
+
+
+def test_no_running_instances_is_an_empty_list_not_a_problem(monkeypatch, real_running_instances):
+    _scripted_cli(monkeypatch, {"ec2": {"Reservations": []}, "ssm": []})
+    assert real_running_instances() == ([], "")

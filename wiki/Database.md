@@ -73,8 +73,32 @@ their network can reach them. Under **Connect** choose how to get in:
   `session-manager-plugin` must be installed, and you choose the AWS
   profile and region to use.
 
+  When you choose Session Manager, the app lists the running EC2
+  instances in that profile and region (and again when you change
+  either), with the ones Session Manager can reach first; one that isn't
+  connected to it is marked, since a tunnel through it won't start. It
+  only reads the list — `ec2 describe-instances` and
+  `ssm describe-instance-information`. If the list can't be read (an
+  expired sign-in, a missing permission) the reason is shown under it and
+  you can still type an instance ID. *(Before 0.18.27 the list was filled
+  only when the dialog was opened from the AWS panel.)*
+
 The tunnel is started when you connect and stopped when you disconnect
 or quit the app.
+
+### When a connection fails
+
+The reason is shown in full where the tables would be, and can be
+selected and copied. For SQL Server it says what to check *(0.18.27;
+before, only "SQL Server error" and a number)*:
+
+| It says | What it means |
+|---|---|
+| **No answer from … (the connection timed out)** — error 20009 | Nothing answered. The usual cause is a database in a private network dialled directly: connect through a bastion or Session Manager, or open its security group to this machine. |
+| **… refused the connection** — error 20009 | The address answered but nothing listens on that port: a wrong port, or a tunnel that isn't running. |
+| **Couldn't find …** — error 20009 | The host name doesn't resolve from this machine. |
+| **Check the user name and the password** — error 18456 | The server was reached and refused the login. |
+| **It couldn't open the database this connection asks for** — error 18456 | The login itself is fine, but the database name is wrong or this user isn't allowed in it. |
 
 ### Signing in with an AWS IAM token (RDS)
 

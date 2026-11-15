@@ -139,6 +139,74 @@ def _fetch_ec2(call: Call) -> list[dict]:
     return rows
 
 
+def running_instances(profile: str = "", region: str = "") -> tuple[list[tuple[str, str]], str]:
+    """Running EC2 instances to offer as a way in for Session Manager.
+
+    Returns ``([(label, instance_id)], problem)``. The instances that
+    Session Manager can reach right now come first; one it can't is
+    still listed, and says so, because that is the likelier reason a
+    tunnel through it fails than a mistyped ID. ``problem`` is why the
+    list couldn't be read, in words, and '' when it could.
+    """
+    from polyglot_ai.core import aws_cli
+
+    if not aws_cli.aws_available():
+        return [], "The AWS CLI (aws) isn't installed on this machine."
+    out, code = aws_cli.run(
+        [
+            "ec2",
+            "describe-instances",
+            "--filters",
+            "Name=instance-state-name,Values=running",
+            "--max-items",
+            "200",
+        ],
+        profile=profile,
+        region=region,
+    )
+    if code != 0:
+        return [], aws_cli.explain_error(out.removeprefix("Error:").strip())
+    try:
+        rows = _fetch_ec2(lambda _argv: json.loads(out or "{}"))
+    except (ValueError, TypeError, AttributeError):
+        return [], "The AWS CLI's answer couldn't be read."
+
+    # Best effort: without ssm:DescribeInstanceInformation the list is
+    # still useful, it just can't say which instances have the agent.
+    online: set[str] | None = None
+    out, code = aws_cli.run(
+        [
+            "ssm",
+            "describe-instance-information",
+            "--query",
+            "InstanceInformationList[?PingStatus==`Online`].InstanceId",
+            "--max-items",
+            "200",
+        ],
+        profile=profile,
+        region=region,
+    )
+    if code == 0:
+        try:
+            answer = json.loads(out or "[]")
+            if isinstance(answer, list):
+                online = {str(i) for i in answer}
+        except ValueError:
+            online = None
+
+    choices = []
+    for row in rows:
+        if row.get("state") != "running" or not row.get("id"):
+            continue
+        label = f"{row['id']}  {row.get('name', '')}".strip()
+        reachable = online is None or row["id"] in online
+        if not reachable:
+            label += "  — not connected to Session Manager"
+        choices.append((not reachable, label, row["id"]))
+    choices.sort(key=lambda c: (c[0], c[1]))
+    return [(label, instance_id) for _unreachable, label, instance_id in choices], ""
+
+
 def _summarize_ec2(d: dict) -> list[tuple[str, str]]:
     try:
         inst = d["Reservations"][0]["Instances"][0]

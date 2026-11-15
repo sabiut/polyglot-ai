@@ -10,6 +10,7 @@ call at a time under that class's lock.
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from polyglot_ai.core.db_dialects import DbTarget, make_ssl_context
@@ -41,10 +42,84 @@ def describe_error(exc: Exception) -> str:
         code, message = detail[0], detail[1]
         if isinstance(message, bytes):
             message = message.decode("utf-8", errors="replace")
-        text = str(message).split("DB-Lib error message")[0].strip()
-        return f"{text} (error {code})" if text else f"SQL Server error {code}"
+        return _describe_mssql(code, str(message))
     text = str(exc).strip()
     return text.splitlines()[0] if text else type(exc).__name__
+
+
+_DBLIB = "DB-Lib error message"
+_DBLIB_HEADER = re.compile(r"DB-Lib error message \d+, severity (\d+):")
+_NETLIB = re.compile(r"Net-Lib error during (.+?)\s*\(\d+\)")
+_IN_BRACKETS = re.compile(r"\(([^()]+)\)\s*$")
+#: Says nothing: the messages it points to are the ones pymssql didn't pass on.
+_DBLIB_NOISE = "General SQL Server error: Check messages from the SQL Server"
+
+
+def _describe_mssql(code, message: str) -> str:
+    """What a pymssql error means, in words — and for the common ones, what to check.
+
+    ``message`` is the server's own text (often missing when a login
+    fails) followed by FreeTDS's account of it: a header line per error,
+    then what it was, then for a network failure what the socket said.
+    The app used to keep only the server's text, which left
+    "SQL Server error 20009" for a database that couldn't be reached and
+    "SQL Server error 18456" for most refused logins.
+    """
+    said, _, account = message.partition(_DBLIB)
+    said = said.strip()
+    account = _DBLIB + account if account else ""
+    severities = [int(s) for s in _DBLIB_HEADER.findall(account)]
+    lines: list[str] = []
+    for line in account.splitlines():
+        line = line.strip()
+        if line and not line.startswith(_DBLIB) and line != _DBLIB_NOISE and line not in lines:
+            lines.append(line)
+
+    if code == 20009:  # never got as far as the server
+        named = next(
+            (_IN_BRACKETS.search(line) for line in lines if "Unable to connect" in line), None
+        )
+        where = named.group(1) if named else "the server"
+        socket_said = _NETLIB.search(account)
+        why = socket_said.group(1).strip().lower() if socket_said else ""
+        if "timed out" in why:
+            return (
+                f"No answer from {where} (the connection timed out). If the database is in "
+                "a private network, connect through an SSH bastion or Session Manager; "
+                "otherwise check that its firewall or security group lets this machine in. "
+                f"(error {code})"
+            )
+        if "refused" in why:
+            return (
+                f"{where} refused the connection: nothing is listening on that port. "
+                "Check the port, and that the server — or the tunnel to it — is running. "
+                f"(error {code})"
+            )
+        if why:
+            return f"Couldn't reach {where}: {why}. (error {code})"
+        return (
+            f"Couldn't find {where}. Check the host name: it may be misspelt, or not "
+            f"known from this machine. (error {code})"
+        )
+
+    if code == 18456:  # reached the server, which said no
+        who = said.rstrip(".") or "The server refused the login"
+        # The server reports a database it can't open (severity 11) and
+        # then refuses the login for it (14); a wrong name or password
+        # is the refusal alone.
+        if 11 in severities:
+            return (
+                f"{who}: it couldn't open the database this connection asks for. "
+                "Check the database name, and that this user is allowed to use it. "
+                f"(error {code})"
+            )
+        return f"{who}. Check the user name and the password. (error {code})"
+
+    if said:
+        return f"{said} (error {code})"
+    if lines:
+        return f"{'; '.join(lines)} (error {code})"
+    return f"SQL Server error {code}"
 
 
 def _plain(value):

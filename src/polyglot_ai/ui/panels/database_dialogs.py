@@ -302,6 +302,9 @@ class AddConnectionDialog(QDialog):
     be renamed to.
     """
 
+    # What the port field holds before any engine has been chosen.
+    _FIRST_PORT = "5432"
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -416,7 +419,7 @@ class AddConnectionDialog(QDialog):
         server.setSpacing(8)
 
         self._host_input = self._line("localhost", "localhost")
-        self._port_input = self._line("5432", "5432", width=80)
+        self._port_input = self._line(self._FIRST_PORT, self._FIRST_PORT, width=80)
         self._add_row(server, ("Host", self._host_input, 3), ("Port", self._port_input, 0))
 
         self._user_input = self._line("postgres")
@@ -473,7 +476,14 @@ class AddConnectionDialog(QDialog):
         self._ssm_target.setStyleSheet(self._combo_style)
         self._ssm_target.lineEdit().setPlaceholderText("i-0123456789abcdef0")
         self._add(ssm, "EC2 instance in the database's network", self._ssm_target)
+        # Whether the list above was read, and from where.
+        self._ssm_note = QLabel("")
+        self._ssm_note.setStyleSheet(f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px;")
+        self._ssm_note.setWordWrap(True)
+        ssm.addWidget(self._ssm_note)
         server.addWidget(self._ssm_widget)
+        #: (profile, region) the instance list was last asked for.
+        self._ssm_listed_for: tuple[str, str] | None = None
 
         # Shared by Session Manager and IAM sign-in.
         self._aws_widget = QWidget()
@@ -483,6 +493,9 @@ class AddConnectionDialog(QDialog):
         self._aws_profile = self._line("default")
         self._aws_region = self._line("us-east-1")
         self._add_row(aws, ("AWS profile", self._aws_profile, 1), ("Region", self._aws_region, 1))
+        # A different account or region has different instances.
+        self._aws_profile.editingFinished.connect(self._list_instances)
+        self._aws_region.editingFinished.connect(self._list_instances)
         server.addWidget(self._aws_widget)
 
         form.addWidget(self._server_widget)
@@ -635,10 +648,11 @@ class AddConnectionDialog(QDialog):
         if db_type != self._last_type:
             # Engine changed: move the defaults along, but only where the
             # field still holds the previous engine's default.
+            # A new dialog opens on SQLite with the port field (hidden) at
+            # PostgreSQL's; choosing SQL Server from there used to keep 5432.
             previous = ENGINES.get(self._last_type)
-            if not self._port_input.text() or (
-                previous and self._port_input.text() == str(previous.default_port)
-            ):
+            was_default = str(previous.default_port) if previous else self._FIRST_PORT
+            if self._port_input.text() in ("", was_default):
                 self._port_input.setText(str(engine.default_port))
             self._port_input.setPlaceholderText(str(engine.default_port))
             self._user_input.setPlaceholderText(engine.default_user)
@@ -660,6 +674,8 @@ class AddConnectionDialog(QDialog):
         self._ssh_widget.setVisible(route == "ssh")
         self._ssm_widget.setVisible(route == "ssm")
         self._aws_widget.setVisible(iam or route == "ssm")
+        if route == "ssm":
+            self._list_instances()
 
         notes = {
             "postgresql": "Connects with asyncpg.",
@@ -732,11 +748,14 @@ class AddConnectionDialog(QDialog):
             self._auth_combo.setCurrentIndex(index)
         if values.get("ssl"):
             self._select_ssl_mode(values["ssl"], self._db_type())
+        if values.get("bastions"):
+            # The AWS panel has just read them: no need to ask again
+            # unless the profile or region is changed. Before the route
+            # is chosen, which would otherwise go and ask.
+            self._show_instances(self._aws_where(), (list(values["bastions"]), ""))
         index = self._route_combo.findData(values.get("route"))
         if index >= 0:
             self._route_combo.setCurrentIndex(index)
-        for text, instance_id in values.get("bastions") or []:
-            self._ssm_target.addItem(text, instance_id)
         self._ssm_target.setCurrentIndex(-1)
         self._ssm_target.setEditText(str(values.get("ssm_target") or ""))
         if "read_only" in values:
@@ -753,6 +772,69 @@ class AddConnectionDialog(QDialog):
             self._conn_input.setText(path)
             if not self._name_input.text():
                 self._name_input.setText(Path(path).stem)
+
+    def _aws_where(self) -> tuple[str, str]:
+        return self._aws_profile.text().strip(), self._aws_region.text().strip()
+
+    def _list_instances(self) -> None:
+        """Fill the instance list from AWS, in the background, once per profile and region.
+
+        It used to be filled only when the dialog was opened from the AWS
+        panel; opened any other way the list was empty and the instance
+        ID had to be known and typed.
+        """
+        where = self._aws_where()
+        if self._route_combo.currentData() != "ssm" or where == self._ssm_listed_for:
+            return
+        self._ssm_listed_for = where
+        self._ssm_note.setText("Looking for running instances…")
+        from polyglot_ai.core.aws_resources import running_instances
+        from polyglot_ai.ui.thread_bridge import run_in_thread
+
+        run_in_thread(
+            lambda: running_instances(*where),
+            lambda found: self._show_instances(where, found),
+            lambda exc: self._show_instances(where, ([], str(exc) or type(exc).__name__)),
+            owner=self,
+            name="db-ssm-instances",
+        )
+
+    def _show_instances(self, where: tuple[str, str], found: tuple[list, str]) -> None:
+        if where != self._aws_where():
+            return  # the profile or region was changed while this was being read
+        self._ssm_listed_for = where
+        choices, problem = found
+        typed = self._ssm_target.currentText()
+        self._ssm_target.blockSignals(True)
+        self._ssm_target.clear()
+        for text, instance_id in choices:
+            self._ssm_target.addItem(text, instance_id)
+        # What was typed (or saved) stays: the list is an offer, not a choice made.
+        index = self._ssm_target.findData(typed.strip()) if typed.strip() else -1
+        self._ssm_target.setCurrentIndex(index)
+        if index < 0:
+            self._ssm_target.setEditText(typed)
+        self._ssm_target.blockSignals(False)
+
+        profile, region = where
+        place = (region or "the profile's default region") + (
+            f" (profile {profile})" if profile else ""
+        )
+        if problem:
+            self._ssm_note.setText(
+                f"Couldn't list the instances: {problem} You can still type an instance ID."
+            )
+        elif not choices:
+            self._ssm_note.setText(
+                f"No running EC2 instances in {place}. Session Manager needs one in the "
+                "database's network to connect through."
+            )
+        else:
+            count = len(choices)
+            self._ssm_note.setText(
+                f"{count} running instance{'' if count == 1 else 's'} in {place}. "
+                "Choose one in the database's network, or type an ID."
+            )
 
     def _ssm_instance(self) -> str:
         """The instance ID: a picked suggestion's ID, or whatever was typed."""

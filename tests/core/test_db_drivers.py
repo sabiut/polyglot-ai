@@ -186,10 +186,85 @@ class TestMssqlDriver:
             b"Login failed for user 'cmadmin'.DB-Lib error message 20018, severity 14:\nGeneral SQL Server error",
         )
         exc = Exception(raw)
-        assert describe_error(exc) == "Login failed for user 'cmadmin'. (error 18456)"
+        assert describe_error(exc) == (
+            "Login failed for user 'cmadmin'. Check the user name and the password. (error 18456)"
+        )
         assert describe_error(Exception("ORA-01017: invalid credentials\nHelp: https://x")) == (
             "ORA-01017: invalid credentials"
         )
+
+    # What pymssql really raises, captured from SQL Server 2022 and from
+    # addresses nothing answers at. Each used to be shown as
+    # "SQL Server error <number>" and nothing else.
+    NO_TEXT = (
+        b"DB-Lib error message 20018, severity 14:\n"
+        b"General SQL Server error: Check messages from the SQL Server\n"
+        b"DB-Lib error message 20002, severity 9:\nTDS server connection failed (127.0.0.1)\n"
+        b"DB-Lib error message 20002, severity 9:\nTDS server connection failed (127.0.0.1)\n"
+    )
+    UNREACHABLE = (
+        b"DB-Lib error message 20009, severity 9:\n"
+        b"Unable to connect: TDS server is unavailable or does not exist (%s)\n%s"
+        b"DB-Lib error message 20009, severity 9:\n"
+        b"Unable to connect: TDS server is unavailable or does not exist (%s)\n%s"
+    )
+
+    def _unreachable(self, host: bytes, socket_said: bytes = b"") -> str:
+        line = b"Net-Lib error during " + socket_said + b"\n" if socket_said else b""
+        return describe_error(Exception((20009, self.UNREACHABLE % (host, line, host, line))))
+
+    def test_a_refused_login_without_the_servers_text_still_says_what_to_check(self):
+        """Most refused logins arrive with no "Login failed for user …" at all."""
+        assert describe_error(Exception((18456, self.NO_TEXT))) == (
+            "The server refused the login. Check the user name and the password. (error 18456)"
+        )
+
+    def test_a_database_that_cannot_be_opened_is_told_apart_from_a_wrong_password(self):
+        """Same number; the server reports the database first (severity 11), then the refusal."""
+        raw = (
+            b"DB-Lib error message 20018, severity 11:\n"
+            b"General SQL Server error: Check messages from the SQL Server\n" + self.NO_TEXT
+        )
+        message = describe_error(Exception((18456, raw)))
+        assert message.startswith(
+            "The server refused the login: it couldn't open the database this connection asks for."
+        )
+        assert "Check the database name, and that this user is allowed to use it." in message
+        assert "password" not in message and message.endswith("(error 18456)")
+
+    def test_a_server_that_does_not_answer_points_at_the_private_network(self):
+        message = self._unreachable(b"db.example.internal", b"Connection timed out (110)")
+        assert message.startswith("No answer from db.example.internal (the connection timed out).")
+        assert "SSH bastion or Session Manager" in message and "security group" in message
+        assert message.endswith("(error 20009)")
+
+    def test_a_refused_connection_points_at_the_port_and_the_tunnel(self):
+        message = self._unreachable(b"127.0.0.1", b"Connection refused (111)")
+        assert message.startswith("127.0.0.1 refused the connection: nothing is listening")
+        assert "the tunnel to it" in message
+
+    def test_a_name_that_does_not_resolve_points_at_the_host_name(self):
+        message = self._unreachable(b"cm-ec2-au.example.rds.amazonaws.com")
+        assert message.startswith("Couldn't find cm-ec2-au.example.rds.amazonaws.com. Check the")
+        assert "host name" in message
+
+    def test_other_socket_errors_are_passed_on(self):
+        message = self._unreachable(b"10.0.0.9", b"No route to host (113)")
+        assert message == "Couldn't reach 10.0.0.9: no route to host. (error 20009)"
+
+    def test_an_unknown_error_shows_what_freetds_said_once(self):
+        raw = (
+            b"DB-Lib error message 20002, severity 9:\nTDS server connection failed (db)\n"
+            b"DB-Lib error message 20002, severity 9:\nTDS server connection failed (db)\n"
+        )
+        assert describe_error(Exception((20002, raw))) == (
+            "TDS server connection failed (db) (error 20002)"
+        )
+        # "Check messages from the SQL Server" is FreeTDS talking to a programmer.
+        assert describe_error(Exception((4060, self.NO_TEXT))) == (
+            "TDS server connection failed (127.0.0.1) (error 4060)"
+        )
+        assert describe_error(Exception((50000, b""))) == "SQL Server error 50000"
 
     def test_query_failure_reads_as_a_sentence_too(self):
         """A failed query carries the number and message as two arguments, not one tuple."""
@@ -288,7 +363,9 @@ async def test_driver_errors_become_messages(fake_pymssql, monkeypatch):
 
     monkeypatch.setattr(fake_pymssql, "connect", refuse)
     ok, message = await _mssql_connection().connect()
-    assert not ok and message == "Login failed for user 'cmadmin'. (error 18456)"
+    assert not ok and message == (
+        "Login failed for user 'cmadmin'. Check the user name and the password. (error 18456)"
+    )
 
 
 class _FakeTunnel:
