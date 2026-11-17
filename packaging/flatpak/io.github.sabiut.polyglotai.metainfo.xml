@@ -23,6 +23,20 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.29" date="2026-11-17">
+      <description>
+        <p>Arduino: build errors now say the file, the line and what is
+        wrong, with a button to go there; a missing board package or
+        library can be installed from the window (it asks first). New
+        Check code button, a two-column window that keeps the serial
+        monitor in view, a board picker when several are plugged in,
+        and a serial monitor that can send, pause, time-stamp, save and
+        graph.</p>
+        <p>The AWS panel shows an RDS database's master user and where
+        its password is kept. Cancelling a database backup can no longer
+        hang on a driver that doesn't respond.</p>
+      </description>
+    </release>
     <release version="0.18.28" date="2026-11-16">
       <description>
         <p>The AWS panel now shows networking: VPCs, subnets (public or
