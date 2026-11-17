@@ -206,6 +206,27 @@ BOARDS: tuple[Board, ...] = (
 _BY_FQBN: dict[str, Board] = {b.fqbn: b for b in BOARDS}
 
 
+#: Where the board packages that Arduino doesn't publish itself are
+#: listed, by packager (the first part of ``esp32:esp32``). The CLI only
+#: knows Arduino's own list unless it is given these.
+PLATFORM_INDEX_URLS: dict[str, str] = {
+    "esp32": "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
+    "esp8266": "https://arduino.esp8266.com/stable/package_esp8266com_index.json",
+    "rp2040": (
+        "https://github.com/earlephilhower/arduino-pico/releases/download/global/"
+        "package_rp2040_index.json"
+    ),
+    "adafruit": "https://adafruit.github.io/arduino-board-index/package_adafruit_index.json",
+    "teensy": "https://www.pjrc.com/teensy/package_teensy_index.json",
+}
+
+
+def platform_index_args(platform: str) -> list[str]:
+    """``--additional-urls <index>`` for a third-party package, else nothing."""
+    url = PLATFORM_INDEX_URLS.get(platform.split(":", 1)[0])
+    return ["--additional-urls", url] if url else []
+
+
 def board_for_fqbn(fqbn: str) -> Board | None:
     """Return the catalog entry matching ``fqbn``, or ``None``."""
     return _BY_FQBN.get(fqbn)

@@ -145,6 +145,7 @@ async def arduino_compile(args: dict) -> str:
         return (
             "Compilation failed.\n"
             + "\n".join(f"- {m}" for m in messages)
+            + _diagnosis(service)
             + "\n\nDetails:\n"
             + detail
         )
@@ -180,13 +181,14 @@ async def arduino_upload(args: dict) -> str:
             pass
         if service.last_error_detail:
             detail = service.last_error_detail.strip()
-            return f"Compilation failed before upload:\n{detail[:4000]}"
+            return f"Compilation failed before upload.{_diagnosis(service)}\n\n{detail[:4000]}"
 
         msgs = [u.message async for u in service.upload_cpp(project.project_dir, board, port)]
         if service.last_error_detail:
             return (
                 "Upload failed.\n"
                 + "\n".join(f"- {m}" for m in msgs)
+                + _diagnosis(service)
                 + "\n\nDetails:\n"
                 + service.last_error_detail.strip()[:4000]
             )
@@ -200,6 +202,7 @@ async def arduino_upload(args: dict) -> str:
             return (
                 "MicroPython upload failed.\n"
                 + "\n".join(f"- {m}" for m in msgs)
+                + _diagnosis(service)
                 + "\n\nDetails:\n"
                 + service.last_error_detail.strip()[:4000]
             )
@@ -219,10 +222,38 @@ async def arduino_upload(args: dict) -> str:
         return (
             "CircuitPython copy failed.\n"
             + "\n".join(f"- {m}" for m in msgs)
+            + _diagnosis(service)
             + "\n\nDetails:\n"
             + service.last_error_detail.strip()[:4000]
         )
     return "Upload succeeded.\n" + "\n".join(f"- {m}" for m in msgs)
+
+
+def _diagnosis(service: ArduinoService) -> str:
+    """What the panel worked out about the last failure, for the model.
+
+    The raw tool output follows it, but the kind of failure is what
+    decides the right advice: a board package that was never
+    installed is not a mistake in the sketch, and rewriting the
+    sketch won't help.
+    """
+    problem = service.last_problem
+    if problem is None:
+        return ""
+    lines = [f"Kind of problem: {problem.kind}"]
+    if problem.where:
+        lines.append(f"Where: {problem.where}")
+    if problem.platform:
+        lines.append(
+            f"Missing board package: {problem.platform} — the user can install it from "
+            "the Arduino panel (the button under the error), which asks before downloading."
+        )
+    if problem.header:
+        lines.append(
+            f"Missing library header: {problem.header} — the Arduino panel offers to "
+            "install the library it belongs to."
+        )
+    return "\n\n" + "\n".join(lines)
 
 
 # ── Scaffold tools ─────────────────────────────────────────────────

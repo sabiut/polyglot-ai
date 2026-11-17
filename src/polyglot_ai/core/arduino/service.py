@@ -28,14 +28,24 @@ Design rules
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import logging
+import re
 import sys
-from collections.abc import AsyncIterator
+import threading
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from polyglot_ai.core.arduino.boards import Board, Language, board_for_usb
+from polyglot_ai.core.arduino import diagnose
+from polyglot_ai.core.arduino.boards import (
+    Board,
+    Language,
+    board_for_usb,
+    platform_index_args,
+)
+from polyglot_ai.core.arduino.diagnose import Problem
 from polyglot_ai.core.dependency_check import find_executable
 
 
@@ -144,6 +154,19 @@ class ArduinoService:
         # panel via the "Ask AI for help" button rather than shown
         # to the kid in the main status area.
         self.last_error_detail: str = ""
+        # What that error means, worked out from the tool's output:
+        # the panel shows it (with the file and line) instead of
+        # sending everyone to the AI to find out. None when the last
+        # run didn't fail, or failed before a tool was started.
+        self.last_problem: Problem | None = None
+        # True when the last run ended because the user stopped it.
+        # Not a failure — there is no error to explain — but not a
+        # success either: a cancelled build must not go on to upload.
+        self.last_cancelled = False
+        # Called with each line a tool prints, as it prints it, from
+        # the thread that reads it. The panel shows them as the
+        # details behind the plain-language feed.
+        self.on_output: Callable[[str], None] | None = None
         # In-flight subprocess so the panel can cancel a long
         # compile or upload mid-flight. ``cancel_current_upload``
         # terminates whatever's stored here. Set by ``_run`` while
@@ -178,7 +201,36 @@ class ArduinoService:
             proc.terminate()
         except Exception:
             pass
+
+        def insist() -> None:
+            # A tool that ignores being asked would otherwise run on to
+            # its timeout, which for a build is many minutes.
+            try:
+                proc.wait(timeout=CANCEL_GRACE_SECONDS)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+
+        threading.Thread(target=insist, name="arduino-cancel", daemon=True).start()
         return True
+
+    def _fail(self, problem: Problem, output: str) -> StepUpdate:
+        """Record a failure and return the line that tells the user about it."""
+        self.last_problem = problem
+        # Never empty: the panel and the AI tools read "there is an
+        # error detail" as "the last step failed".
+        self.last_error_detail = output.strip() or problem.detail or problem.message
+        return StepUpdate(problem.message, kind="fail")
+
+    def _cancelled(self) -> StepUpdate:
+        """Record that the user stopped the run, and say so."""
+        self.last_cancelled = True
+        return StepUpdate("Cancelled.", kind="fail")
+
+    def _begin(self) -> None:
+        self.last_problem = None
+        self.last_error_detail = ""
+        self.last_cancelled = False
 
     # ── Toolchain detection ────────────────────────────────────────
 
@@ -537,26 +589,33 @@ class ArduinoService:
             yield StepUpdate(f"Can't find your project folder: {sketch_dir}", kind="fail")
             return
 
-        yield StepUpdate("Checking your code…")
-        rc, _, stderr = await _run(
+        self._begin()
+        yield StepUpdate(f"Checking your code for {board.display_name}…")
+        rc, stdout, stderr = await _run(
             cli,
             "compile",
             "--fqbn",
             board.fqbn,
             str(sketch_dir),
+            timeout=BUILD_TIMEOUT_SECONDS,
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
-            self.last_error_detail = stderr
-            yield StepUpdate(
-                "Your code has a problem. Click 'Ask AI for help' to see what's wrong.",
-                kind="fail",
+            output = _printed(stdout, stderr)
+            yield self._fail(
+                diagnose.diagnose_compile(output, rc, board_name=board.display_name), output
             )
             return
-        yield StepUpdate("Code looks good!", kind="ok")
+        size = _SKETCH_SIZE.search(stdout)
+        yield StepUpdate(
+            f"Code looks good! It takes up {size.group(1)}% of the board's program space."
+            if size
+            else "Code looks good!",
+            kind="ok",
+        )
 
     # ── Upload (C++) ───────────────────────────────────────────────
 
@@ -568,8 +627,9 @@ class ArduinoService:
             yield StepUpdate("Arduino CLI isn't installed yet.", kind="fail")
             return
 
-        yield StepUpdate("Sending your code to the Arduino…")
-        rc, _, stderr = await _run(
+        self._begin()
+        yield StepUpdate(f"Sending your code to {board.display_name}…")
+        rc, stdout, stderr = await _run(
             cli,
             "upload",
             "--fqbn",
@@ -580,16 +640,15 @@ class ArduinoService:
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
-            self.last_error_detail = stderr
-            yield StepUpdate(
-                "Couldn't upload. Is the cable plugged in? Click 'Ask AI for help' for details.",
-                kind="fail",
+            output = _printed(stdout, stderr)
+            yield self._fail(
+                diagnose.diagnose_upload(output, rc, board_name=board.display_name), output
             )
             return
-        yield StepUpdate("Done! 🎉", kind="ok")
+        yield StepUpdate("Done! Your code is on the board.", kind="ok")
 
     # ── Upload (MicroPython) ───────────────────────────────────────
 
@@ -602,9 +661,16 @@ class ArduinoService:
         if not script.is_file():
             yield StepUpdate(f"Can't find your script: {script}", kind="fail")
             return
+        self._begin()
+        mistake = _python_mistake(script)
+        if mistake is not None:
+            # Found here rather than on the board, where the only sign
+            # of it would be a program that silently doesn't start.
+            yield self._fail(mistake, mistake.detail)
+            return
 
         yield StepUpdate("Sending your Python code to the board…")
-        rc, _, stderr = await _run(
+        rc, stdout, stderr = await _run(
             *mpremote_argv,
             "connect",
             port,
@@ -615,14 +681,19 @@ class ArduinoService:
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
-            self.last_error_detail = stderr
-            yield StepUpdate(
-                "Couldn't send the file. Is the board in run mode?",
-                kind="fail",
-            )
+            output = _printed(stdout, stderr)
+            problem = diagnose.diagnose_upload(output, rc)
+            if problem.kind == diagnose.UNKNOWN:
+                problem = Problem(
+                    diagnose.UNKNOWN,
+                    "Couldn't send the file. Is the board running MicroPython, and not "
+                    "busy in another program? The details are below.",
+                    detail=problem.detail,
+                )
+            yield self._fail(problem, output)
             return
 
         yield StepUpdate("Restarting the board…")
@@ -636,7 +707,7 @@ class ArduinoService:
                 kind="ok",
             )
             return
-        yield StepUpdate("Done! 🎉", kind="ok")
+        yield StepUpdate("Done! Your code is on the board.", kind="ok")
 
     # ── Upload (CircuitPython) ─────────────────────────────────────
 
@@ -657,6 +728,12 @@ class ArduinoService:
             )
             return
 
+        self._begin()
+        mistake = _python_mistake(script)
+        if mistake is not None:
+            yield self._fail(mistake, mistake.detail)
+            return
+
         target = drive / "code.py"
         yield StepUpdate("Copying your code to the board…")
         try:
@@ -675,7 +752,131 @@ class ArduinoService:
                 kind="fail",
             )
             return
-        yield StepUpdate("Done! 🎉", kind="ok")
+        yield StepUpdate("Done! Your code is on the board.", kind="ok")
+
+    # ── Check without uploading ────────────────────────────────────
+
+    async def check_python(self, script: Path) -> AsyncIterator[StepUpdate]:
+        """Look for syntax mistakes in a MicroPython / CircuitPython file.
+
+        Nothing is sent to a board, so none has to be plugged in.
+        """
+        if not script.is_file():
+            yield StepUpdate(f"Can't find your script: {script}", kind="fail")
+            return
+        self._begin()
+        yield StepUpdate("Checking your code…")
+        mistake = _python_mistake(script)
+        if mistake is not None:
+            yield self._fail(mistake, mistake.detail)
+            return
+        yield StepUpdate(
+            "No mistakes found in how the code is written. (Whether it does what you "
+            "want shows when it runs on the board.)",
+            kind="ok",
+        )
+
+    # ── Installing what a build needs ──────────────────────────────
+
+    async def install_platform(self, platform: str) -> AsyncIterator[StepUpdate]:
+        """Download and install a board package (``arduino:avr``).
+
+        A fresh ``arduino-cli`` knows no boards at all; this is what
+        ``arduino-cli core install`` is for. The caller asks the user
+        first — it downloads from the package's publisher.
+        """
+        cli = find_executable("arduino-cli")
+        if cli is None:
+            yield StepUpdate("Arduino CLI isn't installed yet.", kind="fail")
+            return
+        self._begin()
+        urls = platform_index_args(platform)
+        yield StepUpdate("Getting the list of board packages…")
+        rc, stdout, stderr = await _run(
+            cli, "core", "update-index", *urls, timeout=INDEX_TIMEOUT_SECONDS, service=self
+        )
+        if rc == -1:
+            yield self._cancelled()
+            return
+        if rc != 0:
+            yield self._fail(
+                Problem(
+                    diagnose.UNKNOWN,
+                    "Couldn't get the list of board packages. Is this computer online?",
+                ),
+                stderr or stdout,
+            )
+            return
+        yield StepUpdate(f"Downloading and installing {platform} — this can take a few minutes…")
+        rc, stdout, stderr = await _run(
+            cli, "core", "install", platform, *urls, timeout=INSTALL_TIMEOUT_SECONDS, service=self
+        )
+        if rc == -1:
+            yield self._cancelled()
+            return
+        if rc != 0:
+            yield self._fail(
+                Problem(
+                    diagnose.TIMEOUT if rc == 124 else diagnose.UNKNOWN,
+                    f"Couldn't install {platform}. The details are below.",
+                ),
+                stderr or stdout,
+            )
+            return
+        yield StepUpdate(f"Installed {platform}.", kind="ok")
+
+    async def install_library(self, header: str) -> AsyncIterator[StepUpdate]:
+        """Install the library a missing ``#include`` belongs to.
+
+        The Library Manager goes by library names, not header names;
+        :func:`diagnose.library_candidates` gives the likely ones and
+        the first that installs wins.
+        """
+        cli = find_executable("arduino-cli")
+        if cli is None:
+            yield StepUpdate("Arduino CLI isn't installed yet.", kind="fail")
+            return
+        self._begin()
+        yield StepUpdate("Getting the list of libraries…")
+        rc, stdout, stderr = await _run(
+            cli, "lib", "update-index", timeout=INDEX_TIMEOUT_SECONDS, service=self
+        )
+        if rc == -1:
+            yield self._cancelled()
+            return
+        if rc != 0:
+            yield self._fail(
+                Problem(
+                    diagnose.UNKNOWN,
+                    "Couldn't get the list of libraries. Is this computer online?",
+                ),
+                stderr or stdout,
+            )
+            return
+        names = diagnose.library_candidates(header)
+        output = ""
+        for name in names:
+            yield StepUpdate(f"Looking for a library called “{name}”…")
+            rc, stdout, stderr = await _run(
+                cli, "lib", "install", name, timeout=INSTALL_TIMEOUT_SECONDS, service=self
+            )
+            if rc == -1:
+                yield self._cancelled()
+                return
+            if rc == 0:
+                yield StepUpdate(f"Installed the {name} library.", kind="ok")
+                return
+            output += stderr or stdout
+        tried = ", ".join(f"“{name}”" for name in names)
+        yield self._fail(
+            Problem(
+                diagnose.LIBRARY,
+                f"Couldn't find the library that provides {header} (tried {tried}). "
+                "Ask the AI which library it comes from.",
+                header=header,
+            ),
+            output,
+        )
 
     # ── Erase user code ─────────────────────────────────────────────
     #
@@ -707,7 +908,7 @@ class ArduinoService:
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
             # mpremote rm of a non-existent file returns non-zero —
@@ -818,7 +1019,7 @@ class ArduinoService:
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
             self.last_error_detail = stderr
@@ -841,7 +1042,7 @@ class ArduinoService:
             service=self,
         )
         if rc == -1:
-            yield StepUpdate("Cancelled.", kind="fail")
+            yield self._cancelled()
             return
         if rc != 0:
             self.last_error_detail = stderr
@@ -854,6 +1055,36 @@ class ArduinoService:
 
 
 # ── Helpers ───────────────────────────────────────────────────────
+
+
+#: A build is allowed this long. The first one for a board compiles the
+#: board's whole core (minutes, for an ESP32); Cancel is there for the
+#: rest. It used to share the upload's 180 seconds, and a first build
+#: that ran out of them was reported as a mistake in the code.
+BUILD_TIMEOUT_SECONDS = 900.0
+INDEX_TIMEOUT_SECONDS = 300.0
+INSTALL_TIMEOUT_SECONDS = 1800.0
+#: How long a cancelled tool has to stop by itself before it is killed.
+CANCEL_GRACE_SECONDS = 3.0
+
+_SKETCH_SIZE = re.compile(r"Sketch uses \d+ bytes \((\d+)%\)")
+
+
+def _printed(stdout: str, stderr: str) -> str:
+    """What a failed tool said: its errors, or failing that its output.
+
+    Most failures are explained on stderr, but not all — and an
+    empty stderr must not turn a real message into "unknown".
+    """
+    return stderr if stderr.strip() else stdout
+
+
+def _python_mistake(script: Path) -> Problem | None:
+    try:
+        source = script.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None  # the upload itself will say it can't read the file
+    return diagnose.diagnose_python(source, str(script))
 
 
 async def _run(
@@ -898,55 +1129,63 @@ async def _run(
             return 127, "", f"Failed to launch {argv[0]!r}: {exc}"
 
         # Register the Popen so cancel_current_upload can reach it.
-        # Cleared in finally regardless of how communicate exits.
+        # Cleared in finally regardless of how the wait ends.
+        listener = None
         if service is not None:
             service._current_proc = proc
+            listener = service.on_output
+
+        # Read both streams as they are written, a thread each: a tool
+        # that fills one pipe while we wait on the other would stall,
+        # and the panel shows the lines as they arrive.
+        captured: dict[str, list[str]] = {"out": [], "err": []}
+
+        def pump(stream, into: list[str]) -> None:
+            try:
+                for raw in iter(stream.readline, b""):
+                    line = raw.decode("utf-8", errors="replace")
+                    into.append(line)
+                    if listener is not None:
+                        try:
+                            listener(line.rstrip("\r\n"))
+                        except Exception:
+                            logger.debug("arduino: output listener failed", exc_info=True)
+            except (OSError, ValueError):
+                pass  # the pipe was closed under us: the process is gone
+            finally:
+                with contextlib.suppress(Exception):
+                    stream.close()
+
+        readers = [
+            threading.Thread(target=pump, args=(proc.stdout, captured["out"]), daemon=True),
+            threading.Thread(target=pump, args=(proc.stderr, captured["err"]), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
 
         try:
+            timed_out = False
             try:
-                stdout_b, stderr_b = proc.communicate(timeout=timeout)
-            except _subprocess.TimeoutExpired as exc:
-                # Soft-kill first, then hard-kill if the child
-                # ignores SIGTERM. Same defensive pattern works
-                # for both the timeout case and the user-cancel
-                # case (cancel sets _cancel_requested then sends
-                # SIGTERM via cancel_current_upload).
-                try:
+                proc.wait(timeout=timeout)
+            except _subprocess.TimeoutExpired:
+                # Soft-killed already if this was a cancel (see
+                # ``cancel_current_upload``); either way it ends now.
+                timed_out = True
+                with contextlib.suppress(Exception):
                     proc.kill()
-                    extra_stdout, extra_stderr = proc.communicate(timeout=2)
-                except Exception:
-                    extra_stdout, extra_stderr = b"", b""
-                stdout_b = (exc.stdout or b"") + (extra_stdout or b"")
-                stderr_b = (exc.stderr or b"") + (extra_stderr or b"")
-                if service is not None and service._cancel_requested:
-                    return (
-                        -1,
-                        stdout_b.decode("utf-8", errors="replace"),
-                        stderr_b.decode("utf-8", errors="replace") + "\nCancelled by user.",
-                    )
-                return (
-                    124,
-                    stdout_b.decode("utf-8", errors="replace"),
-                    stderr_b.decode("utf-8", errors="replace")
-                    + f"\n{argv[0]} timed out after {timeout:.0f}s",
-                )
-            rc = proc.returncode or 0
-            # cancel_current_upload calls proc.terminate which
-            # makes communicate return normally with a non-zero
-            # rc. Translate that into the rc=-1 "cancelled"
-            # signal so the panel doesn't surface a misleading
-            # failure message.
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=2)
+            for reader in readers:
+                reader.join(2)
+            stdout, stderr = "".join(captured["out"]), "".join(captured["err"])
+            # A cancel makes the tool exit with some non-zero status of
+            # its own. Report it as -1, "cancelled", so the panel
+            # doesn't present it as a failure.
             if service is not None and service._cancel_requested:
-                return (
-                    -1,
-                    stdout_b.decode("utf-8", errors="replace"),
-                    (stderr_b.decode("utf-8", errors="replace") + "\nCancelled by user."),
-                )
-            return (
-                rc,
-                stdout_b.decode("utf-8", errors="replace"),
-                stderr_b.decode("utf-8", errors="replace"),
-            )
+                return -1, stdout, stderr + "\nCancelled by user."
+            if timed_out:
+                return 124, stdout, stderr + f"\n{argv[0]} timed out after {timeout:.0f}s"
+            return proc.returncode or 0, stdout, stderr
         finally:
             # Clear the registration regardless — leaving a stale
             # handle would let a later cancel try to kill an

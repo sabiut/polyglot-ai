@@ -1,4 +1,4 @@
-"""Read serial output from a connected board, emit lines to Qt.
+"""Talk to a connected board over its serial port, a line at a time.
 
 The Arduino panel's #1 missing feature was a way to read what the
 board prints back via ``Serial.println`` (or MicroPython's
@@ -33,15 +33,20 @@ Design notes:
   reader thread or letting the exception escape into Qt's
   exception handler.
 
-* **No send-to-board (MVP).** The user can read but not write.
-  Sending requires a separate input box and line-ending toggle
-  that's worth a follow-up rather than cramming into the first
-  cut.
+* **Sending is a line at a time too, and never on the caller's
+  thread.** :meth:`SerialMonitor.send` hands one line — with the
+  ending the sketch expects, what ``Serial.readStringUntil('\\n')`` or
+  MicroPython's REPL is waiting for — to a writer thread and returns.
+  A board that has stopped reading holds up that thread, not the
+  window: a write can wait out its timeout, and waiting for the
+  bytes to leave (``flush``) has no timeout at all, so nothing here
+  flushes.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -55,9 +60,23 @@ logger = logging.getLogger(__name__)
 # selection lands on the right one for most users.
 COMMON_BAUDS: tuple[int, ...] = (115200, 9600, 57600, 38400, 19200, 4800, 2400, 230400, 460800)
 
+#: What goes after a line that is sent, by the name the panel shows.
+#: "New line" is first because it is what ``Serial.readStringUntil('\\n')``
+#: and ``input()`` wait for.
+#: Lines that can be waiting to go out. Only fills when the board has
+#: stopped taking them; past this, sending says so rather than piling up.
+SEND_QUEUE_LINES = 64
+
+LINE_ENDINGS: tuple[tuple[str, str], ...] = (
+    ("New line", "\n"),
+    ("Carriage return", "\r"),
+    ("Both (CR + LF)", "\r\n"),
+    ("Nothing", ""),
+)
+
 
 class SerialMonitor(QObject):
-    """Read-only serial monitor backed by ``pyserial``.
+    """Serial monitor backed by ``pyserial``: read lines, send lines.
 
     Lifecycle::
 
@@ -96,6 +115,11 @@ class SerialMonitor(QObject):
         self._running = False
         self._port: str | None = None
         self._baud: int = 0
+        # What is waiting to be sent, and the thread that sends it.
+        # A new queue for each connection, so nothing typed for one
+        # board is delivered to the next.
+        self._outgoing: queue.Queue[bytes] = queue.Queue(maxsize=SEND_QUEUE_LINES)
+        self._writer: threading.Thread | None = None
 
     # ── Public API ─────────────────────────────────────────────────
 
@@ -128,6 +152,8 @@ class SerialMonitor(QObject):
                 port=port,
                 baudrate=baud,
                 timeout=1.0,
+                # A board that isn't reading must not hang ``send``.
+                write_timeout=1.0,
                 # ``exclusive=True`` would prevent two monitors
                 # from opening the same port; pyserial added it in
                 # 3.3 and not all distros ship that yet, so we
@@ -152,6 +178,7 @@ class SerialMonitor(QObject):
             daemon=True,
         )
         self._thread.start()
+        self._start_writer()
         self.connected.emit(port, baud)
         logger.info("Serial monitor connected: %s @ %d", port, baud)
 
@@ -171,6 +198,28 @@ class SerialMonitor(QObject):
             self._port,
         )
 
+    def send(self, text: str, ending: str = "\n") -> bool:
+        """Send ``text`` followed by ``ending`` to the board.
+
+        Returns at once: the writing is done by the writer thread.
+        True when the line was taken for sending. False — with an
+        ``error`` signal saying why — when nothing is connected or
+        the board has stopped taking what is sent. A write that
+        fails later is reported through ``error`` too.
+        """
+        if not self._running or self._serial is None:
+            self.error.emit("Start the monitor first — there is nothing to send to yet.")
+            return False
+        try:
+            self._outgoing.put_nowait((text + ending).encode("utf-8"))
+        except queue.Full:
+            self.error.emit(
+                f"{self._port} isn't taking what is sent to it — "
+                f"{SEND_QUEUE_LINES} lines are still waiting to go."
+            )
+            return False
+        return True
+
     @property
     def is_connected(self) -> bool:
         return self._running
@@ -183,6 +232,37 @@ class SerialMonitor(QObject):
     def baud(self) -> int:
         return self._baud
 
+    # ── Writer thread ──────────────────────────────────────────────
+
+    def _start_writer(self) -> None:
+        self._outgoing = queue.Queue(maxsize=SEND_QUEUE_LINES)
+        self._writer = threading.Thread(
+            target=self._write_loop,
+            args=(self._serial, self._outgoing, self._port),
+            name=f"serial-send-{self._port}",
+            daemon=True,
+        )
+        self._writer.start()
+
+    def _write_loop(self, ser, outgoing: queue.Queue, port: str | None) -> None:
+        """Write queued lines until this connection is over.
+
+        ``ser`` and ``outgoing`` are this connection's own: once the
+        monitor has moved on to another, this loop is writing to
+        nothing and stops.
+        """
+        while self._running and self._serial is ser:
+            try:
+                data = outgoing.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                ser.write(data)
+            except Exception as exc:
+                # SerialTimeoutException when the board isn't reading,
+                # SerialException / OSError when it was unplugged.
+                self.error.emit(f"Couldn't send to {port}: {exc}")
+
     # ── Worker thread ──────────────────────────────────────────────
 
     def _read_loop(self) -> None:
@@ -193,7 +273,11 @@ class SerialMonitor(QObject):
         if ser is None:
             return
         try:
-            while self._running:
+            # ``self._serial is ser``: Stop then Start inside the second
+            # it takes this loop to notice leaves ``_running`` true again
+            # — for the *next* connection. Without the check this loop
+            # carried on reading the old port beside the new one.
+            while self._running and self._serial is ser:
                 try:
                     raw = ser.readline()
                 except _serial.SerialException as exc:
@@ -218,6 +302,10 @@ class SerialMonitor(QObject):
                 # without double-spacing. Decode with replacement
                 # so a stray non-UTF-8 byte (rare but possible) is
                 # rendered as ``?`` rather than killing the line.
+                if self._serial is not ser:
+                    # Read after this connection was replaced: it
+                    # belongs to a session the user has ended.
+                    break
                 text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                 self.line_received.emit(text)
         finally:
@@ -229,9 +317,15 @@ class SerialMonitor(QObject):
                 ser.close()
             except Exception:
                 pass
-            self._serial = None
-            self._running = False
-            self.disconnected.emit()
-            logger.info("Serial monitor thread exited (port=%s)", self._port)
-            self._port = None
-            self._baud = 0
+            if self._serial is ser:
+                self._serial = None
+                self._running = False
+                self.disconnected.emit()
+                logger.info("Serial monitor thread exited (port=%s)", self._port)
+                self._port = None
+                self._baud = 0
+            else:
+                # A new connection has taken over since this one was
+                # told to stop. The state is its, not ours to reset —
+                # doing so used to cut the new connection off.
+                logger.info("Serial monitor thread for a replaced connection exited")

@@ -29,6 +29,7 @@ This wiki is the full user guide. Pick a section below.
 ### Infrastructure
 - **[CI / Docker / Kubernetes / AWS](CI-Docker-Kubernetes)** — inspect runs, containers, clusters, and your AWS account
 - **[Database](Database)** — multi-engine explorer, query runner, schema browser
+- **[Arduino](Arduino)** — build, upload and watch the output of Arduino, ESP32 and Pico boards
 
 ### Workflow
 - **[Workflows](Chat#workflows)** — repeatable multi-step AI investigations from YAML

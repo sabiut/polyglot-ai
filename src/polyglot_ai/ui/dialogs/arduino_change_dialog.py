@@ -562,13 +562,20 @@ class ArduinoChangeDialog(QDialog):
 # ── Tile reused only by this dialog ────────────────────────────────
 
 
+_LANGUAGE_TAG = {
+    Language.CPP: "ARDUINO C++",
+    Language.MICROPYTHON: "MICROPYTHON",
+    Language.CIRCUITPYTHON: "CIRCUITPYTHON",
+}
+
+
 class _DialogStarterTile(QPushButton):
     """A simpler tile than the panel's ``_StarterTile``.
 
     Lives in the dialog because the panel's tile imports module-level
     state we don't want to drag in here, and the dialog tile has
     slightly different size constraints (denser grid in a smaller
-    window). Kept tiny: emoji, name, blurb.
+    window). Kept tiny: language, name, blurb.
     """
 
     def __init__(self, starter: Starter, parent: QWidget | None = None) -> None:
@@ -584,11 +591,16 @@ class _DialogStarterTile(QPushButton):
         v.setContentsMargins(14, 12, 14, 12)
         v.setSpacing(6)
 
-        emoji = QLabel(starter.emoji)
-        emoji.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        emoji.setStyleSheet("font-size: 28px; background: transparent;")
-        emoji.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        v.addWidget(emoji)
+        # What the starter is written in, where a picture used to be:
+        # it is the one thing that decides which boards can run it.
+        kind = QLabel(_LANGUAGE_TAG.get(starter.language, ""))
+        kind.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        kind.setStyleSheet(
+            f"color: {tc.get('text_muted')}; font-size: {tc.FONT_XS}px; "
+            "font-weight: 600; letter-spacing: 1px; background: transparent;"
+        )
+        kind.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        v.addWidget(kind)
 
         name = QLabel(starter.name)
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)

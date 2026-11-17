@@ -43,6 +43,7 @@ then clone and replace.
 - `Tests-and-Review.md`
 - `CI-Docker-Kubernetes.md`
 - `Database.md`
+- `Arduino.md`
 - `MCP-Servers.md`
 - `Tasks-and-Today.md`
 - `Settings-and-Shortcuts.md`
