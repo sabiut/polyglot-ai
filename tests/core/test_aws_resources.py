@@ -258,6 +258,39 @@ class TestFilledColumns:
         assert "dynamodb" not in data["errors"]
 
 
+# ── RDS: who the master user is, and where its password lives ───────
+
+
+def _rds_summary(**extra) -> dict[str, str]:
+    db = {"DBInstanceIdentifier": "orders", "MasterUsername": "admin", **extra}
+    return dict(BY_KEY["rds"].summarize({"DBInstances": [db]}))
+
+
+def test_rds_summary_names_the_master_user_and_a_password_set_by_hand():
+    summary = _rds_summary()
+    assert summary["Master user"] == "admin"
+    assert summary["Master password"] == "set on the instance — AWS doesn't keep a readable copy"
+    assert list(summary).index("Master user") < list(summary).index("Master password")
+
+
+def test_rds_summary_says_when_the_password_is_managed_and_rotates():
+    arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:rds!db-0f3c-AbCdEf"
+    managed = _rds_summary(MasterUserSecret={"SecretArn": arn, "SecretStatus": "active"})
+    assert managed["Master password"] == (
+        "in Secrets Manager, rotated automatically — secret rds!db-0f3c-AbCdEf"
+    )
+    rotating = _rds_summary(MasterUserSecret={"SecretArn": arn, "SecretStatus": "rotating"})
+    assert rotating["Master password"] == (
+        "in Secrets Manager, rotated automatically, rotating now — secret rds!db-0f3c-AbCdEf"
+    )
+
+
+def test_rds_summary_without_a_master_user_says_nothing_about_its_password():
+    # An Aurora instance reports its master user on the cluster, not here.
+    summary = dict(BY_KEY["rds"].summarize({"DBInstances": [{"DBInstanceIdentifier": "a"}]}))
+    assert "Master user" not in summary and "Master password" not in summary
+
+
 # ── running instances, for the connection dialog ────────────────────
 
 EC2_ANSWER = {

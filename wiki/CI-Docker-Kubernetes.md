@@ -169,7 +169,8 @@ previous account.
 
 **Click a resource to see its details** in the pane below: a readable
 summary first (for example an instance's state, IPs, VPC and security
-groups; a database's engine, endpoint, storage and backups; an alarm's
+groups; a database's engine, endpoint, master user, where the master
+password is kept, storage and backups; an alarm's
 state and why; a bucket's region, public-access block, encryption and
 versioning), then the full CLI output under *Full output*. Lambda
 summaries list environment variable *names* only. The header buttons

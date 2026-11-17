@@ -657,6 +657,23 @@ def list_snapshots_command(db: dict) -> list[str]:
     ]
 
 
+def _rds_master_password(db: dict) -> str:
+    """Where the master user's password is kept — never the password.
+
+    A password AWS manages rotates by itself, so a copy saved last week
+    stops working: worth knowing when a login is refused.
+    """
+    if not db.get("MasterUsername"):
+        return ""
+    secret = db.get("MasterUserSecret") or {}
+    if not secret.get("SecretArn"):
+        return "set on the instance — AWS doesn't keep a readable copy"
+    name = str(secret["SecretArn"]).rsplit(":secret:", 1)[-1]
+    status = secret.get("SecretStatus") or ""
+    state = f", {status} now" if status and status != "active" else ""
+    return f"in Secrets Manager, rotated automatically{state} — secret {name}"
+
+
 def _summarize_rds(d: dict) -> list[tuple[str, str]]:
     try:
         db = d["DBInstances"][0]
@@ -670,6 +687,8 @@ def _summarize_rds(d: dict) -> list[tuple[str, str]]:
             ("Engine", f"{db.get('Engine', '')} {db.get('EngineVersion', '')}".strip()),
             ("Class", db.get("DBInstanceClass")),
             ("Endpoint", f"{ep['Address']}:{ep.get('Port', '')}" if ep.get("Address") else None),
+            ("Master user", db.get("MasterUsername")),
+            ("Master password", _rds_master_password(db)),
             ("Multi-AZ", db.get("MultiAZ")),
             (
                 "Storage",

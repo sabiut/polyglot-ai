@@ -97,7 +97,7 @@ before, only "SQL Server error" and a number)*:
 | **No answer from … (the connection timed out)** — error 20009 | Nothing answered. The usual cause is a database in a private network dialled directly: connect through a bastion or Session Manager, or open its security group to this machine. |
 | **… refused the connection** — error 20009 | The address answered but nothing listens on that port: a wrong port, or a tunnel that isn't running. |
 | **Couldn't find …** — error 20009 | The host name doesn't resolve from this machine. |
-| **Check the user name and the password** — error 18456 | The server was reached and refused the login. |
+| **Check the user name and the password** — error 18456 | The server was reached and refused the login. For RDS, the database's details in the AWS panel show the master user and whether its password is kept in Secrets Manager — one that is rotates by itself, so a saved copy goes stale. |
 | **It couldn't open the database this connection asks for** — error 18456 | The login itself is fine, but the database name is wrong or this user isn't allowed in it. |
 
 ### Signing in with an AWS IAM token (RDS)
