@@ -818,8 +818,9 @@ def _run_export(source, part, compress, report, cancel) -> BackupResult:
     The export looks at Cancel between batches of rows, which is no help
     while a query is waiting for a lock. So: tell it to stop; cancel what
     it is awaiting, or — for a driver that blocks its thread, once it has
-    had a moment to notice by itself — interrupt the driver; and if it
-    still hasn't let go after :data:`EXPORT_STOP_SECONDS`, stop waiting.
+    had a moment to notice by itself — interrupt the driver (without
+    waiting for the interrupt either); and if it still hasn't let go
+    after :data:`EXPORT_STOP_SECONDS`, stop waiting.
     The thread is a daemon and tidies up after itself when the server
     answers; it changes nothing in the database either way.
     """
@@ -861,7 +862,12 @@ def _run_export(source, part, compress, report, cancel) -> BackupResult:
         if run.blocking:
             thread.join(EXPORT_NOTICE_SECONDS)
             if thread.is_alive():
-                run.interrupt_driver()
+                # On a thread of its own: the driver's cancel is network
+                # traffic too, and one that stalls must not keep Cancel
+                # from its deadline below.
+                threading.Thread(
+                    target=run.interrupt_driver, name="db-backup-cancel", daemon=True
+                ).start()
         else:
             run.cancel_task()
         thread.join(EXPORT_STOP_SECONDS)

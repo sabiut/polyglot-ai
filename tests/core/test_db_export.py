@@ -831,6 +831,33 @@ def test_an_export_that_will_not_stop_is_left_behind_and_cleans_up_later(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_a_driver_whose_cancel_stalls_cannot_hold_cancel_up(tmp_path, engine, monkeypatch):
+    """The interrupt is a network call as well; it was made inline, ahead of the deadline."""
+    monkeypatch.setattr(db_backup, "EXPORT_NOTICE_SECONDS", 0.1)
+    monkeypatch.setattr(db_backup, "EXPORT_STOP_SECONDS", 0.3)
+    let_go = threading.Event()
+
+    class StalledCancel(_StuckExporter):
+        def interrupt(self):
+            self.interrupts += 1
+            self.interrupting_on = threading.current_thread().name
+            let_go.wait(30)  # the attention signal never gets an answer
+
+    exporter = engine(StalledCancel(blocking=True))
+    try:
+        late = _cancelled_backup(tmp_path)
+
+        assert 0.35 < late < 2  # its moment, the wait, and no longer
+        assert exporter.interrupts == 1 and exporter.interrupting_on == "db-backup-cancel"
+        connection = _Connection.instances[0]
+        assert connection.tunnel_stopped and not connection.disconnected.is_set()
+        assert list(tmp_path.iterdir()) == [] and _open_part_files() == []
+    finally:
+        let_go.set()
+        exporter.released.set()
+    assert _Connection.instances[0].disconnected.wait(5)
+
+
 def test_an_export_left_behind_reports_no_more_progress(tmp_path, engine, monkeypatch):
     """The dialog that was listening has moved on, perhaps to another backup."""
     monkeypatch.setattr(db_backup, "EXPORT_NOTICE_SECONDS", 0.1)
