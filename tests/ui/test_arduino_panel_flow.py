@@ -85,6 +85,23 @@ def settle(qapp, done=lambda: True) -> None:
     qapp.processEvents()
 
 
+def sizes(panel) -> str:
+    """The widths behind a layout assertion, for when one fails elsewhere."""
+    cards = [
+        f"{type(w).__name__}:{w.minimumSizeHint().width()}"
+        for w in (panel._col.itemAt(i).widget() for i in range(panel._col.count()))
+        if w is not None and w.isVisible()
+    ]
+    return (
+        f"panel {panel.width()} (min {panel.minimumSizeHint().width()}) "
+        f"viewport {panel._viewport.width()} column {panel._column.width()} "
+        f"(min {panel._column.minimumSizeHint().width()}: {' '.join(cards)}) "
+        f"side {panel._side.width() if panel._side.isVisible() else '-'} "
+        f"(min {panel._side.minimumSizeHint().width()}) "
+        f"tiles {panel._tile_row.direction().name} font {panel.font().family()!r}"
+    )
+
+
 def feed(panel) -> str:
     return panel._status_view.toPlainText()
 
@@ -184,9 +201,9 @@ def test_nothing_is_wider_than_the_window(panel, qapp, sketch, width):
             panel._advanced_toggle.setChecked(True)
         bar = panel._scroll.horizontalScrollBar()
         settle(qapp, lambda: not bar.isVisible())
-        assert not bar.isVisible()
+        assert not bar.isVisible(), sizes(panel)
         column = panel._column
-        assert column.width() <= panel._scroll.viewport().width()
+        assert column.width() <= panel._scroll.viewport().width(), sizes(panel)
         for child in column.findChildren(QWidget):
             if child.isVisible():
                 right = child.mapTo(column, child.rect().topRight()).x()
@@ -196,11 +213,43 @@ def test_nothing_is_wider_than_the_window(panel, qapp, sketch, width):
 def test_starter_tiles_stack_when_the_column_is_narrow(panel, qapp):
     panel.resize(1400, 740)
     panel.show()
-    qapp.processEvents()
-    assert panel._tile_row.direction() == QBoxLayout.Direction.LeftToRight
+    settle(qapp)
+    assert panel._tile_row.direction() == QBoxLayout.Direction.LeftToRight, sizes(panel)
     panel.resize(600, 740)
     settle(qapp, lambda: panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom)
-    assert panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom
+    assert panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom, sizes(panel)
+
+
+@pytest.mark.parametrize("width", [700, 900, 1040, 1400])
+def test_tiles_too_wide_for_a_row_are_stacked_instead(panel, qapp, width):
+    """Wide text (another platform's font, a larger one) makes the row
+    of tiles need more room than the rule of thumb allows for. Going
+    by the column's own width, the column stayed as wide as the row
+    and scrolled sideways instead of ever stacking them."""
+    for i in range(panel._tile_row.count()):
+        panel._tile_row.itemAt(i).widget().setMinimumWidth(260)
+    panel.resize(width, 740)
+    panel.show()
+    bar = panel._scroll.horizontalScrollBar()
+    settle(qapp, lambda: not bar.isVisible())
+    assert panel.width() == width, sizes(panel)
+    assert not bar.isVisible(), sizes(panel)
+    assert panel._column.width() <= panel._viewport.width(), sizes(panel)
+    assert panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom, sizes(panel)
+
+
+def test_the_window_can_be_made_narrow_whatever_the_title_needs(panel, qapp):
+    """The header's title wraps: on one line it set a minimum width
+    for the whole window, which a wider font pushed past the width the
+    single-column layout is for."""
+    panel._hero_title.setText("Build something with your Arduino, in a very wide font indeed")
+    panel.resize(1400, 740)
+    panel.show()
+    settle(qapp)
+    assert panel.minimumSizeHint().width() <= 540, sizes(panel)
+    panel.resize(540, 740)
+    settle(qapp, lambda: panel.width() == 540)
+    assert panel.width() == 540, sizes(panel)
 
 
 def test_a_loaded_project_takes_only_the_room_it_needs(panel, qapp, sketch):

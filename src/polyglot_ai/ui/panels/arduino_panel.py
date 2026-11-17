@@ -99,8 +99,8 @@ _BOARD_POLL_MS = 2500
 # what the board prints on the right, where it stays in view while you
 # work through the steps. Narrower, and it is one column again.
 _TWO_COLUMN_MIN_WIDTH = 900
-# The steps column lays the starter tiles side by side from this width,
-# and one under another below it.
+# With this much room for the steps column the starter tiles go side by
+# side; with less, one under another.
 _TILES_IN_A_ROW_MIN_WIDTH = 640
 # Where the "See output" card goes in the single column: after step 3.
 _MONITOR_INDEX = 3
@@ -444,8 +444,11 @@ class ArduinoPanel(QWidget):
 
         self._column = QWidget()
         self._column.setObjectName("arduinoColumn")
-        self._column.installEventFilter(self)
         self._scroll.setWidget(self._column)
+        # The room there is for the column — which is what decides how
+        # the starter tiles are laid out (see ``_reflow_tiles``).
+        self._viewport = self._scroll.viewport()
+        self._viewport.installEventFilter(self)
         self._col = QVBoxLayout(self._column)
         self._col.setSpacing(16)
 
@@ -501,21 +504,28 @@ class ArduinoPanel(QWidget):
         card.show()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 — Qt override
-        if event.type() == QEvent.Type.Resize and watched is getattr(self, "_column", None):
+        if event.type() == QEvent.Type.Resize and watched is getattr(self, "_viewport", None):
             self._reflow_tiles(event.size().width())
         return super().eventFilter(watched, event)
 
-    def _reflow_tiles(self, width: int) -> None:
-        """Starter tiles side by side when there is room, else stacked."""
+    def _reflow_tiles(self, room: int) -> None:
+        """Starter tiles side by side when there is room, else stacked.
+
+        ``room`` is the width there is for the column, not the width
+        the column has: with the tiles in a row the column can't be
+        narrower than the row, so going by its own width it could
+        never find out that it no longer fitted.
+        """
         if self._tile_row is None:
             return
-        wanted = (
-            QBoxLayout.Direction.LeftToRight
-            if width >= _TILES_IN_A_ROW_MIN_WIDTH
-            else QBoxLayout.Direction.TopToBottom
-        )
+        row, stack = QBoxLayout.Direction.LeftToRight, QBoxLayout.Direction.TopToBottom
+        wanted = row if room >= _TILES_IN_A_ROW_MIN_WIDTH else stack
         if self._tile_row.direction() != wanted:
             self._tile_row.setDirection(wanted)
+        if wanted == row and self._column.minimumSizeHint().width() > room:
+            # Wide enough by the rule of thumb, but not for these
+            # tiles in this font.
+            self._tile_row.setDirection(stack)
 
     def _build_hero(self) -> QWidget:
         wrap = QFrame()
@@ -531,7 +541,11 @@ class ArduinoPanel(QWidget):
         text_col = QVBoxLayout()
         text_col.setContentsMargins(0, 0, 0, 0)
         text_col.setSpacing(2)
-        title = QLabel("Build something with your Arduino")
+        title = self._hero_title = QLabel("Build something with your Arduino")
+        # Wraps rather than setting a minimum width for the whole
+        # window: with a wide font this one line kept the window from
+        # being made narrow enough for its single-column layout.
+        title.setWordWrap(True)
         title.setStyleSheet(
             f"color: {tc.get('text_heading')}; "
             f"font-size: {tc.FONT_2XL}px; font-weight: 700; "
