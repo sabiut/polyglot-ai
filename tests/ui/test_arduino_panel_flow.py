@@ -238,6 +238,34 @@ def test_tiles_too_wide_for_a_row_are_stacked_instead(panel, qapp, width):
     assert panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom, sizes(panel)
 
 
+@pytest.mark.parametrize("width", [540, 900])
+def test_long_names_do_not_widen_the_column(panel, qapp, tmp_path, width):
+    """A folder path has nowhere to wrap — on Windows not even at the
+    separators — and a list is as wide as its longest entry. Either
+    used to make the column wider than the room it had."""
+    folder = tmp_path / ("a_folder_name_with_nowhere_to_wrap_" * 5)
+    folder.mkdir()
+    entry = folder / "blink.ino"
+    entry.write_text("void setup(){}\nvoid loop(){}\n")
+    wordy = "USB-SERIAL CH340 with a very long description indeed " * 2
+    panel._board_combo.addItem("A board with a very long name indeed " * 3, None)
+    panel.resize(width, 740)
+    panel.show()
+    panel._load_project(DetectedProject(entry, folder, Language.CPP))
+    panel._on_boards_detected(
+        [ACM0, DetectedBoard("/dev/serial/by-id/" + "x" * 80, NANO, 0x1A86, 0x7523, wordy)]
+    )
+    panel._advanced_toggle.setChecked(True)
+    bar = panel._scroll.horizontalScrollBar()
+    settle(qapp, lambda: not bar.isVisible())
+    assert panel._detected_combo.isVisible()
+    assert not bar.isVisible(), sizes(panel)
+    assert panel._column.width() <= panel._viewport.width(), sizes(panel)
+    # Shortened to fit, with the whole path a hover away.
+    assert panel._path_label.text() != str(folder) and "…" in panel._path_label.text()
+    assert panel._path_label.toolTip() == str(folder)
+
+
 def test_the_window_can_be_made_narrow_whatever_the_title_needs(panel, qapp):
     """The header's title wraps: on one line it set a minimum width
     for the whole window, which a wider font pushed past the width the

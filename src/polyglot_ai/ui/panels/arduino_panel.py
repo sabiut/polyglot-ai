@@ -86,6 +86,7 @@ from polyglot_ai.core.arduino.starters import copy_starter
 from polyglot_ai.ui import theme_colors as tc
 from polyglot_ai.ui.panels import nav_icons, shared_icons
 from polyglot_ai.ui.panels.arduino_widgets import FlowLayout, ProblemCard, SerialPlot, StarterTile
+from polyglot_ai.ui.panels.database_widgets import ElidedLabel
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,17 @@ def _load_auto_ask_pref() -> bool:
     checkbox in the Advanced panel makes the opt-in explicit.
     """
     return QSettings().value(_AUTO_ASK_KEY, False, type=bool)
+
+
+def _let_shrink(combo: QComboBox) -> None:
+    """Stop a list's longest entry from setting the column's width.
+
+    A combo box is otherwise never narrower than its widest item, and
+    board and port names can be long. One that doesn't fit is cut
+    short in the box; the open list shows it whole.
+    """
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(12)
 
 
 def _save_auto_ask_pref(value: bool) -> None:
@@ -749,11 +761,14 @@ class ArduinoPanel(QWidget):
         v.addLayout(top)
 
         # Path under the file name
-        self._path_label = QLabel("")
+        # Shortened in the middle to fit, not wrapped: a path has
+        # nowhere to wrap (on Windows not even at the separators), so
+        # a deep folder made this card — and the column — as wide as
+        # the whole path.
+        self._path_label = ElidedLabel()
         self._path_label.setStyleSheet(
             f"color: {tc.get('text_muted')}; font-size: {tc.FONT_SM}px; background: transparent;"
         )
-        self._path_label.setWordWrap(True)
         v.addWidget(self._path_label)
 
         # Action row
@@ -812,6 +827,7 @@ class ArduinoPanel(QWidget):
         # Shown only when more than one board is plugged in. Until
         # then there is nothing to choose and the line above says it all.
         self._detected_combo = QComboBox()
+        _let_shrink(self._detected_combo)
         self._detected_combo.setStyleSheet(self._combo_qss())
         self._detected_combo.setToolTip(
             "More than one board is plugged in — choose the one to upload to"
@@ -1244,6 +1260,7 @@ class ArduinoPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Board:"))
         self._board_combo = QComboBox()
+        _let_shrink(self._board_combo)
         self._refresh_board_combo()
         self._board_combo.currentIndexChanged.connect(self._on_board_override)
         row.addWidget(self._board_combo, 1)
@@ -1253,6 +1270,7 @@ class ArduinoPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Port:"))
         self._port_combo = QComboBox()
+        _let_shrink(self._port_combo)
         self._port_combo.setEditable(True)
         self._port_combo.lineEdit().setPlaceholderText("Automatic")
         self._port_combo.setEditText("")
@@ -1263,7 +1281,7 @@ class ArduinoPanel(QWidget):
         # CIRCUITPY drive picker
         row = QHBoxLayout()
         row.addWidget(QLabel("CIRCUITPY drive:"))
-        self._drive_label = QLabel("(auto)")
+        self._drive_label = ElidedLabel("(auto)")
         self._drive_label.setStyleSheet(f"color: {tc.get('text_muted')};")
         row.addWidget(self._drive_label, 1)
         self._drive_pick_btn = QPushButton("Pick…")
@@ -1693,7 +1711,7 @@ class ArduinoPanel(QWidget):
         if self._project is None:
             return
         self._file_label.setText(self._project.entry_file.name)
-        self._path_label.setText(str(self._project.project_dir))
+        self._path_label.set_full_text(str(self._project.project_dir))
         self._lang_chip.show_language(self._project.language)
         # Reset the show-code toggle and clear stale text whenever
         # the project changes — otherwise switching from Blink to
@@ -2070,7 +2088,7 @@ class ArduinoPanel(QWidget):
         )
         if picked:
             self._cp_drive = Path(picked)
-            self._drive_label.setText(picked)
+            self._drive_label.set_full_text(picked)
             self._refresh_upload_button()
 
     # ── Upload ─────────────────────────────────────────────────────
