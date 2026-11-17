@@ -23,6 +23,17 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.30" date="2026-11-17">
+      <description>
+        <p>Arduino: the window no longer scrolls sideways when the
+        project is in a deep folder or the text is larger than usual —
+        a long folder path is shortened in the middle, the starter
+        projects stack when they don't fit side by side, and long board
+        or port names no longer stretch the lists. On Windows, a missing
+        library is recognised as one again, and build errors are shown
+        without stray line endings.</p>
+      </description>
+    </release>
     <release version="0.18.29" date="2026-11-17">
       <description>
         <p>Arduino: build errors now say the file, the line and what is
