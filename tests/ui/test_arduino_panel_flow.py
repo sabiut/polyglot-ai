@@ -16,6 +16,7 @@ pytest.importorskip("PyQt6")
 
 from PyQt6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PyQt6.QtGui import QMouseEvent  # noqa: E402
+from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import QBoxLayout, QPushButton, QWidget  # noqa: E402
 
 from polyglot_ai.core.arduino import diagnose  # noqa: E402
@@ -264,6 +265,33 @@ def test_long_names_do_not_widen_the_column(panel, qapp, tmp_path, width):
     # Shortened to fit, with the whole path a hover away.
     assert panel._path_label.text() != str(folder) and "…" in panel._path_label.text()
     assert panel._path_label.toolTip() == str(folder)
+
+
+def test_the_auto_ask_words_wrap_and_still_tick_the_box(panel, qapp, monkeypatch):
+    """A check box can't wrap its text, which made this sentence the
+    widest thing in the Advanced panel; the words are now a label."""
+    saved = {}
+
+    class Settings:
+        def setValue(self, key, value):  # noqa: N802 — Qt's name
+            saved[key] = value
+
+    monkeypatch.setattr(panel_mod, "QSettings", Settings)
+    panel.resize(900, 740)
+    panel.show()
+    panel._advanced_toggle.setChecked(True)
+    settle(qapp)
+    label, box = panel._auto_ask_label, panel._auto_ask_box
+    assert label.isVisible() and label.wordWrap()
+    assert label.minimumSizeHint().width() < label.sizeHint().width()
+    assert box.accessibleName() == label.text()
+
+    before = box.isChecked()
+    QTest.mouseClick(label, Qt.MouseButton.LeftButton)
+    assert box.isChecked() is not before
+    assert saved == {panel_mod._AUTO_ASK_KEY: not before}
+    QTest.mouseClick(label, Qt.MouseButton.RightButton)
+    assert box.isChecked() is not before
 
 
 def test_the_window_can_be_made_narrow_whatever_the_title_needs(panel, qapp):

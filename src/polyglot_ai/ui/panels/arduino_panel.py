@@ -518,6 +518,13 @@ class ArduinoPanel(QWidget):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 — Qt override
         if event.type() == QEvent.Type.Resize and watched is getattr(self, "_viewport", None):
             self._reflow_tiles(event.size().width())
+        elif (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and watched is getattr(self, "_auto_ask_label", None)
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._auto_ask_box.toggle()
+            return True
         return super().eventFilter(watched, event)
 
     def _reflow_tiles(self, room: int) -> None:
@@ -1296,19 +1303,36 @@ class ArduinoPanel(QWidget):
         # fails. The opt-in lives in Advanced because the kid path
         # is the manual "Ask AI for help" button — the auto-flow is
         # for users who've decided they want it.
-        self._auto_ask_box = QCheckBox("Automatically ask AI when upload fails")
-        self._auto_ask_box.setStyleSheet(
-            f"QCheckBox {{ color: {tc.get('text_secondary')}; "
-            f"font-size: {tc.FONT_SM}px; padding-top: 6px; }}"
-        )
-        self._auto_ask_box.setToolTip(
+        #
+        # The words are a label beside the box rather than the box's
+        # own text: a check box can't wrap, so this sentence was the
+        # widest thing in the panel and, in a wide font, wider than
+        # the column. Clicking the words still ticks the box.
+        words = "Automatically ask AI when upload fails"
+        tip = (
             "When checked, a failed upload sends the error and project "
             "context to the chat panel and presses Send for you. The "
             "chat window pops to the front so you see the AI's reply."
         )
+        self._auto_ask_box = QCheckBox()
+        self._auto_ask_box.setAccessibleName(words)
+        self._auto_ask_box.setToolTip(tip)
         self._auto_ask_box.setChecked(_load_auto_ask_pref())
         self._auto_ask_box.toggled.connect(_save_auto_ask_pref)
-        v.addWidget(self._auto_ask_box)
+        self._auto_ask_label = QLabel(words)
+        self._auto_ask_label.setWordWrap(True)
+        self._auto_ask_label.setStyleSheet(
+            f"color: {tc.get('text_secondary')}; font-size: {tc.FONT_SM}px; "
+            "background: transparent;"
+        )
+        self._auto_ask_label.setToolTip(tip)
+        self._auto_ask_label.installEventFilter(self)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 6, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(self._auto_ask_box, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self._auto_ask_label, 1)
+        v.addLayout(row)
 
         # ── Erase user code (destructive — Advanced only) ──
         #
