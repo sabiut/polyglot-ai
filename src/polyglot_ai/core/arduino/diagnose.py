@@ -50,8 +50,18 @@ class Problem:
         """``blink.ino, line 5`` — or '' when the tool gave no place."""
         if not self.file:
             return ""
-        name = Path(self.file).name
+        name = _file_name(self.file)
         return f"{name}, line {self.line}" if self.line else name
+
+
+def _file_name(path: str) -> str:
+    """The last part of a path as a compiler printed it.
+
+    Not ``Path(...).name``: the path is the compiler's, and on Windows
+    it comes with backslashes and a drive letter whatever this code is
+    running on.
+    """
+    return re.split(r"[\\/]", path)[-1]
 
 
 _PLATFORM_MISSING = re.compile(
@@ -59,7 +69,7 @@ _PLATFORM_MISSING = re.compile(
 )
 _PLATFORM_HINT = re.compile(r"core install ([\w.+-]+:[\w.+-]+)")
 _MISSING_HEADER = re.compile(
-    r"^(?P<file>[^\n:]*?):(?P<line>\d+):(?P<col>\d+): fatal error: "
+    r"^(?P<file>(?:[A-Za-z]:)?[^\n:]*?):(?P<line>\d+):(?P<col>\d+): fatal error: "
     r"(?P<header>[\w./+-]+\.h(?:pp)?): No such file or directory",
     re.MULTILINE,
 )
@@ -191,7 +201,7 @@ def diagnose_compile(output: str, rc: int, *, board_name: str = "") -> Problem:
     if error:
         text = error.group("text").strip()
         plain = _plain(text)
-        place = Path(error.group("file")).name
+        place = _file_name(error.group("file"))
         return Problem(
             CODE,
             f"There's a mistake in {place}, line {error.group('line')}. {plain or text}".strip(),

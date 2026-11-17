@@ -815,6 +815,11 @@ class ArduinoPanel(QWidget):
         buttons.setSpacing(10)
         self._upload_button = QPushButton("Upload to Arduino")
         self._upload_button.setMinimumHeight(60)
+        # A button is otherwise never narrower than its text, and this
+        # one's text is sometimes a sentence ("Open Advanced and pick
+        # the CIRCUITPY drive"): with larger fonts that alone made the
+        # column wider than its half of the window.
+        self._upload_button.setMinimumWidth(160)
         self._upload_button.setCursor(Qt.CursorShape.PointingHandCursor)
         # Click is dispatched through a single handler that picks
         # between "start upload" and "cancel what's running"
@@ -1121,9 +1126,9 @@ class ArduinoPanel(QWidget):
             f"border-top: 1px solid {tc.get('border_subtle')}; "
             f"padding: 8px 0 0 0; }}"
         )
-        row = QHBoxLayout(wrap)
+        row = FlowLayout(spacing=8)
+        wrap.setLayout(row)
         row.setContentsMargins(0, 6, 0, 0)
-        row.setSpacing(8)
 
         intro = QLabel("Toolchains:")
         intro.setStyleSheet(
@@ -1144,7 +1149,6 @@ class ArduinoPanel(QWidget):
             self._toolchain_chips[key] = chip
             row.addWidget(chip)
 
-        row.addStretch(1)
         # Initial paint with whatever the service reports right now.
         self._refresh_toolchain_chips()
         return wrap

@@ -1143,7 +1143,10 @@ async def _run(
         def pump(stream, into: list[str]) -> None:
             try:
                 for raw in iter(stream.readline, b""):
-                    line = raw.decode("utf-8", errors="replace")
+                    # One kind of line ending from here on: on Windows the
+                    # tools end lines with CR LF, and the stray CR ended
+                    # up inside the messages picked out of the output.
+                    line = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
                     into.append(line)
                     if listener is not None:
                         try:

@@ -71,6 +71,20 @@ def sketch(tmp_path):
     return DetectedProject(entry, folder, Language.CPP)
 
 
+def settle(qapp, done=lambda: True) -> None:
+    """Let a resize work its way through the layouts.
+
+    Moving the output card between the columns takes several rounds of
+    layout requests; how many one ``processEvents`` gets through
+    differs between platforms.
+    """
+    for _ in range(50):
+        qapp.processEvents()
+        if done():
+            break
+    qapp.processEvents()
+
+
 def feed(panel) -> str:
     return panel._status_view.toPlainText()
 
@@ -168,8 +182,8 @@ def test_nothing_is_wider_than_the_window(panel, qapp, sketch, width):
             panel._load_project(sketch)
             panel._on_boards_detected([ACM0, USB0])
             panel._advanced_toggle.setChecked(True)
-        qapp.processEvents()
         bar = panel._scroll.horizontalScrollBar()
+        settle(qapp, lambda: not bar.isVisible())
         assert not bar.isVisible()
         column = panel._column
         assert column.width() <= panel._scroll.viewport().width()
@@ -185,7 +199,7 @@ def test_starter_tiles_stack_when_the_column_is_narrow(panel, qapp):
     qapp.processEvents()
     assert panel._tile_row.direction() == QBoxLayout.Direction.LeftToRight
     panel.resize(600, 740)
-    qapp.processEvents()
+    settle(qapp, lambda: panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom)
     assert panel._tile_row.direction() == QBoxLayout.Direction.TopToBottom
 
 

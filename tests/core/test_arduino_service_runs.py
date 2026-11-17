@@ -317,6 +317,16 @@ def test_output_is_handed_over_line_by_line_while_the_tool_runs():
     assert seen[1][1] - seen[0][1] > 0.25
 
 
+def test_windows_line_endings_are_made_plain_ones():
+    code = "import sys; sys.stdout.buffer.write(b'one\\r\\ntwo\\r\\n'); sys.stderr.buffer.write(b'x\\r\\n')"
+    service = ArduinoService()
+    seen: list[str] = []
+    service.on_output = seen.append
+    rc, out, err = run(sys.executable, "-c", code, service=service)
+    assert (rc, out, err) == (0, "one\ntwo\n", "x\n")
+    assert sorted(seen) == ["one", "two", "x"]
+
+
 def test_a_listener_that_raises_does_not_lose_the_output():
     service = ArduinoService()
     service.on_output = lambda line: 1 / 0

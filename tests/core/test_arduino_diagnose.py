@@ -191,3 +191,22 @@ def test_library_names_worth_trying_for_a_header():
 def test_one_closing_brace_too_many():
     problem = diagnose_compile("/s/s.ino:12:1: error: expected declaration before '}' token", 1)
     assert "one closing brace } too many" in problem.message
+
+
+# ── output from Windows: drive letters, backslashes ────────────────
+
+
+def test_a_compiler_error_in_a_windows_path():
+    out = r"C:\Users\me\blink\blink.ino:9:3: error: expected ';' before 'delay'"
+    problem = diagnose_compile(out, 1)
+    assert (problem.kind, problem.line) == (diagnose.CODE, 9)
+    assert problem.file == r"C:\Users\me\blink\blink.ino"
+    assert problem.where == "blink.ino, line 9"
+    assert problem.message.startswith("There's a mistake in blink.ino, line 9.")
+
+
+def test_a_missing_library_in_a_windows_path():
+    out = r"C:\Users\me\sweep\sweep.ino:1:10: fatal error: Servo.h: No such file or directory"
+    problem = diagnose_compile(out, 1)
+    assert (problem.kind, problem.header, problem.line) == (diagnose.LIBRARY, "Servo.h", 1)
+    assert problem.where == "sweep.ino, line 1"
