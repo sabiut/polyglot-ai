@@ -23,6 +23,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.18.31" date="2026-11-19">
+      <description>
+        <p>The AWS panel now lists ECR repositories: how many images
+        each holds and the latest one. A repository's details show its
+        URI and settings, the ten newest images with what their scans
+        found, and its lifecycle and access policies in plain words.
+        Right-click to copy the repository URI or the docker login
+        command for its registry.</p>
+      </description>
+    </release>
     <release version="0.18.30" date="2026-11-17">
       <description>
         <p>Arduino: the window no longer scrolls sideways when the
