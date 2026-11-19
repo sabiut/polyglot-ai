@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
 from urllib.parse import quote
 
 #: ``call(argv, global_call=False)`` → parsed JSON (dict) or None on error.
@@ -420,6 +422,331 @@ def _summarize_eks(d: dict) -> list[tuple[str, str]]:
             ("Created", _ts(c.get("createdAt"))),
             ("Role", (c.get("roleArn") or "").rsplit("/", 1)[-1]),
         ]
+    )
+
+
+# ECR ---------------------------------------------------------------
+
+#: How many of a repository's images are read: one request's worth (the
+#: API's own page limit), so a repository with years of builds in it
+#: costs the same one call as a new one.
+_ECR_MAX_IMAGES = 1000
+#: The newest images listed in a repository's details.
+_ECR_NEWEST = 10
+
+
+def _ecr_images_argv(name: str) -> list[str]:
+    # ``--max-results`` with ``--no-paginate`` rather than ``--max-items``:
+    # the panel reads a cut-short ``--max-items`` answer as "this section
+    # lists only some of what there is", which is about the repositories,
+    # not about the images in one of them.
+    return [
+        "ecr",
+        "describe-images",
+        "--repository-name",
+        name,
+        "--max-results",
+        str(_ECR_MAX_IMAGES),
+        "--no-paginate",
+    ]
+
+
+def _instant(value) -> float:
+    """A timestamp as the CLI prints it — ISO text (v2) or seconds (v1) — for sorting."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _when(value) -> str:
+    if isinstance(value, (int, float)):
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(value)) + " UTC"
+    return _ts(value)
+
+
+_SEVERITIES = ("CRITICAL", "HIGH")
+_SCAN_STATUS = {
+    "FAILED": "scan failed",
+    "UNSUPPORTED_IMAGE": "can't be scanned",
+    "IN_PROGRESS": "scan in progress",
+    "PENDING": "scan pending",
+}
+
+
+def _scan_result(image: dict) -> str:
+    """``2 critical, 5 high, 12 lower`` — or that the scan found nothing, or didn't run."""
+    summary = image.get("imageScanFindingsSummary")
+    if summary is None:
+        return _SCAN_STATUS.get((image.get("imageScanStatus") or {}).get("status", ""), "")
+    counts = summary.get("findingSeverityCounts") or {}
+    lower = sum(n for severity, n in counts.items() if severity not in _SEVERITIES)
+    found = [f"{counts[s]} {s.lower()}" for s in _SEVERITIES if counts.get(s)]
+    if lower:
+        found.append(f"{lower} lower")
+    return ", ".join(found) or "scanned, nothing found"
+
+
+def _image_name(image: dict) -> str:
+    tags = image.get("imageTags") or []
+    # An untagged image has only its digest: enough of it to tell two apart.
+    return ", ".join(sorted(tags)) or "untagged " + image.get("imageDigest", "")[:19]
+
+
+def _image_line(image: dict) -> str:
+    size = image.get("imageSizeInBytes")
+    return "  ".join(
+        filter(
+            None,
+            [
+                _image_name(image),
+                _when(image.get("imagePushedAt"))[:16],
+                f"{size / 1_000_000:.1f} MB" if isinstance(size, (int, float)) else "",
+                _scan_result(image),
+            ],
+        )
+    )
+
+
+def _newest(images: list[dict]) -> list[dict]:
+    return sorted(images, key=lambda i: _instant(i.get("imagePushedAt")), reverse=True)
+
+
+def _count_images(row: dict, data: dict) -> None:
+    images = data["imageDetails"]
+    more = bool(data.get("nextToken"))
+    row["images"] = len(images)
+    if not images:
+        row["status"] = "empty"
+        return
+    row["status"] = f"{len(images)}{'+' if more else ''} image{'s' if len(images) != 1 else ''}"
+    if more:
+        # The newest of the ones read isn't necessarily the newest there is.
+        return
+    latest = _newest(images)[0]
+    scan = _scan_result(latest)
+    row["info"] = "  ".join(
+        filter(
+            None,
+            [
+                "latest: " + _image_name(latest),
+                _when(latest.get("imagePushedAt"))[:10],
+                # Only what needs attention; a clean scan isn't news here.
+                scan if "critical" in scan else "",
+            ],
+        )
+    )
+
+
+def _fetch_ecr(call: Call) -> list[dict]:
+    data = call(["ecr", "describe-repositories", "--max-items", "200"])
+    rows = []
+    for repo in (data or {}).get("repositories", []):
+        name = repo.get("repositoryName", "")
+        rows.append(
+            {
+                "id": name,
+                "name": name,
+                "arn": repo.get("repositoryArn", ""),
+                "uri": repo.get("repositoryUri", ""),
+                "registry": repo.get("registryId", ""),
+                "label": name,
+                "status": "",
+                "info": "",
+            }
+        )
+    rows.sort(key=lambda r: r["name"].lower())
+    _enrich(call, rows, lambda r: _ecr_images_argv(r["name"]), _count_images)
+    return rows
+
+
+_TAG_MUTABILITY = {
+    "MUTABLE": "mutable — pushing a tag again moves it to the new image",
+    "IMMUTABLE": "immutable — a tag can't be moved to another image",
+}
+
+
+def _summarize_ecr(d: dict) -> list[tuple[str, str]]:
+    try:
+        repo = d["repositories"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    mutability = repo.get("imageTagMutability") or ""
+    encryption = repo.get("encryptionConfiguration") or {}
+    kind = encryption.get("encryptionType") or ""
+    key = (encryption.get("kmsKey") or "").rsplit("/", 1)[-1]
+    scan = (repo.get("imageScanningConfiguration") or {}).get("scanOnPush")
+    return _kv(
+        [
+            ("Repository", repo.get("repositoryName")),
+            ("URI", repo.get("repositoryUri")),
+            ("Created", _when(repo.get("createdAt"))),
+            ("Tags", _TAG_MUTABILITY.get(mutability, mutability.lower().replace("_", " "))),
+            (
+                "Scan on push",
+                None
+                if scan is None
+                else "on"
+                if scan
+                else "off (the registry's own scanning settings may still apply)",
+            ),
+            (
+                "Encryption",
+                {"AES256": "AES-256"}.get(kind, f"{kind} ({key})" if key else kind),
+            ),
+        ]
+    )
+
+
+def _ecr_images(output: str, code: int) -> list[tuple[str, str]]:
+    if code != 0:
+        return [("Images", _unknown(output))]
+    data = json.loads(output or "{}")
+    images = data.get("imageDetails") or []
+    if not images:
+        return [("Images", "none — nothing has been pushed yet")]
+    untagged = sum(1 for image in images if not image.get("imageTags"))
+    count = f"{len(images)}" + (f" ({untagged} untagged)" if untagged else "")
+    if data.get("nextToken"):
+        count = (
+            f"more than {len(images)} — only the first {len(images)} were read, "
+            "so the newest may not be among those below"
+        )
+    return [
+        ("Images", count),
+        *_listed("Newest", [_image_line(image) for image in _newest(images)[:_ECR_NEWEST]]),
+    ]
+
+
+_LIFECYCLE_WHICH = {"untagged": "untagged images", "any": "all images"}
+
+
+def _lifecycle_line(rule: dict) -> str:
+    selection = rule.get("selection") or {}
+    status = selection.get("tagStatus", "")
+    tagged = selection.get("tagPrefixList") or selection.get("tagPatternList") or []
+    which = _LIFECYCLE_WHICH.get(
+        status,
+        "images tagged " + ", ".join(f"{t}*" if "*" not in t else t for t in tagged)
+        if tagged
+        else "tagged images",
+    )
+    number, unit = selection.get("countNumber"), selection.get("countUnit", "days")
+    action = (rule.get("action") or {}).get("type", "expire")
+    what = {
+        "sinceImagePushed": f"{action} {number} {unit} after they were pushed",
+        "imageCountMoreThan": f"keep the newest {number}, {action} the rest",
+    }.get(selection.get("countType", ""), f"{action} by {selection.get('countType', '?')}")
+    line = f"{which}: {what}"
+    return f"{line} — {rule['description']}" if rule.get("description") else line
+
+
+def _ecr_lifecycle(output: str, code: int) -> list[tuple[str, str]]:
+    label = "Lifecycle policy"
+    if code != 0:
+        if "LifecyclePolicyNotFoundException" in output:
+            return [(label, "none — images are kept until someone deletes them")]
+        return [(label, _unknown(output))]
+    policy = json.loads(json.loads(output).get("lifecyclePolicyText") or "{}")
+    rules = sorted(policy.get("rules") or [], key=lambda r: r.get("rulePriority", 0))
+    return _listed(label, [_lifecycle_line(rule) for rule in rules], none="set, with no rules")
+
+
+_ECR_PULL = frozenset(
+    {"ecr:getdownloadurlforlayer", "ecr:batchgetimage", "ecr:batchchecklayeravailability"}
+)
+_ECR_PUSH = frozenset(
+    {"ecr:putimage", "ecr:initiatelayerupload", "ecr:uploadlayerpart", "ecr:completelayerupload"}
+)
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [] if value is None else [value]
+
+
+def _principal_names(principal) -> list[str]:
+    """Who a policy statement is about, shortest readable form each."""
+    if principal == "*":
+        return ["ANYONE"]
+    names = []
+    for kind, values in (principal or {}).items():
+        for value in _as_list(values):
+            arn = re.fullmatch(r"arn:aws[\w-]*:iam::(\d{12}):(.+)", str(value))
+            if value == "*":
+                names.append("ANYONE")
+            elif kind != "AWS":
+                names.append(str(value))
+            elif arn:
+                account, what = arn.groups()
+                names.append(f"account {account}" if what == "root" else f"{what} in {account}")
+            else:
+                names.append(f"account {value}" if str(value).isdigit() else str(value))
+    return names
+
+
+def _policy_line(statement: dict) -> str:
+    who = ", ".join(_principal_names(statement.get("Principal"))) or "nobody named"
+    actions = {str(a).lower() for a in _as_list(statement.get("Action"))}
+    if actions & {"*", "ecr:*"}:
+        can = "do anything"
+    elif actions & _ECR_PUSH:
+        can = "push and pull" if actions & _ECR_PULL else "push"
+    elif actions and actions <= _ECR_PULL:
+        can = "pull"
+    else:
+        can = f"use {len(actions)} action{'s' if len(actions) != 1 else ''}"
+    allowed = statement.get("Effect") == "Allow"
+    line = f"{who} can {can}" if allowed else f"{who} may NOT {can}"
+    return f"{line} (with conditions)" if statement.get("Condition") else line
+
+
+def _ecr_policy(output: str, code: int) -> list[tuple[str, str]]:
+    label = "Access policy"
+    if code != 0:
+        if "RepositoryPolicyNotFoundException" in output:
+            return [(label, "none — only this account's own IAM permissions apply")]
+        return [(label, _unknown(output))]
+    policy = json.loads(json.loads(output).get("policyText") or "{}")
+    statements = _as_list(policy.get("Statement"))
+    return _listed(label, [_policy_line(s) for s in statements], none="set, with no statements")
+
+
+def _ecr_facts(row: dict, run: Run) -> list[tuple[str, str]]:
+    """What is in a repository, what clears it out, and who else may use it."""
+    name = ["--repository-name", row["name"]]
+    lookups = [
+        ("Images", _ecr_images_argv(row["name"]), _ecr_images),
+        ("Lifecycle policy", ["ecr", "get-lifecycle-policy", *name], _ecr_lifecycle),
+        ("Access policy", ["ecr", "get-repository-policy", *name], _ecr_policy),
+    ]
+
+    def one(lookup):
+        label, argv, parse = lookup
+        try:
+            return parse(*run(argv))
+        except (json.JSONDecodeError, TypeError, ValueError, AttributeError, KeyError):
+            return [(label, "unknown — unexpected output")]
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        return [pair for pairs in pool.map(one, lookups) for pair in pairs]
+
+
+def ecr_login_command(row: dict, profile: str = "", region: str = "") -> str:
+    """The line that signs Docker in to a repository's registry.
+
+    Text to paste into a terminal: it has no secret in it — the password
+    is made when the line is run, and goes straight to Docker.
+    """
+    registry = row.get("uri", "").split("/", 1)[0]
+    args = ["aws", "ecr", "get-login-password"]
+    if profile:
+        args += ["--profile", profile]
+    if region:
+        args += ["--region", region]
+    return (
+        f"{shlex.join(args)} | docker login --username AWS --password-stdin {shlex.quote(registry)}"
     )
 
 
@@ -1743,6 +2070,23 @@ RESOURCE_TYPES: list[ResourceType] = [
             reg, f"eks/home?region={reg}#/clusters/{quote(r['name'])}"
         ),
         status_colour=_active_colour,
+    ),
+    ResourceType(
+        key="ecr",
+        title="ECR repositories",
+        group="Compute",
+        fetch=_fetch_ecr,
+        describe=lambda r: ["ecr", "describe-repositories", "--repository-names", r["name"]],
+        summarize=_summarize_ecr,
+        facts=_ecr_facts,
+        # A name may have slashes in it (team/app); the console keeps them.
+        console_url=lambda r, reg: _console(
+            reg,
+            f"ecr/repositories/private/{r['registry']}/{quote(r['name'])}?region={reg}"
+            if r.get("registry")
+            else f"ecr/repositories?region={reg}",
+        ),
+        status_colour=lambda r: "text_muted" if r.get("status") == "empty" else None,
     ),
     ResourceType(
         key="s3",

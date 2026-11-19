@@ -138,6 +138,7 @@ profile's configured one). One refresh lists, in parallel:
 | | **Lambda** functions | runtime, last modified |
 | | **ECS services** | cluster / service, running/desired tasks |
 | | **EKS clusters** | status, Kubernetes version |
+| | **ECR repositories** *(from 0.18.31)* | how many images, the latest one's tags and push date |
 | Data | **S3 buckets** | the bucket's region, creation date (all regions are listed) |
 | | **RDS databases** | status (coloured), engine and class |
 | | **DynamoDB tables** | status, item count |
@@ -156,8 +157,8 @@ list only shows what you have. Click a section's ▾ / ▸ header to collapse
 or expand it; collapsed sections stay collapsed across refreshes. Type in
 **Filter resources…** to narrow every section at once.
 
-The status and count for EKS, DynamoDB, SQS, SNS and target groups take
-one extra request per row, so they are filled in for the first twelve
+The status and count for EKS, ECR, DynamoDB, SQS, SNS and target groups
+take one extra request per row, so they are filled in for the first twelve
 rows of each section. A section that was cut short says so — *EC2 (200+)*.
 
 The account ID and caller identity appear under the selectors. Each
@@ -178,6 +179,35 @@ open the resource in the **AWS Console** in your browser, send the
 details to the AI, or open them in a larger window. There is no
 auto-refresh — every call is a real API request — so use the refresh
 button when you want fresh data.
+
+#### ECR repositories *(from 0.18.31)*
+
+The private repositories in the selected region. The list shows how many
+images each holds and the latest one — its tags and the day it was
+pushed, plus its scan result when that includes **critical** findings.
+A repository's details show:
+
+- its **URI** (what you `docker push` and `docker pull`), whether tags
+  are mutable, scan-on-push and encryption;
+- the **ten newest images** — tags, when pushed, size, and what the scan
+  found (`2 critical, 5 high, 12 lower`), with untagged images shown by
+  the start of their digest;
+- the **lifecycle policy** in words (`untagged images: expire 14 days
+  after they were pushed`), or that there is none and images are kept
+  until someone deletes them;
+- the **access policy** in words — who else may use the repository and
+  for what (`account 444455556666 can pull`). A statement that lets in
+  everyone reads `ANYONE can pull`.
+
+Only read calls are made — `ecr describe-repositories`,
+`describe-images`, `get-lifecycle-policy` and `get-repository-policy` —
+and one request reads up to 1,000 of a repository's images; past that
+the details say the newest may not be among those shown. Right-click a
+repository for **Copy repository URI** and **Copy docker login command**
+— the `aws ecr get-login-password … | docker login …` line for its
+registry, with your profile and region filled in. Copying it runs
+nothing and it contains no password. Public (ECR Public) repositories
+are not listed.
 
 #### Networking *(from 0.18.28)*
 
@@ -229,6 +259,7 @@ Every resource has **Open in AWS Console**, **Copy ID / ARN / URL** and
 - **EKS** — *Describe*, *Node groups*, *Add to kubeconfig…* (runs
   `aws eks update-kubeconfig`, after asking, so the Kubernetes panel can
   browse the cluster)
+- **ECR** — *Describe*, *Copy repository URI*, *Copy docker login command*
 - **S3** — *List top-level objects*, *Copy s3:// URI*
 - **RDS** — *Describe*, *Connect in Database panel…* (opens the
   [Database panel](Database#connecting-to-an-rds-database-from-the-aws-panel)'s

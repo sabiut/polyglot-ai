@@ -37,6 +37,7 @@ from polyglot_ai.core.aws_resources import (
     BY_KEY,
     RESOURCE_TYPES,
     default_snapshot_name,
+    ecr_login_command,
     format_summary,
     list_snapshots_command,
     snapshot_command,
@@ -1052,6 +1053,16 @@ class AwsPanel(QWidget):
                 menu.addAction("Copy DNS name").triggered.connect(
                     lambda: self._copy_text(data["dns"])
                 )
+        elif kind == "ecr":
+            menu.addAction("Describe").triggered.connect(lambda: self._on_item_selected(item, None))
+            menu.addAction("Copy repository URI").triggered.connect(
+                lambda: self._copy_text(data["uri"])
+            )
+            menu.addAction("Copy docker login command").triggered.connect(
+                lambda: self._copy_text(
+                    ecr_login_command(data, profile=self._profile, region=self._region)
+                )
+            )
         elif kind == "s3":
             bucket = data["name"]
             menu.addAction("List top-level objects").triggered.connect(
